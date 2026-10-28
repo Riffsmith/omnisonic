@@ -1,0 +1,54 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+**/build/
+
+# Android
+*.apk
+*.aab
+local.properties
+**/local.properties
+
+# Keystores
+*.jks
+*.keystore
+*.keys
+
+# JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+.ideaModules/
+
+# Kotlin
+*.kotlin.metadata
+
+# Generated
+**/generated/
+**/R.java
+**/BuildConfig.java
+
+# Lint
+lint/
+
+# Baseline profile (generated)
+**/baseline-prof.txt
+
+# Agent contract files (name the studied app by design; never commit)
+AGENTS.md
+example-AGENTS.md
+progress/
+
+# Agent memory / study (keep out of app repo)
+.agents/
+reference/
+dex/
+
+# macOS
+__MACOSX/

@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      OMNISONIC_BANNED_PATTERNS: ${{ secrets.OMNISONIC_BANNED_PATTERNS }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: banned-name scan
+        run: git ls-files -z | xargs -0 -r scripts/check-banned-names.sh
+
+      - name: assemble
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: unit tests
+        run: ./gradlew test --stacktrace
+
+      - name: lint
+        run: ./gradlew lint --stacktrace
+
+      - name: upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: '**/build/reports/tests/'
