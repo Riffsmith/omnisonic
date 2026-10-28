@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(git rev-parse --show-toplevel)"
 
 git diff --cached -z --name-only --diff-filter=ACMR \
-  | xargs -0 -r "$script_dir/scripts/check-banned-names.sh"
+  | xargs -0 -r "$repo_root/scripts/check-banned-names.sh"
