@@ -76,6 +76,74 @@ class HttpClientFactoryTest {
     }
 
     @Test
+    fun mediaRequestsMustReturnRawBodies() {
+        MockWebServer().use { server ->
+            val compressed = Zstd.compress("raw-media".toByteArray())
+            server.enqueue(
+                MockResponse().setHeader("Content-Encoding", "zstd").setBody(Buffer().write(compressed)),
+            )
+            server.start()
+            val client = HttpClientFactory(OmnisonicLogger(RecordingSink())).create(
+                ConnectionSpec(profile = ClientProfile.MEDIA, headers = mapOf("X-Media-Marker" to "raw")),
+            )
+
+            val body = client.newCall(Request.Builder().url(server.url("/media")).build()).execute().use { it.body!!.bytes() }
+
+            assertThat(body).isEqualTo(compressed)
+            val request = server.takeRequest()
+            assertThat(request.getHeader("Accept-Encoding")).isNull()
+            assertThat(request.getHeader("X-Media-Marker")).isEqualTo("raw")
+            assertThat(client.readTimeoutMillis).isAtLeast(ConnectionSpec.MEDIA_READ_TIMEOUT_MS.toInt())
+        }
+    }
+
+    @Test
+    fun nativeDecoderLoadFailureIsWrappedAsIoException() {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse().setHeader("Content-Encoding", "zstd").setBody(Buffer().write(Zstd.compress("x".toByteArray()))),
+            )
+            server.start()
+            val factory = HttpClientFactory(
+                OmnisonicLogger(RecordingSink()),
+                ResponseDecoder { _, _ -> throw UnsatisfiedLinkError("missing libzstd-jni") },
+            )
+            val client = factory.create(ConnectionSpec())
+
+            val error = assertThrows(java.io.IOException::class.java) {
+                client.newCall(Request.Builder().url(server.url("/probe")).build()).execute().use { it.body!!.string() }
+            }
+
+            assertThat(error).hasCauseThat().isInstanceOf(UnsatisfiedLinkError::class.java)
+        }
+    }
+
+    @Test
+    fun nativeDecoderReadFailureIsWrappedAsIoException() {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse().setHeader("Content-Encoding", "zstd").setBody(Buffer().write(Zstd.compress("x".toByteArray()))),
+            )
+            server.start()
+            val factory = HttpClientFactory(
+                OmnisonicLogger(RecordingSink()),
+                ResponseDecoder { _, _ ->
+                    object : java.io.InputStream() {
+                        override fun read(): Int = throw UnsatisfiedLinkError("missing native read")
+                    }
+                },
+            )
+            val client = factory.create(ConnectionSpec())
+
+            val error = assertThrows(java.io.IOException::class.java) {
+                client.newCall(Request.Builder().url(server.url("/probe")).build()).execute().use { it.body!!.string() }
+            }
+
+            assertThat(error).hasCauseThat().isInstanceOf(UnsatisfiedLinkError::class.java)
+        }
+    }
+
+    @Test
     fun readTimeoutMissesAreSurfaced() {
         MockWebServer().use { server ->
             // server accepts the connection but then stalls before responding — read timeout path

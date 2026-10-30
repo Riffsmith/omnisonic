@@ -11,12 +11,14 @@ import javax.net.ssl.X509TrustManager
 fun pkcs12KeyStore(bytes: ByteArray, password: String?): KeyStore =
     KeyStore.getInstance("PKCS12").apply { load(ByteArrayInputStream(bytes), password?.toCharArray()) }
 
+enum class ClientProfile { API, MEDIA }
+
 /** Options for one provider connection's OkHttpClient; see app docs (PROVIDERS §multi-URL). */
 data class ConnectionSpec(
     val headers: Map<String, String> = emptyMap(),
     val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,
     val readTimeoutMs: Long = DEFAULT_READ_TIMEOUT_MS,
-    val acceptZstd: Boolean = true,
+    val profile: ClientProfile = ClientProfile.API,
     val clientKeyStore: KeyStore? = null,
     val clientKeyStorePassword: String? = null,
     val trustedCertificates: List<X509Certificate> = emptyList(),
@@ -24,6 +26,7 @@ data class ConnectionSpec(
     companion object {
         const val DEFAULT_CONNECT_TIMEOUT_MS = 5_000L
         const val DEFAULT_READ_TIMEOUT_MS = 15_000L
+        const val MEDIA_READ_TIMEOUT_MS = 60_000L
     }
 }
 
