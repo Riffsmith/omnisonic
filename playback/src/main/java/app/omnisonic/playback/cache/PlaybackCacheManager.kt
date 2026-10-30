@@ -1,13 +1,13 @@
 package app.omnisonic.playback.cache
 
 import android.content.Context
-import android.net.Uri
 import androidx.media3.database.DatabaseProvider
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import app.omnisonic.playback.api.stream.ResolvedStream
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -21,7 +21,7 @@ class PlaybackCacheManager(
     private val cacheDir: File,
     private val databaseProvider: DatabaseProvider,
     initialMaxBytes: Long,
-    private val upstreamFactory: DataSource.Factory,
+    private val upstreamFactory: (ResolvedStream) -> DataSource.Factory,
 ) {
     private val lock = Any()
     private var maxBytes = initialMaxBytes
@@ -35,23 +35,23 @@ class PlaybackCacheManager(
     @Volatile
     private var released = false
 
-    fun cacheFor(uri: Uri, cacheKey: String = uri.toString()): DataSource.Factory {
+    fun cacheFor(stream: ResolvedStream): DataSource.Factory {
         check(!released) { "cache released" }
         return CacheDataSource.Factory()
             .setCache(cache)
-            .setUpstreamDataSourceFactory(wrappedUpstream())
-            .setCacheKeyFactory { dataSpec -> dataSpec.key ?: cacheKey }
+            .setUpstreamDataSourceFactory(wrappedUpstream(stream))
+            .setCacheKeyFactory { dataSpec -> dataSpec.key ?: stream.cacheKey }
             .setFlags(CacheDataSource.FLAG_BLOCK_ON_CACHE)
     }
 
-    fun directFor(uri: Uri): DataSource.Factory {
+    fun directFor(stream: ResolvedStream): DataSource.Factory {
         check(!released) { "cache released" }
-        return wrappedUpstream()
+        return wrappedUpstream(stream)
     }
 
     /** Per-stream override wins over [defaultCacheFirst]; consumed by OmniPlayer when building sources. */
-    fun factoryFor(uri: Uri, cacheKey: String): DataSource.Factory =
-        if (perUriCacheFirst[cacheKey] ?: defaultCacheFirst) cacheFor(uri, cacheKey) else directFor(uri)
+    fun factoryFor(stream: ResolvedStream): DataSource.Factory =
+        if (perUriCacheFirst[stream.cacheKey] ?: defaultCacheFirst) cacheFor(stream) else directFor(stream)
 
     fun setPerUriCacheFirst(cacheKey: String, cacheFirst: Boolean) {
         perUriCacheFirst[cacheKey] = cacheFirst
@@ -91,8 +91,8 @@ class PlaybackCacheManager(
         }
     }
 
-    private fun wrappedUpstream(): DataSource.Factory =
-        DefaultDataSource.Factory(context, upstreamFactory)
+    private fun wrappedUpstream(stream: ResolvedStream): DataSource.Factory =
+        DefaultDataSource.Factory(context, upstreamFactory(stream))
 
     private fun newCache(maxBytes: Long): SimpleCache =
         SimpleCache(cacheDir, LeastRecentlyUsedCacheEvictor(maxBytes), databaseProvider)

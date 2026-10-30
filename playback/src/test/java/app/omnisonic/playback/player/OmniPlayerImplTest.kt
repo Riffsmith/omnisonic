@@ -5,7 +5,6 @@ import android.net.Uri
 import android.os.Looper
 import androidx.media3.common.Player
 import androidx.media3.database.StandaloneDatabaseProvider
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.test.utils.FakeClock
 import androidx.test.core.app.ApplicationProvider
@@ -20,6 +19,12 @@ import app.omnisonic.playback.api.rg.ReplayGainMode
 import app.omnisonic.playback.api.rg.ReplayGainSource
 import app.omnisonic.playback.api.rg.ReplayGainValues
 import app.omnisonic.playback.api.stream.ResolvedStream
+import app.omnisonic.core.model.log.LogSink
+import app.omnisonic.core.model.log.OmnisonicLogger
+import app.omnisonic.core.network.ClientProfile
+import app.omnisonic.core.network.ConnectionSpec
+import app.omnisonic.core.network.HttpClientFactory
+import app.omnisonic.playback.cache.MediaDataSourceFactoryProvider
 import app.omnisonic.playback.cache.PlaybackCacheManager
 import app.omnisonic.playback.engine.ExoEngineFactory
 import app.omnisonic.playback.settings.PlaybackSettingsStore
@@ -29,8 +34,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.fail
 import org.junit.Before
@@ -52,6 +60,8 @@ class OmniPlayerImplTest {
     private lateinit var settings: PlaybackSettingsStore
     private lateinit var processors: SinkProcessorChain
     private lateinit var cacheManager: PlaybackCacheManager
+    private lateinit var mediaDataSources: MediaDataSourceFactoryProvider
+    private lateinit var providerClients: MutableMap<Long, OkHttpClient>
     private lateinit var engineFactory: AudioEngineFactory
     private lateinit var server: MockWebServer
     private lateinit var scope: CoroutineScope
@@ -68,12 +78,14 @@ class OmniPlayerImplTest {
         settings = PlaybackSettingsStore.createAt(File(settingsDir, "playback.preferences_pb"))
         processors = SinkProcessorChain()
         cacheDir = File(context.cacheDir, "t6-${System.nanoTime()}")
+        providerClients = mutableMapOf(1L to OkHttpClient())
+        mediaDataSources = MediaDataSourceFactoryProvider { id -> providerClients.getValue(id) }
         cacheManager = PlaybackCacheManager(
             context = context,
             cacheDir = cacheDir,
             databaseProvider = StandaloneDatabaseProvider(context),
             initialMaxBytes = 32L * 1024 * 1024,
-            upstreamFactory = DefaultHttpDataSource.Factory(),
+            upstreamFactory = { stream -> mediaDataSources.factoryFor(stream.entry.providerId) },
         )
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         fakeClock = FakeClock(false)
@@ -119,6 +131,33 @@ class OmniPlayerImplTest {
             .isNotInstanceOf(CacheDataSource::class.java)
         assertThat(player.dataSourceFactoryFor(radio).createDataSource())
             .isNotInstanceOf(CacheDataSource::class.java)
+    }
+
+    @Test
+    fun `provider media client custom headers reach the data source path`() = runBlocking<Unit> {
+        requireHeaderServer()
+        providerClients[2L] = HttpClientFactory(OmnisonicLogger(LogSink { _, _, _, _ -> })).create(
+            ConnectionSpec(profile = ClientProfile.MEDIA, headers = mapOf("X-Test" to "1")),
+        )
+        val player = newPlayer()
+
+        player.play(httpStream(providerId = 2L), entry(providerId = 2L))
+
+        await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
+        assertThat(server.takeRequest().getHeader("X-Test")).isEqualTo("1")
+    }
+
+    @Test
+    fun `provider media client without a required header fails`() = runBlocking<Unit> {
+        requireHeaderServer()
+        val player = newPlayer()
+        val spy = ListenerSpy()
+        player.setListener(spy)
+
+        player.play(httpStream(), entry())
+
+        await("error surfaced") { spy.errors.isNotEmpty() }
+        assertThat(server.takeRequest().getHeader("X-Test")).isNull()
     }
 
     @Test
@@ -328,11 +367,22 @@ class OmniPlayerImplTest {
         title = "Track",
     )
 
-    private fun httpStream(path: String = "/track.wav"): ResolvedStream = ResolvedStream(
-        entry = entry(),
+    private fun httpStream(path: String = "/track.wav", providerId: Long = 1L): ResolvedStream = ResolvedStream(
+        entry = entry(providerId = providerId),
         uri = server.url(path).toString(),
         requiresNetwork = true,
     )
+
+    private fun requireHeaderServer() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.getHeader("X-Test") == "1") {
+                    MockResponse().setBody(okio.Buffer().write(wavBytes(300)))
+                } else {
+                    MockResponse().setResponseCode(403)
+                }
+        }
+    }
 
     private fun serveWav(durationMs: Int = 300) {
         server.enqueue(MockResponse().setBody(okio.Buffer().write(wavBytes(durationMs))))

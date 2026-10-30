@@ -11,7 +11,6 @@ import androidx.media3.datasource.cache.CacheWriter
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.stream.ResolvedStream
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import com.google.common.truth.Truth.assertThat
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -43,12 +42,13 @@ class PlaybackCacheManagerTest {
         val manager = newManager(4096) { ByteArrayDataSource(data) }
         val uri = streamUri("a")
 
-        writeThroughCache(manager, uri, data)
+        val stream = stream(uri)
+        writeThroughCache(manager, stream, data)
 
-        assertThat(manager.cachedBytesFor(uri.toString())).isEqualTo(400)
-        assertThat(manager.isCached(uri.toString())).isTrue()
-        assertThat(readAll(manager.cacheFor(uri).createDataSource(), uri)).isEqualTo(data)
-        val direct = manager.directFor(uri).createDataSource()
+        assertThat(manager.cachedBytesFor(stream.cacheKey)).isEqualTo(400)
+        assertThat(manager.isCached(stream.cacheKey)).isTrue()
+        assertThat(readAll(manager.cacheFor(stream).createDataSource(), uri)).isEqualTo(data)
+        val direct = manager.directFor(stream).createDataSource()
         assertThat(direct).isNotInstanceOf(CacheDataSource::class.java)
         assertThat(readAll(direct, uri)).isEqualTo(data)
     }
@@ -59,19 +59,20 @@ class PlaybackCacheManagerTest {
         val server = MockWebServer()
         server.enqueue(MockResponse().setBody(okio.Buffer().write(data)))
         server.start()
-        val manager = newManager(4096) { DefaultHttpDataSource.Factory().createDataSource() }
+        val manager = newManager(4096) {
+            androidx.media3.datasource.DefaultHttpDataSource.Factory().createDataSource()
+        }
         try {
             val base = server.url("/stream.mp3").toString()
             val entry = PlaybackQueueEntry(providerId = 1L, externalId = "song-1")
             val firstStream = ResolvedStream(entry, "$base?s=salt-one")
             val secondStream = ResolvedStream(entry, "$base?s=salt-two")
-            val first = Uri.parse(firstStream.uri)
             val second = Uri.parse(secondStream.uri)
 
             assertThat(secondStream.cacheKey).isEqualTo(firstStream.cacheKey)
-            writeThroughCache(manager, first, data, firstStream.cacheKey)
+            writeThroughCache(manager, firstStream, data)
             assertThat(manager.isCached(secondStream.cacheKey)).isTrue()
-            assertThat(readAll(manager.cacheFor(second, secondStream.cacheKey).createDataSource(), second))
+            assertThat(readAll(manager.cacheFor(secondStream).createDataSource(), second))
                 .isEqualTo(data)
 
             assertThat(server.requestCount).isEqualTo(1)
@@ -87,34 +88,36 @@ class PlaybackCacheManagerTest {
         val uriA = streamUri("a")
         val uriB = streamUri("b")
 
-        writeThroughCache(manager, uriA, data)
-        assertThat(manager.cachedBytesFor(uriA.toString())).isEqualTo(400)
+        val streamA = stream(uriA)
+        val streamB = stream(uriB)
+        writeThroughCache(manager, streamA, data)
+        assertThat(manager.cachedBytesFor(streamA.cacheKey)).isEqualTo(400)
 
-        writeThroughCache(manager, uriB, data)
+        writeThroughCache(manager, streamB, data)
 
-        assertThat(manager.cachedBytesFor(uriA.toString())).isEqualTo(0)
-        assertThat(manager.cachedBytesFor(uriB.toString())).isEqualTo(400)
+        assertThat(manager.cachedBytesFor(streamA.cacheKey)).isEqualTo(0)
+        assertThat(manager.cachedBytesFor(streamB.cacheKey)).isEqualTo(400)
     }
 
     @Test
     fun `per-uri switch overrides cache-first default`() {
         val manager = newManager(4096) { ByteArrayDataSource(ByteArray(10)) }
-        val cached = streamUri("cached")
-        val direct = streamUri("direct")
+        val cached = stream(streamUri("cached"))
+        val direct = stream(streamUri("direct"))
 
-        manager.setPerUriCacheFirst(cached.toString(), true)
-        assertThat(manager.factoryFor(cached, cached.toString()).createDataSource()).isInstanceOf(CacheDataSource::class.java)
-        assertThat(manager.factoryFor(direct, direct.toString()).createDataSource()).isInstanceOf(DefaultDataSource::class.java)
+        manager.setPerUriCacheFirst(cached.cacheKey, true)
+        assertThat(manager.factoryFor(cached).createDataSource()).isInstanceOf(CacheDataSource::class.java)
+        assertThat(manager.factoryFor(direct).createDataSource()).isInstanceOf(DefaultDataSource::class.java)
 
         manager.defaultCacheFirst = true
-        assertThat(manager.factoryFor(direct, direct.toString()).createDataSource()).isInstanceOf(CacheDataSource::class.java)
-        assertThat(manager.factoryFor(cached, cached.toString()).createDataSource()).isInstanceOf(CacheDataSource::class.java)
+        assertThat(manager.factoryFor(direct).createDataSource()).isInstanceOf(CacheDataSource::class.java)
+        assertThat(manager.factoryFor(cached).createDataSource()).isInstanceOf(CacheDataSource::class.java)
 
-        manager.setPerUriCacheFirst(cached.toString(), false)
-        assertThat(manager.factoryFor(cached, cached.toString()).createDataSource()).isInstanceOf(DefaultDataSource::class.java)
+        manager.setPerUriCacheFirst(cached.cacheKey, false)
+        assertThat(manager.factoryFor(cached).createDataSource()).isInstanceOf(DefaultDataSource::class.java)
 
-        manager.clearPerUriOverride(cached.toString())
-        assertThat(manager.factoryFor(cached, cached.toString()).createDataSource()).isInstanceOf(CacheDataSource::class.java)
+        manager.clearPerUriOverride(cached.cacheKey)
+        assertThat(manager.factoryFor(cached).createDataSource()).isInstanceOf(CacheDataSource::class.java)
     }
 
     @Test
@@ -124,12 +127,14 @@ class PlaybackCacheManagerTest {
         val uriA = streamUri("a")
         val uriB = streamUri("b")
 
-        writeThroughCache(manager, uriA, data)
+        val streamA = stream(uriA)
+        val streamB = stream(uriB)
+        writeThroughCache(manager, streamA, data)
         manager.applyMaxBytes(2048)
-        writeThroughCache(manager, uriB, data)
+        writeThroughCache(manager, streamB, data)
 
-        assertThat(manager.cachedBytesFor(uriA.toString())).isEqualTo(400)
-        assertThat(manager.cachedBytesFor(uriB.toString())).isEqualTo(400)
+        assertThat(manager.cachedBytesFor(streamA.cacheKey)).isEqualTo(400)
+        assertThat(manager.cachedBytesFor(streamB.cacheKey)).isEqualTo(400)
     }
 
     @Test
@@ -138,8 +143,9 @@ class PlaybackCacheManagerTest {
         manager.release()
         managers.remove(manager)
 
-        assertThrows(IllegalStateException::class.java) { manager.factoryFor(streamUri("a"), streamUri("a").toString()) }
-        assertThrows(IllegalStateException::class.java) { manager.cachedBytesFor(streamUri("a").toString()) }
+        val stream = stream(streamUri("a"))
+        assertThrows(IllegalStateException::class.java) { manager.factoryFor(stream) }
+        assertThrows(IllegalStateException::class.java) { manager.cachedBytesFor(stream.cacheKey) }
         assertThrows(IllegalStateException::class.java) { manager.applyMaxBytes(1) }
     }
 
@@ -149,7 +155,7 @@ class PlaybackCacheManagerTest {
             cacheDir = File(context.cacheDir, "t5-${UUID.randomUUID()}"),
             databaseProvider = StandaloneDatabaseProvider(context),
             initialMaxBytes = maxBytes,
-            upstreamFactory = DataSource.Factory { upstream() },
+            upstreamFactory = { DataSource.Factory { upstream() } },
         )
         managers.add(manager)
         return manager
@@ -157,12 +163,12 @@ class PlaybackCacheManagerTest {
 
     private fun writeThroughCache(
         manager: PlaybackCacheManager,
-        uri: Uri,
+        stream: ResolvedStream,
         data: ByteArray,
-        cacheKey: String = uri.toString(),
     ) {
-        val dataSource = manager.cacheFor(uri, cacheKey).createDataSource() as CacheDataSource
-        val dataSpec = DataSpec(uri, 0, data.size.toLong()).buildUpon().setKey(cacheKey).build()
+        val uri = Uri.parse(stream.uri)
+        val dataSource = manager.cacheFor(stream).createDataSource() as CacheDataSource
+        val dataSpec = DataSpec(uri, 0, data.size.toLong()).buildUpon().setKey(stream.cacheKey).build()
         try {
             CacheWriter(dataSource, dataSpec, null, null).cache()
         } catch (e: IOException) {
@@ -189,6 +195,9 @@ class PlaybackCacheManagerTest {
     }
 
     private fun streamUri(name: String): Uri = Uri.parse("https://cache.test/$name.mp3")
+
+    private fun stream(uri: Uri): ResolvedStream =
+        ResolvedStream(PlaybackQueueEntry(providerId = 1L, externalId = uri.toString()), uri.toString())
 
     private fun applicationContext(): Context =
         androidx.test.core.app.ApplicationProvider.getApplicationContext()

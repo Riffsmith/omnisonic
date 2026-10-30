@@ -261,11 +261,9 @@ class OmniPlayerImpl(
         if (playWhenReady) player.play()
     }
 
-    internal fun dataSourceFactoryFor(stream: ResolvedStream): DataSource.Factory {
-        val uri = Uri.parse(stream.uri)
-        return if (stream.routedDirect || stream.isRadio) cacheManager.directFor(uri)
-        else cacheManager.factoryFor(uri, stream.cacheKey)
-    }
+    internal fun dataSourceFactoryFor(stream: ResolvedStream): DataSource.Factory =
+        if (stream.routedDirect || stream.isRadio) cacheManager.directFor(stream)
+        else cacheManager.factoryFor(stream)
 
     private fun mediaSourceFor(stream: ResolvedStream): MediaSource =
         DefaultMediaSourceFactory(dataSourceFactoryFor(stream))
