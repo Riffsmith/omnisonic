@@ -1,18 +1,20 @@
 package app.omnisonic.provider.local
 
 import android.content.ContentProvider
+import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Bundle
+import android.os.CancellationSignal
 import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.ProviderAlbumRequest
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,6 +27,10 @@ private data class RecordedQuery(
     val selection: String?,
     val selectionArgs: Array<out String>?,
     val sortOrder: String?,
+    val sortColumns: List<String>?,
+    val sortDirection: Int?,
+    val limit: Int?,
+    val offset: Int?,
 )
 
 private class FakeMediaStoreProvider : ContentProvider() {
@@ -46,23 +52,66 @@ private class FakeMediaStoreProvider : ContentProvider() {
         selection: String?,
         selectionArgs: Array<out String>?,
         sortOrder: String?,
+    ): Cursor = recordQuery(uri, selection, selectionArgs, sortOrder, null, null, null, null)
+
+    override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        queryArgs: Bundle?,
+        cancellationSignal: CancellationSignal?,
     ): Cursor {
-        queries += RecordedQuery(uri, selection, selectionArgs, sortOrder)
+        val args = queryArgs ?: Bundle.EMPTY
+        return recordQuery(
+            uri = uri,
+            selection = args.getString(ContentResolver.QUERY_ARG_SQL_SELECTION),
+            selectionArgs = args.getStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS),
+            sortOrder = args.getString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER),
+            sortColumns = args.getStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS)?.toList(),
+            sortDirection = args.getInt(ContentResolver.QUERY_ARG_SORT_DIRECTION, Int.MIN_VALUE)
+                .takeUnless { it == Int.MIN_VALUE },
+            limit = args.getInt(ContentResolver.QUERY_ARG_LIMIT, Int.MIN_VALUE)
+                .takeUnless { it == Int.MIN_VALUE },
+            offset = args.getInt(ContentResolver.QUERY_ARG_OFFSET, Int.MIN_VALUE)
+                .takeUnless { it == Int.MIN_VALUE },
+        )
+    }
+
+    private fun recordQuery(
+        uri: Uri,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?,
+        sortColumns: List<String>?,
+        sortDirection: Int?,
+        limit: Int?,
+        offset: Int?,
+    ): Cursor {
+        if (sortOrder?.contains("LIMIT", ignoreCase = true) == true) {
+            throw IllegalArgumentException("Invalid token LIMIT")
+        }
+        queries += RecordedQuery(uri, selection, selectionArgs, sortOrder, sortColumns, sortDirection, limit, offset)
+
         val columns = columnsByUri.getValue(uri)
+        var rows = rowsByUri[uri].orEmpty().toList()
+        if (selection != null && selectionArgs != null && selectionArgs.isNotEmpty()) {
+            Regex("([A-Za-z0-9_]+) = \\?").find(selection)?.groupValues?.get(1)?.let { column ->
+                val index = columns.indexOf(column)
+                if (index >= 0) rows = rows.filter { row -> row[index]?.toString() == selectionArgs[0] }
+            }
+            Regex("([A-Za-z0-9_]+) LIKE \\?", RegexOption.IGNORE_CASE).find(selection)
+                ?.groupValues?.get(1)?.let { column ->
+                    val index = columns.indexOf(column)
+                    if (index >= 0) {
+                        val needle = selectionArgs[0].trim('%')
+                        rows = rows.filter { row -> row[index]?.toString()?.contains(needle, ignoreCase = true) == true }
+                    }
+                }
+        }
+        if (limit != null) {
+            rows = rows.drop(offset ?: 0).take(limit)
+        }
+
         val cursor = MatrixCursor(columns)
-        var rows = rowsByUri[uri].orEmpty()
-        if (selection?.contains("_id = ?", ignoreCase = true) == true && selectionArgs != null) {
-            rows = rows.filter { row -> row[0]?.toString() == selectionArgs[0] }
-        }
-        if (selection?.contains("like ?", ignoreCase = true) == true && selectionArgs != null) {
-            val needle = selectionArgs[0].trim('%')
-            rows = rows.filter { row -> row.drop(1).any { it?.toString()?.contains(needle, ignoreCase = true) == true } }
-        }
-        if (sortOrder != null) {
-            val limit = Regex("LIMIT (\\d+)").find(sortOrder)?.groupValues?.get(1)?.toIntOrNull()
-            val offset = Regex("OFFSET (\\d+)").find(sortOrder)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-            rows = rows.drop(offset).let { if (limit == null) it else it.take(limit) }
-        }
         rows.forEach(cursor::addRow)
         return cursor
     }
@@ -82,17 +131,46 @@ class LocalMediaProviderTest {
 
     private val fake = FakeMediaStoreProvider()
     private lateinit var provider: LocalMediaProvider
+
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        fake.given(MediaStore.Audio.Artists.EXTERNAL_CONTENT_URI, ARTIST_COLUMNS, listOf(arrayOf("7", "Autechre", 12, 130), arrayOf("8", "Sade", 2, 19)))
-        fake.given(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, ALBUM_COLUMNS, listOf(arrayOf("100", "Lovers Rock", "Sade", 10, 2000), arrayOf("101", "Promise", "Sade", 9, 1985)))
-        fake.given(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, MEDIA_COLUMNS, listOf(arrayOf("501", "Smooth Operator", "Promise", "Sade", 3, 1985, 260_000, "/music/sade/smooth.mp3"), arrayOf("500", "Kiss of Life", "Promise", "Sade", 1002, 1985, 210_000, "/music/sade/kiss.flac")))
-        fake.given(MediaStore.Audio.Genres.EXTERNAL_CONTENT_URI, GENRE_COLUMNS, listOf(arrayOf("30", "soul"), arrayOf("31", "electronic")))
+        fake.given(
+            MediaStore.Audio.Artists.EXTERNAL_CONTENT_URI,
+            ARTIST_COLUMNS,
+            listOf(
+                arrayOf("7", "Autechre", 12, 130),
+                arrayOf("8", "Sade", 2, 19),
+            ),
+        )
+        fake.given(
+            MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
+            ALBUM_COLUMNS,
+            listOf(
+                arrayOf("100", "Lovers Rock", "Sade", "8", 10, 2000),
+                arrayOf("101", "Promise", "Sade", "8", 9, 1985),
+                arrayOf("102", "Greatest Hits", "Sade", "8", 2, 1990),
+                arrayOf("103", "Greatest Hits", "Autechre", "7", 1, 1995),
+            ),
+        )
+        fake.given(
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            MEDIA_COLUMNS,
+            listOf(
+                arrayOf("501", "Smooth Operator", "Promise", "101", "Sade", "8", 3, 1985, 260_000, "audio/mpeg", "smooth.mp3"),
+                arrayOf("500", "Kiss of Life", "Promise", "101", "Sade", "8", 1002, 1985, 210_000, "audio/flac", "kiss.flac"),
+                arrayOf("502", "Sade Greatest", "Greatest Hits", "102", "Sade", "8", 1, 1990, 200_000, "audio/ogg", "track"),
+                arrayOf("503", "Autechre Greatest", "Greatest Hits", "103", "Autechre", "7", 1, 1995, 180_000, "audio/mpeg", "autechre.mp3"),
+            ),
+        )
+        fake.given(
+            MediaStore.Audio.Genres.EXTERNAL_CONTENT_URI,
+            GENRE_COLUMNS,
+            listOf(arrayOf("30", "soul"), arrayOf("31", "electronic")),
+        )
         ShadowContentResolver.registerProviderInternal(MediaStore.AUTHORITY, fake)
         provider = LocalMediaProvider(context.contentResolver)
     }
-
 
     @Test
     fun `listArtists maps names and library counts`(): Unit = runBlocking {
@@ -107,17 +185,50 @@ class LocalMediaProviderTest {
     }
 
     @Test
-    fun `listAlbums pages through MediaStore with limit and offset`(): Unit = runBlocking {
+    fun `listAlbums pages through MediaStore with bundle limit and offset`(): Unit = runBlocking {
         val albums = provider.listAlbums(ProviderAlbumRequest(type = AlbumListType.ALPHABETICAL_BY_NAME, size = 1, offset = 1))
 
         assertThat(albums).hasSize(1)
         assertThat(albums.single().title).isEqualTo("Promise")
         assertThat(albums.single().artistName).isEqualTo("Sade")
+        assertThat(albums.single().artistExternalId).isEqualTo("8")
         assertThat(albums.single().songCount).isEqualTo(9)
         assertThat(albums.single().year).isEqualTo(1985)
 
-        val sort = fake.queries.single { it.uri == MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI }.sortOrder
-        assertTrue(sort.orEmpty().contains("LIMIT 1 OFFSET 1"))
+        val query = fake.queries.single { it.uri == MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI }
+        assertThat(query.sortOrder).isNull()
+        assertThat(query.sortColumns).containsExactly(
+            "${MediaStore.Audio.Albums.ALBUM} COLLATE NOCASE",
+            MediaStore.Audio.Albums._ID,
+        ).inOrder()
+        assertThat(query.limit).isEqualTo(1)
+        assertThat(query.offset).isEqualTo(1)
+    }
+
+    @Test
+    fun `paged reads pass limits as query args and never as SQL sort order`(): Unit = runBlocking {
+        provider.listAlbums(ProviderAlbumRequest(type = AlbumListType.NEWEST, size = 2, offset = 1))
+        provider.searchArtists(query = "a", offset = 3, count = 4)
+        provider.searchAlbums(query = "g", offset = 5, count = 6)
+        provider.searchSongs(query = "h", offset = 7, count = 8)
+
+        val paged = fake.queries.filter { it.limit != null }
+        assertThat(paged).hasSize(4)
+        assertThat(paged.map { it.limit }).containsExactly(2, 4, 6, 8).inOrder()
+        assertThat(paged.map { it.offset }).containsExactly(1, 3, 5, 7).inOrder()
+        assertThat(paged.map { it.sortOrder }).containsExactly(null, null, null, null)
+        assertThat(paged.map { it.sortColumns }).doesNotContain(null)
+    }
+
+    @Test
+    @Config(sdk = [29])
+    fun `api 29 pages locally when the provider ignores bundled limits`(): Unit = runBlocking {
+        val albums = provider.listAlbums(ProviderAlbumRequest(type = AlbumListType.ALPHABETICAL_BY_NAME, size = 1, offset = 1))
+
+        assertThat(albums.map { it.title }).containsExactly("Promise")
+        val query = fake.queries.single { it.uri == MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI }
+        assertThat(query.limit).isNull()
+        assertThat(query.offset).isNull()
     }
 
     @Test
@@ -125,29 +236,47 @@ class LocalMediaProviderTest {
         val album = provider.albumDetails("100")!!
         assertThat(album.title).isEqualTo("Lovers Rock")
         assertThat(album.artistName).isEqualTo("Sade")
+        assertThat(album.artistExternalId).isEqualTo("8")
         assertThat(album.songCount).isEqualTo(10)
 
         val song = provider.songDetails("500")!!
         assertThat(song.title).isEqualTo("Kiss of Life")
-        assertThat(song.filePath).isEqualTo("/music/sade/kiss.flac")
+        assertThat(song.albumExternalId).isEqualTo("101")
+        assertThat(song.artistExternalId).isEqualTo("8")
+        assertThat(song.filePath).isNull()
         assertThat(song.codec).isEqualTo("flac")
         assertThat(song.trackNo).isEqualTo(2)
         assertThat(song.discNo).isEqualTo(1)
         assertThat(song.durationMs).isEqualTo(210_000L)
 
         val plain = provider.songDetails("501")!!
+        assertThat(plain.filePath).isNull()
         assertThat(plain.codec).isEqualTo("mp3")
         assertThat(plain.discNo).isNull()
         assertThat(plain.trackNo).isEqualTo(3)
+
+        val mimeOnly = provider.songDetails("502")!!
+        assertThat(mimeOnly.codec).isEqualTo("ogg")
     }
 
     @Test
     fun `browseDirectory resolves artists to albums and albums to songs`(): Unit = runBlocking {
         val artistDirectory = provider.browseDirectory("8")
-        assertThat(artistDirectory.childAlbums.map { it.title }).containsExactly("Lovers Rock", "Promise").inOrder()
+        assertThat(artistDirectory.childAlbums.map { it.title }).containsExactly("Lovers Rock", "Promise", "Greatest Hits").inOrder()
 
         val albumDirectory = provider.browseDirectory("101")
         assertThat(albumDirectory.childSongs.map { it.title }).containsExactly("Smooth Operator", "Kiss of Life").inOrder()
+    }
+
+    @Test
+    fun `albums sharing a title keep their song lists separate`(): Unit = runBlocking {
+        val sade = provider.browseDirectory("102")
+        val autechre = provider.browseDirectory("103")
+
+        assertThat(sade.childAlbums).isEmpty()
+        assertThat(autechre.childAlbums).isEmpty()
+        assertThat(sade.childSongs.map { it.title }).containsExactly("Sade Greatest")
+        assertThat(autechre.childSongs.map { it.title }).containsExactly("Autechre Greatest")
     }
 
     @Test
@@ -200,6 +329,7 @@ class LocalMediaProviderTest {
             MediaStore.Audio.Albums._ID,
             MediaStore.Audio.Albums.ALBUM,
             MediaStore.Audio.Albums.ARTIST,
+            MediaStore.Audio.Albums.ARTIST_ID,
             MediaStore.Audio.Albums.NUMBER_OF_SONGS,
             MediaStore.Audio.Albums.FIRST_YEAR,
         )
@@ -208,11 +338,14 @@ class LocalMediaProviderTest {
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ARTIST_ID,
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.DATA,
+            MediaStore.Audio.Media.MIME_TYPE,
+            MediaStore.Audio.Media.DISPLAY_NAME,
         )
 
         val GENRE_COLUMNS = arrayOf(MediaStore.Audio.Genres._ID, MediaStore.Audio.Genres.NAME)

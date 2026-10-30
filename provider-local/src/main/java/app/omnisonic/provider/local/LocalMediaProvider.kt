@@ -3,7 +3,10 @@ package app.omnisonic.provider.local
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.database.Cursor
+import android.database.CursorWrapper
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.provider.MediaStore
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.MediaProvider
@@ -21,6 +24,7 @@ import app.omnisonic.provider.api.ProviderPlaylist
 import app.omnisonic.provider.api.ProviderPlaylistSummary
 import app.omnisonic.provider.api.ProviderRadio
 import app.omnisonic.provider.api.ProviderSong
+import java.text.Collator
 
 /**
  * Device-library provider backed by MediaStore audio rows. Local files carry no
@@ -32,17 +36,10 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
     override suspend fun probe(): ProviderCapabilities = ProviderCapabilities()
 
     override suspend fun listArtists(): List<ProviderArtist> =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Artists.EXTERNAL_CONTENT_URI,
-            arrayOf(
-                MediaStore.Audio.Artists._ID,
-                MediaStore.Audio.Artists.ARTIST,
-                MediaStore.Audio.Artists.NUMBER_OF_ALBUMS,
-                MediaStore.Audio.Artists.NUMBER_OF_TRACKS,
-            ),
-            null,
-            null,
-            "${MediaStore.Audio.Artists.ARTIST} COLLATE NOCASE ASC",
+            ARTIST_PROJECTION,
+            sortColumns = arrayOf(MediaStore.Audio.Artists.ARTIST),
         )?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -59,45 +56,47 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
         }.orEmpty()
 
     override suspend fun browseDirectory(externalId: String): ProviderDirectory {
-        val artistName = artistName(externalId)
-        if (artistName != null) {
+        if (artistExists(externalId)) {
             return ProviderDirectory(
                 externalId = externalId,
-                childAlbums = albumsBy(MediaStore.Audio.Albums.ARTIST, artistName),
+                childAlbums = albumsBy(MediaStore.Audio.Albums.ARTIST_ID, externalId),
             )
         }
-        val albumName = albumName(externalId)
         return ProviderDirectory(
             externalId = externalId,
-            childSongs = albumName?.let { songsBy(MediaStore.Audio.Media.ALBUM, it) }.orEmpty(),
+            childSongs = if (albumExists(externalId)) {
+                songsBy(MediaStore.Audio.Media.ALBUM_ID, externalId)
+            } else {
+                emptyList()
+            },
         )
     }
 
     override suspend fun albumDetails(albumExternalId: String): ProviderAlbum? =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
             ALBUM_PROJECTION,
-            "${MediaStore.Audio.Albums._ID} = ?",
-            arrayOf(albumExternalId),
-            null,
+            selection = "${MediaStore.Audio.Albums._ID} = ?",
+            selectionArgs = arrayOf(albumExternalId),
         )?.use { cursor -> if (cursor.moveToFirst()) cursor.toAlbum() else null }
 
     override suspend fun songDetails(externalId: String): ProviderSong? =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             MEDIA_PROJECTION,
-            "${MediaStore.Audio.Media._ID} = ?",
-            arrayOf(externalId),
-            null,
+            selection = "${MediaStore.Audio.Media._ID} = ?",
+            selectionArgs = arrayOf(externalId),
         )?.use { cursor -> if (cursor.moveToFirst()) cursor.toSong() else null }
 
-    override suspend fun listAlbums(request: ProviderAlbumRequest): List<ProviderAlbum> =
-        contentResolver.query(
+    override suspend fun listAlbums(request: ProviderAlbumRequest): List<ProviderAlbum> {
+        val (sortColumns, sortDirection) = albumSort(request.type)
+        return query(
             MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
             ALBUM_PROJECTION,
-            null,
-            null,
-            "${albumSort(request.type)} LIMIT ${request.size} OFFSET ${request.offset}",
+            sortColumns = sortColumns,
+            sortDirection = sortDirection,
+            limit = request.size,
+            offset = request.offset,
         )?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -105,14 +104,13 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
                 }
             }
         }.orEmpty()
+    }
 
     override suspend fun listGenres(): List<ProviderGenre> =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Genres.EXTERNAL_CONTENT_URI,
             arrayOf(MediaStore.Audio.Genres._ID, MediaStore.Audio.Genres.NAME),
-            null,
-            null,
-            "${MediaStore.Audio.Genres.NAME} COLLATE NOCASE ASC",
+            sortColumns = arrayOf(MediaStore.Audio.Genres.NAME),
         )?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -131,12 +129,14 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
     override suspend fun listBookmarks(): List<ProviderBookmark> = emptyList()
 
     override suspend fun searchArtists(query: String, offset: Int, count: Int): List<ProviderArtist> =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Artists.EXTERNAL_CONTENT_URI,
             ARTIST_PROJECTION,
-            "${MediaStore.Audio.Artists.ARTIST} LIKE ?",
-            arrayOf("%${query.trim()}%"),
-            "${MediaStore.Audio.Artists.ARTIST} COLLATE NOCASE ASC LIMIT $count OFFSET $offset",
+            selection = "${MediaStore.Audio.Artists.ARTIST} LIKE ?",
+            selectionArgs = arrayOf("%${query.trim()}%"),
+            sortColumns = arrayOf(MediaStore.Audio.Artists.ARTIST),
+            limit = count,
+            offset = offset,
         )?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -146,12 +146,14 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
         }.orEmpty()
 
     override suspend fun searchAlbums(query: String, offset: Int, count: Int): List<ProviderAlbum> =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
             ALBUM_PROJECTION,
-            "${MediaStore.Audio.Albums.ALBUM} LIKE ?",
-            arrayOf("%${query.trim()}%"),
-            "${MediaStore.Audio.Albums.ALBUM} COLLATE NOCASE ASC LIMIT $count OFFSET $offset",
+            selection = "${MediaStore.Audio.Albums.ALBUM} LIKE ?",
+            selectionArgs = arrayOf("%${query.trim()}%"),
+            sortColumns = arrayOf(MediaStore.Audio.Albums.ALBUM),
+            limit = count,
+            offset = offset,
         )?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -161,12 +163,14 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
         }.orEmpty()
 
     override suspend fun searchSongs(query: String, offset: Int, count: Int): List<ProviderSong> =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             MEDIA_PROJECTION,
-            MUSIC_SELECTION + " AND (${MediaStore.Audio.Media.TITLE} LIKE ?)",
-            arrayOf("%${query.trim()}%"),
-            "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC LIMIT $count OFFSET $offset",
+            selection = MUSIC_SELECTION + " AND (${MediaStore.Audio.Media.TITLE} LIKE ?)",
+            selectionArgs = arrayOf("%${query.trim()}%"),
+            sortColumns = arrayOf(MediaStore.Audio.Media.TITLE),
+            limit = count,
+            offset = offset,
         )?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -199,31 +203,29 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
     private fun mediaUri(externalId: String): Uri? =
         externalId.toLongOrNull()?.let { ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, it) }
 
-    private suspend fun artistName(externalId: String): String? =
-        contentResolver.query(
+    private suspend fun artistExists(externalId: String): Boolean =
+        query(
             MediaStore.Audio.Artists.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Audio.Artists._ID, MediaStore.Audio.Artists.ARTIST),
-            "${MediaStore.Audio.Artists._ID} = ?",
-            arrayOf(externalId),
-            null,
-        )?.use { cursor -> if (cursor.moveToFirst()) cursor.string(MediaStore.Audio.Artists.ARTIST) else null }
+            arrayOf(MediaStore.Audio.Artists._ID),
+            selection = "${MediaStore.Audio.Artists._ID} = ?",
+            selectionArgs = arrayOf(externalId),
+        )?.use { it.moveToFirst() } == true
 
-    private suspend fun albumName(externalId: String): String? =
-        contentResolver.query(
+    private suspend fun albumExists(externalId: String): Boolean =
+        query(
             MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Audio.Albums._ID, MediaStore.Audio.Albums.ALBUM),
-            "${MediaStore.Audio.Albums._ID} = ?",
-            arrayOf(externalId),
-            null,
-        )?.use { cursor -> if (cursor.moveToFirst()) cursor.string(MediaStore.Audio.Albums.ALBUM) else null }
+            arrayOf(MediaStore.Audio.Albums._ID),
+            selection = "${MediaStore.Audio.Albums._ID} = ?",
+            selectionArgs = arrayOf(externalId),
+        )?.use { it.moveToFirst() } == true
 
     private suspend fun albumsBy(column: String, value: String): List<ProviderAlbum> =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
             ALBUM_PROJECTION,
-            "$column = ?",
-            arrayOf(value),
-            "${MediaStore.Audio.Albums.FIRST_YEAR} ASC",
+            selection = "$column = ?",
+            selectionArgs = arrayOf(value),
+            sortColumns = arrayOf(MediaStore.Audio.Albums.FIRST_YEAR),
         )?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -233,12 +235,12 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
         }.orEmpty()
 
     private suspend fun songsBy(column: String, value: String): List<ProviderSong> =
-        contentResolver.query(
+        query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             MEDIA_PROJECTION,
-            "$MUSIC_SELECTION AND ($column = ?)",
-            arrayOf(value),
-            "${MediaStore.Audio.Media.TRACK} ASC",
+            selection = "$MUSIC_SELECTION AND ($column = ?)",
+            selectionArgs = arrayOf(value),
+            sortColumns = arrayOf(MediaStore.Audio.Media.TRACK),
         )?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -247,12 +249,61 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
             }
         }.orEmpty()
 
-    private fun albumSort(type: AlbumListType): String = when (type) {
-        AlbumListType.NEWEST -> "${MediaStore.Audio.Albums.LAST_YEAR} DESC, ${MediaStore.Audio.Albums._ID} DESC"
-        AlbumListType.ALPHABETICAL_BY_NAME -> "${MediaStore.Audio.Albums.ALBUM} COLLATE NOCASE ASC, ${MediaStore.Audio.Albums._ID} ASC"
-        AlbumListType.ALPHABETICAL_BY_ARTIST ->
-            "${MediaStore.Audio.Albums.ARTIST} COLLATE NOCASE ASC, ${MediaStore.Audio.Albums.ALBUM} COLLATE NOCASE ASC"
-        AlbumListType.BY_GENRE, AlbumListType.RANDOM -> "${MediaStore.Audio.Albums._ID} ASC"
+    private fun albumSort(type: AlbumListType): Pair<Array<String>, Int> = when (type) {
+        AlbumListType.NEWEST -> arrayOf(
+            "${MediaStore.Audio.Albums.LAST_YEAR} DESC",
+            MediaStore.Audio.Albums._ID,
+        ) to ContentResolver.QUERY_SORT_DIRECTION_DESCENDING
+
+        AlbumListType.ALPHABETICAL_BY_NAME -> arrayOf(
+            "${MediaStore.Audio.Albums.ALBUM} COLLATE NOCASE",
+            MediaStore.Audio.Albums._ID,
+        ) to ContentResolver.QUERY_SORT_DIRECTION_ASCENDING
+
+        AlbumListType.ALPHABETICAL_BY_ARTIST -> arrayOf(
+            "${MediaStore.Audio.Albums.ARTIST} COLLATE NOCASE",
+            MediaStore.Audio.Albums.ALBUM,
+        ) to ContentResolver.QUERY_SORT_DIRECTION_ASCENDING
+
+        AlbumListType.BY_GENRE, AlbumListType.RANDOM -> arrayOf(
+            MediaStore.Audio.Albums._ID,
+        ) to ContentResolver.QUERY_SORT_DIRECTION_ASCENDING
+    }
+
+    private fun query(
+        uri: Uri,
+        projection: Array<String>,
+        selection: String? = null,
+        selectionArgs: Array<String>? = null,
+        sortColumns: Array<String>? = null,
+        sortDirection: Int = ContentResolver.QUERY_SORT_DIRECTION_ASCENDING,
+        limit: Int? = null,
+        offset: Int? = null,
+    ): Cursor? {
+        val args = Bundle()
+        if (selection != null) {
+            args.putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+            if (selectionArgs != null) {
+                args.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs)
+            }
+        }
+        if (!sortColumns.isNullOrEmpty()) {
+            args.putStringArray(ContentResolver.QUERY_ARG_SORT_COLUMNS, sortColumns)
+            args.putInt(ContentResolver.QUERY_ARG_SORT_DIRECTION, sortDirection)
+            args.putInt(ContentResolver.QUERY_ARG_SORT_COLLATION, Collator.PRIMARY)
+        }
+        if (limit != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            args.putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+            if (offset != null) {
+                args.putInt(ContentResolver.QUERY_ARG_OFFSET, offset)
+            }
+        }
+        val cursor = contentResolver.query(uri, projection, args, null)
+        return if (limit != null && Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            cursor?.let { PagedCursor(it, offset ?: 0, limit) }
+        } else {
+            cursor
+        }
     }
 
     private fun Cursor.toArtist(): ProviderArtist = ProviderArtist(
@@ -265,27 +316,46 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
     private fun Cursor.toAlbum(): ProviderAlbum = ProviderAlbum(
         externalId = string(MediaStore.Audio.Albums._ID).orEmpty(),
         title = string(MediaStore.Audio.Albums.ALBUM).orEmpty(),
+        artistExternalId = string(MediaStore.Audio.Albums.ARTIST_ID),
         artistName = string(MediaStore.Audio.Albums.ARTIST),
         year = int(MediaStore.Audio.Albums.FIRST_YEAR),
         songCount = int(MediaStore.Audio.Albums.NUMBER_OF_SONGS),
     )
 
     private fun Cursor.toSong(): ProviderSong {
-        val filePath = string(MediaStore.Audio.Media.DATA)
         val track = int(MediaStore.Audio.Media.TRACK) ?: 0
         return ProviderSong(
             externalId = string(MediaStore.Audio.Media._ID).orEmpty(),
             title = string(MediaStore.Audio.Media.TITLE).orEmpty(),
+            artistExternalId = string(MediaStore.Audio.Media.ARTIST_ID),
             artistName = string(MediaStore.Audio.Media.ARTIST),
-            albumExternalId = null,
+            albumExternalId = string(MediaStore.Audio.Media.ALBUM_ID),
             trackNo = if (track > 0) track % TRACK_GRANULARITY else null,
             discNo = if (track >= TRACK_GRANULARITY) track / TRACK_GRANULARITY else null,
             year = int(MediaStore.Audio.Media.YEAR),
             imagePath = null,
             durationMs = int(MediaStore.Audio.Media.DURATION)?.toLong(),
-            filePath = filePath,
-            codec = filePath?.substringAfterLast('.', "")?.lowercase()?.takeIf { it.isNotEmpty() },
+            filePath = null,
+            codec = codec(),
         )
+    }
+
+    private fun Cursor.codec(): String? {
+        val extension = string(MediaStore.Audio.Media.DISPLAY_NAME)
+            ?.substringAfterLast('.', "")
+            ?.lowercase()
+            ?.takeIf { it.isNotEmpty() }
+        if (extension != null) return extension
+
+        val subtype = string(MediaStore.Audio.Media.MIME_TYPE)
+            ?.substringAfter('/', "")
+            ?.substringBefore(';')
+            ?.lowercase()
+        return when (subtype) {
+            null, "", "octet-stream" -> null
+            "mpeg" -> "mp3"
+            else -> subtype
+        }
     }
 
     private fun Cursor.string(columnName: String): String? {
@@ -313,6 +383,7 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
             MediaStore.Audio.Albums._ID,
             MediaStore.Audio.Albums.ALBUM,
             MediaStore.Audio.Albums.ARTIST,
+            MediaStore.Audio.Albums.ARTIST_ID,
             MediaStore.Audio.Albums.NUMBER_OF_SONGS,
             MediaStore.Audio.Albums.FIRST_YEAR,
         )
@@ -321,13 +392,38 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ARTIST_ID,
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.DATA,
+            MediaStore.Audio.Media.MIME_TYPE,
+            MediaStore.Audio.Media.DISPLAY_NAME,
         )
     }
+}
+
+private class PagedCursor(
+    cursor: Cursor,
+    private val offset: Int,
+    private val limit: Int,
+) : CursorWrapper(cursor) {
+    private var remaining = limit
+    private var searched = false
+
+    override fun moveToNext(): Boolean {
+        if (!searched) {
+            searched = true
+            if (offset > 0 && !super.moveToPosition(offset - 1)) return false
+        }
+        if (remaining <= 0) return false
+        val moved = super.moveToNext()
+        if (moved) remaining--
+        return moved
+    }
+
+    override fun getCount(): Int = minOf(limit, maxOf(0, super.getCount() - offset))
 }
 
 class LocalMediaProviderFactory(private val contentResolver: ContentResolver) : MediaProviderFactory {
