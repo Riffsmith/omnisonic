@@ -264,12 +264,17 @@ class OmniPlayerImpl(
     internal fun dataSourceFactoryFor(stream: ResolvedStream): DataSource.Factory {
         val uri = Uri.parse(stream.uri)
         return if (stream.routedDirect || stream.isRadio) cacheManager.directFor(uri)
-        else cacheManager.factoryFor(uri)
+        else cacheManager.factoryFor(uri, stream.cacheKey)
     }
 
     private fun mediaSourceFor(stream: ResolvedStream): MediaSource =
         DefaultMediaSourceFactory(dataSourceFactoryFor(stream))
-            .createMediaSource(MediaItem.fromUri(Uri.parse(stream.uri)))
+            .createMediaSource(
+                MediaItem.Builder()
+                    .setUri(Uri.parse(stream.uri))
+                    .setCustomCacheKey(stream.cacheKey)
+                    .build(),
+            )
 
     private fun applyPeq() {
         val configured = peqConfig

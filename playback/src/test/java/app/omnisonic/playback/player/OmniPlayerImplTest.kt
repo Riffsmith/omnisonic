@@ -103,7 +103,7 @@ class OmniPlayerImplTest {
 
         serveWav()
         player.play(stream, entry())
-        await("cache populated") { cacheManager.cachedBytesFor(Uri.parse(stream.uri)) > 0 }
+        await("cache populated") { cacheManager.cachedBytesFor(stream.cacheKey) > 0 }
     }
 
     @Test
@@ -127,13 +127,13 @@ class OmniPlayerImplTest {
         val uri = Uri.parse(server.url("/track.wav").toString())
         val stream = ResolvedStream(entry(), uri.toString())
 
-        cacheManager.setPerUriCacheFirst(uri, true)
+        cacheManager.setPerUriCacheFirst(stream.cacheKey, true)
         assertThat(player.dataSourceFactoryFor(stream).createDataSource())
             .isInstanceOf(CacheDataSource::class.java)
 
         settings.setCacheFirst(true)
         await("cache-first default applied") { cacheManager.defaultCacheFirst }
-        cacheManager.setPerUriCacheFirst(uri, false)
+        cacheManager.setPerUriCacheFirst(stream.cacheKey, false)
         assertThat(player.dataSourceFactoryFor(stream).createDataSource())
             .isNotInstanceOf(CacheDataSource::class.java)
     }

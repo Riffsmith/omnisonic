@@ -13,8 +13,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Media3 SimpleCache wrapper. All non-local upstream traffic can flow through the cache;
- * `content://` and plain reads use the direct factory. Cache key is the URI string
- * (CacheDataSource default key factory).
+ * `content://` and plain reads use the direct factory. Callers pass the provider-stable
+ * stream key so rotating auth salts never create new cache entries.
  */
 class PlaybackCacheManager(
     private val context: Context,
@@ -35,11 +35,12 @@ class PlaybackCacheManager(
     @Volatile
     private var released = false
 
-    fun cacheFor(uri: Uri): DataSource.Factory {
+    fun cacheFor(uri: Uri, cacheKey: String = uri.toString()): DataSource.Factory {
         check(!released) { "cache released" }
         return CacheDataSource.Factory()
             .setCache(cache)
             .setUpstreamDataSourceFactory(wrappedUpstream())
+            .setCacheKeyFactory { dataSpec -> dataSpec.key ?: cacheKey }
             .setFlags(CacheDataSource.FLAG_BLOCK_ON_CACHE)
     }
 
@@ -48,24 +49,24 @@ class PlaybackCacheManager(
         return wrappedUpstream()
     }
 
-    /** Per-URI override wins over [defaultCacheFirst]; consumed by OmniPlayer when building sources. */
-    fun factoryFor(uri: Uri): DataSource.Factory =
-        if (perUriCacheFirst[uri.toString()] ?: defaultCacheFirst) cacheFor(uri) else directFor(uri)
+    /** Per-stream override wins over [defaultCacheFirst]; consumed by OmniPlayer when building sources. */
+    fun factoryFor(uri: Uri, cacheKey: String): DataSource.Factory =
+        if (perUriCacheFirst[cacheKey] ?: defaultCacheFirst) cacheFor(uri, cacheKey) else directFor(uri)
 
-    fun setPerUriCacheFirst(uri: Uri, cacheFirst: Boolean) {
-        perUriCacheFirst[uri.toString()] = cacheFirst
+    fun setPerUriCacheFirst(cacheKey: String, cacheFirst: Boolean) {
+        perUriCacheFirst[cacheKey] = cacheFirst
     }
 
-    fun clearPerUriOverride(uri: Uri) {
-        perUriCacheFirst.remove(uri.toString())
+    fun clearPerUriOverride(cacheKey: String) {
+        perUriCacheFirst.remove(cacheKey)
     }
 
-    fun cachedBytesFor(uri: Uri): Long {
+    fun cachedBytesFor(cacheKey: String): Long {
         check(!released) { "cache released" }
-        return cache.getCachedBytes(uri.toString(), 0, Long.MAX_VALUE)
+        return cache.getCachedBytes(cacheKey, 0, Long.MAX_VALUE)
     }
 
-    fun isCached(uri: Uri): Boolean = cachedBytesFor(uri) > 0
+    fun isCached(cacheKey: String): Boolean = cachedBytesFor(cacheKey) > 0
 
     /**
      * Recreates the underlying SimpleCache with a new LRU budget. Eviction reacts to span
