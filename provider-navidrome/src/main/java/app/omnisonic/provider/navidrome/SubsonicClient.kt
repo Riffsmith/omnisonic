@@ -24,7 +24,6 @@ import app.omnisonic.provider.api.ProviderRadio
 import app.omnisonic.provider.api.ProviderSong
 import app.omnisonic.provider.api.ProviderTransportException
 import java.io.IOException
-import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.ZonedDateTime
@@ -32,6 +31,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -416,30 +416,29 @@ class SubsonicClient(
         endpoint: String,
         params: List<Pair<String, String>>,
     ): String {
-        val base = block.baseUrl()
-        val query = (authParams() + params).joinToString("&") { (name, value) ->
-            "$name=${encodeValue(value)}"
-        }
-        return "$base/rest/$endpoint.view?$query"
+        val builder = "${block.baseUrl()}/rest/$endpoint.view".toHttpUrl().newBuilder()
+        (authParams() + params).forEach { (name, value) -> builder.addQueryParameter(name, value) }
+        return builder.build().toString()
     }
 
     private fun authParams(): List<Pair<String, String>> {
         val params = mutableListOf<Pair<String, String>>()
-        params += "u" to encodeValue(connection.username)
         when (connection.authMethod) {
             ProviderAuthMethod.TOKEN -> {
                 val salt = newSalt()
+                params += "u" to connection.username
                 params += "t" to tokenFor(connection.password ?: "", salt)
                 params += "s" to salt
             }
             ProviderAuthMethod.LEGACY_PASSWORD -> {
+                params += "u" to connection.username
                 params += "p" to "enc:" + connection.password
                     ?.toByteArray(Charsets.UTF_8)
                     ?.joinToString("") { "%02x".format(it) }
                     .orEmpty()
             }
             ProviderAuthMethod.API_KEY -> {
-                params += "apiKey" to encodeValue(connection.apiKey.orEmpty())
+                params += "apiKey" to connection.apiKey.orEmpty()
             }
         }
         params += "v" to API_VERSION
@@ -452,8 +451,6 @@ class SubsonicClient(
         MessageDigest.getInstance("MD5")
             .digest((password + salt).toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
-
-    private fun encodeValue(value: String): String = URLEncoder.encode(value, "UTF-8")
 
     private suspend fun <T> requestAttempt(
         block: ConnectionBlock,

@@ -45,9 +45,10 @@ private fun testConnection(
     secondary: ConnectionBlock? = null,
     authMethod: ProviderAuthMethod = ProviderAuthMethod.TOKEN,
     apiKey: String? = null,
+    username: String = "admin",
 ): ProviderConnection = ProviderConnection(
     providerId = 1L,
-    username = "admin",
+    username = username,
     password = TEST_PASSWORD,
     primary = primary,
     secondary = secondary,
@@ -105,6 +106,25 @@ class SubsonicClientTest {
     }
 
     @Test
+    fun `username with reserved characters is encoded exactly once`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(emptyMap())
+            server.start()
+            val client = testClient(
+                testConnection(
+                    ConnectionBlock("http", server.hostName, server.port),
+                    username = "a+b@c.d e",
+                ),
+            )
+
+            runBlocking { client.listArtists() }
+
+            val requested = server.takeRequest().requestUrl!!
+            assertThat(requested.queryParameter("u")).isEqualTo("a+b@c.d e")
+        }
+    }
+
+    @Test
     fun `legacy password auth hex encodes the password`() = runBlocking {
         MockWebServer().use { server ->
             server.dispatcher = pathDispatcher(emptyMap())
@@ -118,9 +138,12 @@ class SubsonicClientTest {
 
             runBlocking { client.listGenres() }
 
-            val requested = server.takeRequest().requestUrl!!
+            val request = server.takeRequest()
+            val requested = request.requestUrl!!
             val expected = TEST_PASSWORD.toByteArray(Charsets.UTF_8).joinToString("") { "%02x".format(it) }
             assertThat(requested.queryParameter("p")).isEqualTo("enc:$expected")
+            assertThat(request.requestLine).contains("p=enc%3A$expected")
+            assertThat(request.requestLine).doesNotContain("p=enc%253A")
             assertThat(requested.queryParameter("t")).isNull()
             assertThat(requested.queryParameter("s")).isNull()
         }
@@ -143,7 +166,10 @@ class SubsonicClientTest {
 
             val requested = server.takeRequest().requestUrl!!
             assertThat(requested.queryParameter("apiKey")).isEqualTo("navi-key-1")
+            assertThat(requested.queryParameter("u")).isNull()
             assertThat(requested.queryParameter("t")).isNull()
+            assertThat(requested.queryParameter("s")).isNull()
+            assertThat(requested.queryParameter("p")).isNull()
         }
     }
 
