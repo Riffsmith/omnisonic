@@ -20,7 +20,10 @@ android {
         jvmTarget = "17"
     }
     testOptions {
-        unitTests.all { it.useJUnitPlatform() }
+        unitTests {
+            isIncludeAndroidResources = true
+            all { it.useJUnitPlatform() }
+        }
     }
     buildFeatures {
         compose = true
@@ -43,11 +46,16 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    implementation(libs.datastore.preferences)
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.truth)
     testImplementation(libs.mockk)
     testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.media3.test.utils)
     testImplementation(libs.junit4)
     testRuntimeOnly(libs.junit.vintage.engine)
 }

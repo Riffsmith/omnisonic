@@ -36,6 +36,9 @@ interface SongDao {
     @Query("UPDATE songs SET resumePointMs = :resumePointMs, lastPlayed = :now WHERE id = :id")
     suspend fun setResumePoint(id: Long, resumePointMs: Long, now: Long)
 
+    @Query("UPDATE songs SET resumePointMs = :resumePointMs WHERE id = :id")
+    suspend fun applyProviderResumePoint(id: Long, resumePointMs: Long?)
+
     @Query("UPDATE songs SET userRating = :rating WHERE id = :id")
     suspend fun setUserRating(id: Long, rating: Int?)
 

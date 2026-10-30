@@ -23,7 +23,10 @@ android {
 
 dependencies {
     api(project(":core-model"))
+    implementation(libs.moshi)
+    implementation(libs.moshi.kotlin)
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.truth)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

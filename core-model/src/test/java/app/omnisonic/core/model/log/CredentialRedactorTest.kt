@@ -40,10 +40,10 @@ class CredentialRedactorTest {
     @Test
     fun queryCredentialsAreRedacted() {
         val scrubbed = redactor.scrub(
-            "https://host/rest/ping.view?u=admin&p=enc%3Aabc&salt=abc&v=1.8.0&c=omnisonic&f=json"
+            "https://host/rest/ping.view?u=admin&t=abc123&p=enc%3Aabc&salt=abc&v=1.8.0&c=omnisonic&f=json"
         )
         assertThat(scrubbed).isEqualTo(
-            "https://host/rest/ping.view?u=[REDACTED]&p=[REDACTED]&salt=[REDACTED]&v=1.8.0&c=omnisonic&f=json"
+            "https://host/rest/ping.view?u=[REDACTED]&t=[REDACTED]&p=[REDACTED]&salt=[REDACTED]&v=1.8.0&c=omnisonic&f=json"
         )
     }
 

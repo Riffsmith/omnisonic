@@ -23,6 +23,7 @@ android {
 
 dependencies {
     api(project(":core-model"))
+    api(libs.media3.common)
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.truth)

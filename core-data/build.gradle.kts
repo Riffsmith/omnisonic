@@ -57,4 +57,6 @@ dependencies {
     testRuntimeOnly(libs.junit.vintage.engine)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.room.testing)
+    testImplementation(project(":provider-navidrome"))
+    testImplementation(libs.okhttp.mockwebserver)
 }

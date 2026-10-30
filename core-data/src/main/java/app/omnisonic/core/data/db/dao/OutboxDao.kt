@@ -32,6 +32,18 @@ interface OutboxDao {
     @Query(
         """
         SELECT * FROM outbox_items
+        WHERE nextAttemptAt <= :now
+        ORDER BY nextAttemptAt, createdAt
+        """,
+    )
+    suspend fun selectAllDue(now: Long): List<OutboxItemEntity>
+
+    @Query("UPDATE outbox_items SET payloadJson = :payloadJson, nextAttemptAt = :nextAttemptAt WHERE id = :id")
+    suspend fun recordProgress(id: Long, payloadJson: String?, nextAttemptAt: Long)
+
+    @Query(
+        """
+        SELECT * FROM outbox_items
         WHERE providerId = :providerId AND mediaType = :mediaType AND externalId = :externalId AND action = :action
         """,
     )

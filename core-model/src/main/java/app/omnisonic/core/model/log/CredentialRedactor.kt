@@ -58,6 +58,7 @@ class CredentialRedactor(
         val DEFAULT_QUERY_KEYS = setOf(
             "u",
             "p",
+            "t",
             "s",
             "salt",
             "token",

@@ -17,7 +17,10 @@ android {
         jvmTarget = "17"
     }
     testOptions {
-        unitTests.all { it.useJUnitPlatform() }
+        unitTests {
+            isIncludeAndroidResources = true
+            all { it.useJUnitPlatform() }
+        }
     }
 }
 
@@ -27,4 +30,8 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.truth)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.junit4)
+    testRuntimeOnly(libs.junit.vintage.engine)
 }
