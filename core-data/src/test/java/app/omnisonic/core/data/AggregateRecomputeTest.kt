@@ -112,4 +112,51 @@ class AggregateRecomputeTest : DatabaseTestBase() {
         assertThat(album.lastPlayed).isNull()
         assertThat(album.resumeFilePath).isNull()
     }
+
+    @Test
+    fun averageOnEmptyAlbumByIdKeepsZeroPlayCount() = runDbTest {
+        newProvider(id = 1)
+        val emptyAlbum = newAlbum(id = 21, providerId = 1)
+
+        aggregateDao.recomputeAlbums(listOf(emptyAlbum.id), AlbumCountRule.AVERAGE)
+
+        assertEmptyAlbum(emptyAlbum.id)
+    }
+
+    @Test
+    fun minimumOnEmptyAlbumByIdKeepsZeroPlayCount() = runDbTest {
+        newProvider(id = 1)
+        val emptyAlbum = newAlbum(id = 22, providerId = 1)
+
+        aggregateDao.recomputeAlbums(listOf(emptyAlbum.id), AlbumCountRule.MINIMUM)
+
+        assertEmptyAlbum(emptyAlbum.id)
+    }
+
+    @Test
+    fun averageOnEmptyAlbumByProviderKeepsZeroPlayCount() = runDbTest {
+        newProvider(id = 1)
+        val emptyAlbum = newAlbum(id = 23, providerId = 1)
+
+        aggregateDao.recomputeAlbumsForProvider(providerId = 1, rule = AlbumCountRule.AVERAGE)
+
+        assertEmptyAlbum(emptyAlbum.id)
+    }
+
+    @Test
+    fun minimumOnEmptyAlbumByProviderKeepsZeroPlayCount() = runDbTest {
+        newProvider(id = 1)
+        val emptyAlbum = newAlbum(id = 24, providerId = 1)
+
+        aggregateDao.recomputeAlbumsForProvider(providerId = 1, rule = AlbumCountRule.MINIMUM)
+
+        assertEmptyAlbum(emptyAlbum.id)
+    }
+
+    private suspend fun assertEmptyAlbum(albumId: Long) {
+        val album = requireNotNull(albumDao.selectById(albumId))
+        assertThat(album.playCount).isEqualTo(0)
+        assertThat(album.lastPlayed).isNull()
+        assertThat(album.resumeFilePath).isNull()
+    }
 }

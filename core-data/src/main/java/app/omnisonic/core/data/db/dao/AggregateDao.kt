@@ -24,7 +24,7 @@ interface AggregateDao {
     @Query(
         """
         UPDATE albums SET
-          playCount = (SELECT ROUND(AVG(songs.playCount)) FROM songs WHERE songs.albumId = albums.id),
+          playCount = (SELECT COALESCE(ROUND(AVG(songs.playCount)), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
           resumeFilePath = (
             SELECT songs.filePath FROM songs
@@ -39,7 +39,7 @@ interface AggregateDao {
     @Query(
         """
         UPDATE albums SET
-          playCount = (SELECT MIN(songs.playCount) FROM songs WHERE songs.albumId = albums.id),
+          playCount = (SELECT COALESCE(MIN(songs.playCount), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
           resumeFilePath = (
             SELECT songs.filePath FROM songs
@@ -69,7 +69,7 @@ interface AggregateDao {
     @Query(
         """
         UPDATE albums SET
-          playCount = (SELECT ROUND(AVG(songs.playCount)) FROM songs WHERE songs.albumId = albums.id),
+          playCount = (SELECT COALESCE(ROUND(AVG(songs.playCount)), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
           resumeFilePath = (
             SELECT songs.filePath FROM songs
@@ -84,7 +84,7 @@ interface AggregateDao {
     @Query(
         """
         UPDATE albums SET
-          playCount = (SELECT MIN(songs.playCount) FROM songs WHERE songs.albumId = albums.id),
+          playCount = (SELECT COALESCE(MIN(songs.playCount), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
           resumeFilePath = (
             SELECT songs.filePath FROM songs
