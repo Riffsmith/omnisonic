@@ -17,6 +17,7 @@ import app.omnisonic.playback.api.player.DecoderPreference
 import app.omnisonic.playback.api.player.EngineConfig
 import app.omnisonic.playback.api.player.EngineInfo
 import app.omnisonic.playback.api.player.OffloadMode
+import app.omnisonic.playback.api.player.WakeMode
 
 class ExoEngineFactory(
     private val context: Context,
@@ -38,7 +39,7 @@ class ExoEngineFactory(
             .setLoadControl(loadControl)
             .setClock(clock)
             .setAudioAttributes(ENGINE_AUDIO_ATTRIBUTES, false)
-            .setWakeMode(C.WAKE_MODE_LOCAL)
+            .setWakeMode(config.wakeMode.toPlayerWakeMode())
             .build()
         return ExoAudioEngine(config, player)
     }
@@ -98,4 +99,9 @@ internal class ExoAudioEngine(
     override fun release() {
         player.release()
     }
+}
+
+private fun WakeMode.toPlayerWakeMode(): Int = when (this) {
+    WakeMode.LOCAL -> C.WAKE_MODE_LOCAL
+    WakeMode.NETWORK -> C.WAKE_MODE_NETWORK
 }
