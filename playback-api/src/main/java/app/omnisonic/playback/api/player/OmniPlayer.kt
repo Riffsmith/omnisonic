@@ -18,6 +18,15 @@ interface OmniPlayer {
     /** Starts (or restarts) playback of a resolved stream; resumes from [ResolvedStream] positions. */
     fun play(stream: ResolvedStream, entry: PlaybackQueueEntry)
 
+    /**
+     * Holds a resolved stream for the entry after the current one so the engine
+     * can keep a [current, next] playlist for gapless handoff. Must not restart
+     * or reposition the current item. A null [stream] trims any prepared tail;
+     * when nothing is current yet the stream is retained and joins the playlist
+     * at the next [play]. A stream equal to the already prepared one is a no-op.
+     */
+    fun prepareNext(stream: ResolvedStream?)
+
     fun pause()
     fun resume()
     fun stop()
@@ -54,4 +63,10 @@ interface OmniPlayerListener {
     fun isPlayingChanged(isPlaying: Boolean)
     /** Reaction point the queue player uses to drive restore and seek fuzz. */
     fun onEngineReady(entry: PlaybackQueueEntry)
+
+    /**
+     * The engine moved to the prepared next item on its own; the queue machine
+     * must validate and adopt it instead of replaying the stream.
+     */
+    fun onAutoAdvance(entry: PlaybackQueueEntry)
 }

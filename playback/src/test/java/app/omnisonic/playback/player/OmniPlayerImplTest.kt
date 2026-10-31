@@ -14,6 +14,8 @@ import app.omnisonic.playback.api.player.DecoderPreference
 import app.omnisonic.playback.api.player.EngineConfig
 import app.omnisonic.playback.api.player.OmniPlayerListener
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
+import app.omnisonic.playback.api.queue.QueueCommandPort
+import app.omnisonic.playback.api.queue.QueueState
 import app.omnisonic.playback.api.rg.NoReplayGainSource
 import app.omnisonic.playback.api.rg.ReplayGainMode
 import app.omnisonic.playback.api.rg.ReplayGainSource
@@ -68,6 +70,7 @@ class OmniPlayerImplTest {
     private lateinit var fakeClock: FakeClock
     private lateinit var settingsDir: File
     private lateinit var cacheDir: File
+    private lateinit var port: TestQueuePort
     private var player: OmniPlayerImpl? = null
 
     @Before
@@ -87,6 +90,7 @@ class OmniPlayerImplTest {
             initialMaxBytes = 32L * 1024 * 1024,
             upstreamFactory = { stream -> mediaDataSources.factoryFor(stream.entry.providerId) },
         )
+        port = TestQueuePort()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         fakeClock = FakeClock(false)
         engineFactory = ExoEngineFactory(context, fakeClock) { processors.toArray() }
@@ -294,23 +298,71 @@ class OmniPlayerImplTest {
     }
 
     @Test
-    fun `engine swap keeps media position and play intent`() {
+    fun `engine swap keeps the exposed player identity, media position and play intent`() {
         val player = newPlayer()
         repeat(3) { serveWav(durationMs = 5_000) }
         player.play(httpStream(), entry())
         await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
-        val firstPlayer = player.exposedPlayer()
+        val exposedPlayer = player.exposedPlayer()
+        val listenerEvents = mutableListOf<Int>()
+        exposedPlayer.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                listenerEvents += playbackState
+            }
+        })
         player.seekTo(120)
 
         player.applyEngineConfig(EngineConfig(decoderPreference = DecoderPreference.EXTENSION_FIRST))
 
         await("swapped engine prepared") {
-            player.exposedPlayer() !== firstPlayer &&
+            player.exposedPlayer() === exposedPlayer &&
                 (player.exposedPlayer().playbackState == Player.STATE_BUFFERING ||
                     player.exposedPlayer().playbackState == Player.STATE_READY) &&
                 player.exposedPlayer().currentPosition >= 100L
         }
         assertThat(player.exposedPlayer().playWhenReady).isTrue()
+        await("post-swap event reaches the pre-swap listener") { listenerEvents.isNotEmpty() }
+    }
+
+    @Test
+    fun `two queued wavs advance without idle or buffering between tracks`() {
+        val player = newPlayer()
+        val spy = ListenerSpy()
+        player.setListener(spy)
+        val states = mutableListOf<Int>()
+        player.exposedPlayer().addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                states += playbackState
+            }
+        })
+        serveWav(durationMs = 5_000)
+        serveWav(durationMs = 5_000)
+        val first = entry(externalId = "song-1", queueItemId = 1)
+
+        player.play(httpStream(), first)
+        player.prepareNext(
+            httpStream(path = "/track-2.wav", externalId = "song-2", queueItemId = 2),
+        )
+
+        await("auto advance") { spy.autoAdvances.map { it.queueItemId }.contains(2L) }
+        val afterFirstReady = states.dropWhile { it != Player.STATE_READY }
+        assertThat(afterFirstReady).isNotEmpty()
+        assertThat(afterFirstReady)
+            .containsNoneOf(Player.STATE_IDLE, Player.STATE_ENDED, Player.STATE_BUFFERING)
+        assertThat(spy.finished).isEmpty()
+    }
+
+    @Test
+    fun `prepare next before play joins the engine playlist at start`() {
+        val player = newPlayer()
+        serveWav(durationMs = 5_000)
+        serveWav(durationMs = 5_000)
+
+        player.prepareNext(httpStream(path = "/track-2.wav", externalId = "song-2", queueItemId = 2))
+        player.play(httpStream(), entry(queueItemId = 1))
+
+        await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
+        assertThat(player.exposedPlayer().currentMediaItem?.mediaId).isEqualTo("1")
     }
 
     @Test
@@ -358,17 +410,23 @@ class OmniPlayerImplTest {
     }
 
     private fun newPlayer(rgSource: ReplayGainSource = NoReplayGainSource): OmniPlayerImpl =
-        OmniPlayerImpl(engineFactory, processors, cacheManager, settings, rgSource, scope)
+        OmniPlayerImpl(engineFactory, processors, cacheManager, settings, rgSource, scope, port)
             .also { player = it }
 
-    private fun entry(providerId: Long = 1L, externalId: String = "song-1") = PlaybackQueueEntry(
+    private fun entry(providerId: Long = 1L, externalId: String = "song-1", queueItemId: Long? = null) = PlaybackQueueEntry(
         providerId = providerId,
         externalId = externalId,
+        queueItemId = queueItemId ?: PlaybackQueueEntry.nextQueueItemId(),
         title = "Track",
     )
 
-    private fun httpStream(path: String = "/track.wav", providerId: Long = 1L): ResolvedStream = ResolvedStream(
-        entry = entry(providerId = providerId),
+    private fun httpStream(
+        path: String = "/track.wav",
+        providerId: Long = 1L,
+        externalId: String = "song-1",
+        queueItemId: Long? = null,
+    ): ResolvedStream = ResolvedStream(
+        entry = entry(providerId = providerId, externalId = externalId, queueItemId = queueItemId),
         uri = server.url(path).toString(),
         requiresNetwork = true,
     )
@@ -433,11 +491,16 @@ class OmniPlayerImplTest {
     private class ListenerSpy : OmniPlayerListener {
         val ready = mutableListOf<PlaybackQueueEntry>()
         val finished = mutableListOf<PlaybackQueueEntry>()
+        val autoAdvances = mutableListOf<PlaybackQueueEntry>()
         val errors = mutableListOf<Pair<PlaybackQueueEntry?, androidx.media3.common.PlaybackException>>()
         val playing = mutableListOf<Boolean>()
 
         override fun onEngineFinished(entry: PlaybackQueueEntry) {
             finished.add(entry)
+        }
+
+        override fun onAutoAdvance(entry: PlaybackQueueEntry) {
+            autoAdvances.add(entry)
         }
 
         override fun onError(entry: PlaybackQueueEntry?, error: androidx.media3.common.PlaybackException) {

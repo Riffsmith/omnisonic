@@ -2,8 +2,9 @@ package app.omnisonic.playback.api.controller
 
 import app.omnisonic.playback.api.events.PlaybackEventBus
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
+import app.omnisonic.playback.api.queue.QueueCommandPort
 import app.omnisonic.playback.api.queue.QueueState
-import app.omnisonic.playback.api.queue.QueuePlayer
+import app.omnisonic.playback.api.queue.RepeatMode
 import app.omnisonic.playback.api.renderer.PlaybackRenderer
 import app.omnisonic.playback.api.settings.NotificationAction
 import app.omnisonic.playback.api.source.QueueSources
@@ -20,9 +21,12 @@ data class PlayerCoreState(
     val pitch: Float = 1f,
 )
 
-/** Hub commands flow through: UI and session callbacks talk only to this. */
-interface PlaybackController {
-    val queueState: StateFlow<QueueState>
+/**
+ * Hub commands flow through: UI and session callbacks talk only to this.
+ * Extends [QueueCommandPort] so the exposed player can route its queue-aware
+ * commands here without reaching the queue machine.
+ */
+interface PlaybackController : QueueCommandPort {
     val playerState: StateFlow<PlayerCoreState>
     val events: PlaybackEventBus
     val queueSources: QueueSources
@@ -33,12 +37,8 @@ interface PlaybackController {
     fun resume()
     fun stop()
 
-    fun skipNext()
-    fun skipPrevious()
     fun seekTo(positionMs: Long)
 
-    fun setShuffleEnabled(enabled: Boolean)
-    fun setRepeatMode(mode: app.omnisonic.playback.api.queue.RepeatMode)
     fun setPlaybackSpeed(scale: Float)
     fun setPlaybackPitch(pitch: Float)
 

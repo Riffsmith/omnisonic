@@ -12,7 +12,12 @@ import kotlinx.coroutines.flow.StateFlow
 interface QueuePlayer {
     val state: StateFlow<QueueState>
 
-    fun setQueue(entries: List<PlaybackQueueEntry>, startEntriesIndex: Int = 0)
+    fun setQueue(
+        entries: List<PlaybackQueueEntry>,
+        startEntriesIndex: Int = 0,
+        sourceType: String? = null,
+        sourceData: String? = null,
+    )
     fun append(entries: List<PlaybackQueueEntry>, sourceType: String? = null, sourceData: String? = null)
     fun prependNext(entry: PlaybackQueueEntry)
     fun removeEntry(queueItemId: Long)
@@ -37,6 +42,13 @@ interface QueuePlayer {
     /** Wire-up for engine-observed state moving through the controller. */
     fun onEngineFinishedCurrent()
     fun onEngineError()
+
+    /**
+     * The engine advanced to the prepared next entry on its own. The queue
+     * machine validates the entry against its expected next, adopts it without
+     * resolving or replaying, and prepares the following entry.
+     */
+    fun onEngineAutoAdvanced(entry: PlaybackQueueEntry)
     fun onPositionTick(positionMs: Long)
 
     fun release()
