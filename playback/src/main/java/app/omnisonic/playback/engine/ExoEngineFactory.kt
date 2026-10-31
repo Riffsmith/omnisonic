@@ -35,13 +35,19 @@ class ExoEngineFactory(
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
-        val player = ExoPlayer.Builder(context, EngineRenderersFactory(context, config, processors))
+        val renderersFactory = EngineRenderersFactory(context, config, processors)
+        val player = ExoPlayer.Builder(context, renderersFactory)
             .setLoadControl(loadControl)
             .setClock(clock)
             .setAudioAttributes(ENGINE_AUDIO_ATTRIBUTES, false)
             .setWakeMode(config.wakeMode.toPlayerWakeMode())
             .build()
-        return ExoAudioEngine(config, player)
+        return ExoAudioEngine(
+            config = config,
+            player = player,
+            extensionAvailable = audioExtensionRendererAvailable(),
+            offloadEffective = renderersFactory.offloadModeSurvived,
+        )
     }
 
     private class EngineRenderersFactory(
@@ -49,6 +55,9 @@ class ExoEngineFactory(
         private val config: EngineConfig,
         private val processors: () -> Array<AudioProcessor>,
     ) : DefaultRenderersFactory(context) {
+
+        var offloadModeSurvived: Boolean = false
+            private set
 
         init {
             setExtensionRendererMode(
@@ -65,12 +74,15 @@ class ExoEngineFactory(
             enableFloatOutput: Boolean,
             enableAudioTrackPlaybackParams: Boolean,
         ): AudioSink {
+            val wired = processors()
+            offloadModeSurvived = config.offloadMode != OffloadMode.DISABLED && wired.isEmpty()
             val sink = DefaultAudioSink.Builder(context)
-                .setAudioProcessors(processors())
+                .setAudioProcessors(wired)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                 .build()
-            sink.setOffloadMode(config.offloadMode.toSinkOffloadMode())
+            val effectiveOffload = if (wired.isEmpty()) config.offloadMode else OffloadMode.DISABLED
+            sink.setOffloadMode(effectiveOffload.toSinkOffloadMode())
             return sink
         }
 
@@ -86,15 +98,34 @@ class ExoEngineFactory(
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
+
+        val EXTENSION_AUDIO_RENDERER_CLASSES = listOf(
+            "androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer",
+            "androidx.media3.decoder.opus.LibopusAudioRenderer",
+            "androidx.media3.decoder.flac.LibflacAudioRenderer",
+            "androidx.media3.decoder.midi.MidiRenderer",
+        )
+
+        fun audioExtensionRendererAvailable(): Boolean =
+            EXTENSION_AUDIO_RENDERER_CLASSES.any { runCatching { Class.forName(it) }.isSuccess }
     }
 }
 
 internal class ExoAudioEngine(
-    private val config: EngineConfig,
+    config: EngineConfig,
     override val player: Player,
+    extensionAvailable: Boolean,
+    offloadEffective: Boolean,
 ) : AudioEngine {
 
-    override fun info(): EngineInfo = EngineInfo(config, loudnessCodecAttached = false)
+    private val info = EngineInfo(
+        config = config,
+        loudnessCodecAttached = false,
+        extensionAvailable = extensionAvailable,
+        offloadEffective = offloadEffective,
+    )
+
+    override fun info(): EngineInfo = info
 
     override fun release() {
         player.release()

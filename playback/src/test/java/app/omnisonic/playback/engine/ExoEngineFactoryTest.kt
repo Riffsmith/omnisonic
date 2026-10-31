@@ -55,4 +55,48 @@ class ExoEngineFactoryTest {
         )
         engine.release()
     }
+
+    @Test
+    fun `offload is not effective while any sink processor is wired`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val factory = ExoEngineFactory(context) {
+            arrayOf(
+                ReplayGainAudioProcessor(),
+                PeqAudioProcessor(),
+                MonoAudioProcessor(),
+                FadeAudioProcessor(),
+            )
+        }
+        val engine = factory.create(EngineConfig(offloadMode = OffloadMode.ENABLED))
+        try {
+            val info = engine.info()
+            assertThat(info.offloadEffective).isFalse()
+            assertThat(info.extensionAvailable).isFalse()
+        } finally {
+            engine.release()
+        }
+    }
+
+    @Test
+    fun `requested offload survives when no sink processors are wired`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = ExoEngineFactory(context) { emptyArray() }
+            .create(EngineConfig(offloadMode = OffloadMode.ENABLED))
+        try {
+            assertThat(engine.info().offloadEffective).isTrue()
+        } finally {
+            engine.release()
+        }
+    }
+
+    @Test
+    fun `offload stays ineffective when the request was disabled`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = ExoEngineFactory(context) { emptyArray() }.create(EngineConfig())
+        try {
+            assertThat(engine.info().offloadEffective).isFalse()
+        } finally {
+            engine.release()
+        }
+    }
 }
