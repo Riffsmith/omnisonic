@@ -53,7 +53,7 @@ class OmniForwardingPlayerTest {
 
     private lateinit var context: Context
     private lateinit var settings: PlaybackSettingsStore
-    private lateinit var processors: SinkProcessorChain
+    private lateinit var chainFactory: SinkProcessorChainFactory
     private lateinit var cacheManager: PlaybackCacheManager
     private lateinit var engineFactory: AudioEngineFactory
     private lateinit var scope: CoroutineScope
@@ -69,7 +69,7 @@ class OmniForwardingPlayerTest {
         context = ApplicationProvider.getApplicationContext()
         settingsDir = java.nio.file.Files.createTempDirectory("t13-settings").toFile()
         settings = PlaybackSettingsStore.createAt(File(settingsDir, "playback.preferences_pb"))
-        processors = SinkProcessorChain()
+        chainFactory = SinkProcessorChainFactory()
         cacheDir = File(context.cacheDir, "t13-${System.nanoTime()}")
         cacheManager = PlaybackCacheManager(
             context = context,
@@ -81,7 +81,7 @@ class OmniForwardingPlayerTest {
         port = TestQueuePort()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         fakeClock = FakeClock(false)
-        engineFactory = ExoEngineFactory(context, fakeClock) { processors.toArray() }
+        engineFactory = ExoEngineFactory(context, fakeClock) { chainFactory.create().toArray() }
     }
 
     @After
@@ -96,8 +96,11 @@ class OmniForwardingPlayerTest {
         runCatching { cacheDir.deleteRecursively() }
     }
 
+    private val processors: SinkProcessorChain
+        get() = checkNotNull(chainFactory.active)
+
     private fun newPlayer(): OmniPlayerImpl =
-        OmniPlayerImpl(engineFactory, processors, cacheManager, settings, NoReplayGainSource, scope, port)
+        OmniPlayerImpl(engineFactory, chainFactory, cacheManager, settings, NoReplayGainSource, scope, port)
             .also { player = it }
 
     private fun newSession(): MediaSession =

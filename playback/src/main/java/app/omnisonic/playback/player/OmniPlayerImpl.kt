@@ -37,10 +37,11 @@ import kotlinx.coroutines.launch
 
 /**
  * Source building and sink configuration over swappable engines behind one
- * stable exposed player. The injected factory must be built from the same
- * [processors] chain so sink configuration survives engine swaps, and
- * [externalScope] must dispatch onto the engine's application thread — the
- * player is only ever touched from that dispatcher.
+ * stable exposed player. The injected engine factory must be wired to the same
+ * [SinkProcessorChainFactory] so every engine receives a fresh processor chain
+ * carrying the current [ProcessorConfig], and [externalScope] must dispatch
+ * onto the engine's application thread — the player is only ever touched from
+ * that dispatcher.
  *
  * [exposedPlayer] is an [OmniForwardingPlayer] around a stable
  * [QueueAwareBridge]; engine swaps never change the exposed identity and a new
@@ -59,7 +60,7 @@ import kotlinx.coroutines.launch
  */
 class OmniPlayerImpl(
     private val engineFactory: AudioEngineFactory,
-    private val processors: SinkProcessorChain,
+    private val chainFactory: SinkProcessorChainFactory,
     private val cacheManager: PlaybackCacheManager,
     private val settings: PlaybackSettings,
     private val replayGainSource: ReplayGainSource,
@@ -67,13 +68,13 @@ class OmniPlayerImpl(
     private val queuePort: QueueCommandPort,
 ) : OmniPlayer, QueueAwareBridge.Actions {
 
-    private var engine: AudioEngine = engineFactory.create(EngineConfig())
+    private var engine: AudioEngine
     private var engineConfig = EngineConfig()
-    private val bridge = QueueAwareBridge(engine.player.applicationLooper, queuePort.queueState, this)
-    private val exposed: OmniForwardingPlayer =
-        OmniForwardingPlayer(queuePort.queueState, queuePort, bridge) { release() }
-    private val mainHandler = Handler(engine.player.applicationLooper)
-    private val fadePauseAction = Runnable { pause() }
+    private lateinit var processors: SinkProcessorChain
+    private val bridge: QueueAwareBridge
+    private val exposed: OmniForwardingPlayer
+    private val mainHandler: Handler
+    private val fadePauseAction: Runnable
     private val settingsJobs = mutableListOf<Job>()
     private var startJob: Job? = null
     private var listener: OmniPlayerListener? = null
@@ -87,6 +88,8 @@ class OmniPlayerImpl(
     private var shortFadeMs = PlaybackSettingsStore.DEFAULT_SHORT_FADE_MS
     private var userPreampDb = 0f
     private var peqConfig: PeqConfig? = null
+    private var replayGainLinear = 1f
+    private var monoEnabled = false
     private var released = false
 
     private val engineListener = object : Player.Listener {
@@ -141,6 +144,14 @@ class OmniPlayerImpl(
     }
 
     init {
+        engine = engineFactory.create(EngineConfig())
+        processors = checkNotNull(chainFactory.active) {
+            "engine factory must be wired to the same sink processor chain factory"
+        }
+        bridge = QueueAwareBridge(engine.player.applicationLooper, queuePort.queueState, this)
+        exposed = OmniForwardingPlayer(queuePort.queueState, queuePort, bridge) { release() }
+        mainHandler = Handler(engine.player.applicationLooper)
+        fadePauseAction = Runnable { pause() }
         engine.player.addListener(engineListener)
         observeSettings()
         observeQueue()
@@ -221,16 +232,18 @@ class OmniPlayerImpl(
     }
 
     override fun setReplayGainLinear(multiplier: Float) {
-        processors.replayGain.setLinearFactor(multiplier)
+        replayGainLinear = multiplier
+        pushConfig()
     }
 
     override fun setMono(enabled: Boolean) {
-        processors.mono.setEnabled(enabled)
+        monoEnabled = enabled
+        pushConfig()
     }
 
     override fun setPeq(config: PeqConfig?) {
         peqConfig = config
-        applyPeq()
+        pushConfig()
     }
 
     override fun fadePause() {
@@ -277,6 +290,9 @@ class OmniPlayerImpl(
             )
         }
         engine = newEngine
+        processors = checkNotNull(chainFactory.active) {
+            "engine factory must be wired to the same sink processor chain factory"
+        }
         newEngine.player.addListener(engineListener)
         newEngine.player.playbackParameters = PlaybackParameters(speed, pitch)
         if (currentStream != null) startCurrentStream(restorePosition, playWhenReady = wasPlaying)
@@ -391,10 +407,10 @@ class OmniPlayerImpl(
                 SettingsSnapshot(cacheFirst, mono, preampDb, fadeMs)
             }.collect { snapshot ->
                 cacheManager.defaultCacheFirst = snapshot.cacheFirst
-                processors.mono.setEnabled(snapshot.mono)
+                monoEnabled = snapshot.mono
                 userPreampDb = snapshot.preampDb
                 shortFadeMs = snapshot.shortFadeMs
-                applyPeq()
+                pushConfig()
             }
         }
     }
@@ -407,7 +423,8 @@ class OmniPlayerImpl(
             normalisation = settings.replayGainNormalisation.first(),
             targetLoudnessLufs = settings.replayGainTargetLoudnessLufs.first(),
         )
-        processors.replayGain.setLinearFactor(ReplayGainSelector.linearMultiplier(gainDb))
+        replayGainLinear = ReplayGainSelector.linearMultiplier(gainDb)
+        pushConfig()
     }
 
     private fun adoptAutoAdvance(mediaItem: MediaItem?) {
@@ -476,11 +493,17 @@ class OmniPlayerImpl(
                     .build(),
             )
 
-    private fun applyPeq() {
+    private fun pushConfig() {
         val configured = peqConfig
         val effective = configured?.copy(preampDb = configured.preampDb + userPreampDb)
             ?: PeqConfig(preampDb = userPreampDb)
-        processors.peq.setPeqConfig(effective)
+        chainFactory.updateConfig(
+            ProcessorConfig(
+                replayGainLinear = replayGainLinear,
+                monoEnabled = monoEnabled,
+                peq = effective,
+            ),
+        )
     }
 
     private data class SettingsSnapshot(

@@ -60,7 +60,7 @@ class OmniPlayerImplTest {
 
     private lateinit var context: Context
     private lateinit var settings: PlaybackSettingsStore
-    private lateinit var processors: SinkProcessorChain
+    private lateinit var chainFactory: SinkProcessorChainFactory
     private lateinit var cacheManager: PlaybackCacheManager
     private lateinit var mediaDataSources: MediaDataSourceFactoryProvider
     private lateinit var providerClients: MutableMap<Long, OkHttpClient>
@@ -79,7 +79,7 @@ class OmniPlayerImplTest {
         server = MockWebServer().apply { start() }
         settingsDir = java.nio.file.Files.createTempDirectory("t6-settings").toFile()
         settings = PlaybackSettingsStore.createAt(File(settingsDir, "playback.preferences_pb"))
-        processors = SinkProcessorChain()
+        chainFactory = SinkProcessorChainFactory()
         cacheDir = File(context.cacheDir, "t6-${System.nanoTime()}")
         providerClients = mutableMapOf(1L to OkHttpClient())
         mediaDataSources = MediaDataSourceFactoryProvider { id -> providerClients.getValue(id) }
@@ -93,7 +93,7 @@ class OmniPlayerImplTest {
         port = TestQueuePort()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         fakeClock = FakeClock(false)
-        engineFactory = ExoEngineFactory(context, fakeClock) { processors.toArray() }
+        engineFactory = ExoEngineFactory(context, fakeClock) { chainFactory.create().toArray() }
     }
 
     @After
@@ -281,7 +281,7 @@ class OmniPlayerImplTest {
 
         player.fadePause()
 
-        assertThat(processors.fade.isActive()).isFalse()
+        assertThat(processors.fade.isIdle()).isTrue()
         assertThat(player.exposedPlayer().playWhenReady).isFalse()
     }
 
@@ -409,8 +409,11 @@ class OmniPlayerImplTest {
         assertThat(server.requestCount).isEqualTo(0)
     }
 
+    private val processors: SinkProcessorChain
+        get() = checkNotNull(chainFactory.active)
+
     private fun newPlayer(rgSource: ReplayGainSource = NoReplayGainSource): OmniPlayerImpl =
-        OmniPlayerImpl(engineFactory, processors, cacheManager, settings, rgSource, scope, port)
+        OmniPlayerImpl(engineFactory, chainFactory, cacheManager, settings, rgSource, scope, port)
             .also { player = it }
 
     private fun entry(providerId: Long = 1L, externalId: String = "song-1", queueItemId: Long? = null) = PlaybackQueueEntry(

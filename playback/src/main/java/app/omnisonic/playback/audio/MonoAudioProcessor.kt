@@ -4,6 +4,11 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
 
+/**
+ * Stereo-to-mono downmix. Stays active after the first configure and passes
+ * non-stereo or disabled input through unchanged, so the toggle takes effect
+ * on subsequent samples without a sink reconfigure.
+ */
 class MonoAudioProcessor : BaseAudioProcessor() {
     private var configuredFormat: AudioProcessor.AudioFormat? = null
     private var enabled = false
@@ -21,12 +26,12 @@ class MonoAudioProcessor : BaseAudioProcessor() {
         return inputAudioFormat
     }
 
-    override fun isActive(): Boolean =
-        enabled && configuredFormat != null && configuredFormat!!.channelCount == 2
+    override fun isActive(): Boolean = configuredFormat != null
 
     override fun queueInput(inputBuffer: ByteBuffer) {
+        if (inputBuffer.remaining() == 0) return
         val encoding = configuredFormat!!.encoding
-        if (configuredFormat!!.channelCount != 2) {
+        if (!enabled || configuredFormat!!.channelCount != 2) {
             replaceOutputBuffer(inputBuffer.remaining()).put(inputBuffer).flip()
             return
         }

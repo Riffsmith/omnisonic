@@ -12,6 +12,11 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+/**
+ * Parametric EQ. Stays active after the first configure and applies a neutral
+ * transform when no bands or preamp are configured, so a runtime config change
+ * takes effect on subsequent samples without a sink reconfigure.
+ */
 class PeqAudioProcessor : BaseAudioProcessor() {
     private var configuredFormat: AudioProcessor.AudioFormat? = null
     private var config: PeqConfig = PeqConfig()
@@ -40,13 +45,10 @@ class PeqAudioProcessor : BaseAudioProcessor() {
         return inputAudioFormat
     }
 
-    override fun isActive(): Boolean {
-        val format = configuredFormat ?: return false
-        return format.channelCount <= MAX_CHANNELS &&
-            (config.bands.isNotEmpty() || config.preampDb != 0f)
-    }
+    override fun isActive(): Boolean = configuredFormat != null
 
     override fun queueInput(inputBuffer: ByteBuffer) {
+        if (inputBuffer.remaining() == 0) return
         val format = configuredFormat!!
         val encoding = format.encoding
         val channels = format.channelCount

@@ -4,6 +4,11 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
 
+/**
+ * Sink fade. Stays active after the first configure and applies a neutral
+ * gain when no fade is armed, so a mid-stream [beginFadeOut]/[beginFadeIn]
+ * takes effect on subsequent samples without a sink reconfigure.
+ */
 class FadeAudioProcessor : BaseAudioProcessor() {
     private var configuredFormat: AudioProcessor.AudioFormat? = null
     private var fadeDurationMs = 0L
@@ -32,9 +37,10 @@ class FadeAudioProcessor : BaseAudioProcessor() {
         return inputAudioFormat
     }
 
-    override fun isActive(): Boolean = framesRemaining > 0L
+    override fun isActive(): Boolean = configuredFormat != null
 
     override fun queueInput(inputBuffer: ByteBuffer) {
+        if (inputBuffer.remaining() == 0) return
         val format = configuredFormat!!
         val encoding = format.encoding
         val channels = format.channelCount

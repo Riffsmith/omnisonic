@@ -83,12 +83,17 @@ class PeqAudioProcessorTest {
     }
 
     @Test
-    fun `inactive with empty config and active with preamp`() {
+    fun `active once configured with neutral output for an empty config`() {
         val processor = PeqAudioProcessor()
-        processor.configure(format())
         assertThat(processor.isActive()).isFalse()
+        processor.configure(format())
+        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.process(shortsBuffer(shortArrayOf(1000, 1000))).readShorts())
+            .isEqualTo(shortArrayOf(1000, 1000))
         processor.setPeqConfig(PeqConfig(preampDb = -3f))
         assertThat(processor.isActive()).isTrue()
+        assertThat(processor.process(shortsBuffer(shortArrayOf(1000, 1000))).readShorts())
+            .isEqualTo(shortArrayOf(708, 708))
     }
 
     @Test

@@ -61,12 +61,17 @@ class ReplayGainAudioProcessorTest {
     }
 
     @Test
-    fun `inactive when neutral and active after factor set`() {
+    fun `active once configured with neutral output until the factor changes`() {
         val processor = ReplayGainAudioProcessor()
-        processor.configure(format())
         assertThat(processor.isActive()).isFalse()
+        processor.configure(format())
+        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.process(shortsBuffer(shortArrayOf(1000, 1000))).readShorts())
+            .isEqualTo(shortArrayOf(1000, 1000))
         processor.setLinearFactor(0.5f)
         assertThat(processor.isActive()).isTrue()
+        assertThat(processor.process(shortsBuffer(shortArrayOf(1000, 1000))).readShorts())
+            .isEqualTo(shortArrayOf(500, 500))
     }
 
     @Test

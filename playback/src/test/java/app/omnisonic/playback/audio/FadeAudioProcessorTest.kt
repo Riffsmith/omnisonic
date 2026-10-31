@@ -15,7 +15,8 @@ class FadeAudioProcessorTest {
         assertThat(out[0]).isEqualTo(0)
         assertThat(out[96]).isEqualTo(500)
         assertThat(out[191]).isEqualTo(995)
-        assertThat(processor.isActive()).isFalse()
+        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.isIdle()).isTrue()
         assertThat(processor.process(shortsBuffer(shortArrayOf(1000, 1000))).readShorts())
             .isEqualTo(shortArrayOf(1000, 1000))
     }
@@ -29,7 +30,8 @@ class FadeAudioProcessorTest {
         assertThat(out[0]).isEqualTo(1000)
         assertThat(out[96]).isEqualTo(500)
         assertThat(out[191]).isEqualTo(5)
-        assertThat(processor.isActive()).isFalse()
+        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.isIdle()).isTrue()
     }
 
     @Test
@@ -46,8 +48,10 @@ class FadeAudioProcessorTest {
         processor.configure(format(channels = 1))
         processor.beginFadeIn(10)
         assertThat(processor.isActive()).isTrue()
+        assertThat(processor.isIdle()).isFalse()
         processor.flush()
-        assertThat(processor.isActive()).isFalse()
+        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.isIdle()).isTrue()
     }
 
     @Test
@@ -55,8 +59,19 @@ class FadeAudioProcessorTest {
         val processor = FadeAudioProcessor()
         processor.configure(format(channels = 1))
         processor.beginFadeIn(0)
-        assertThat(processor.isActive()).isFalse()
+        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.isIdle()).isTrue()
         assertThat(processor.process(shortsBuffer(shortArrayOf(500))).readShorts())
             .isEqualTo(shortArrayOf(500))
+    }
+
+    @Test
+    fun `stays active after configure and passes through while idle`() {
+        val processor = FadeAudioProcessor()
+        assertThat(processor.isActive()).isFalse()
+        processor.configure(format(channels = 1))
+        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.process(shortsBuffer(shortArrayOf(700, 700))).readShorts())
+            .isEqualTo(shortArrayOf(700, 700))
     }
 }

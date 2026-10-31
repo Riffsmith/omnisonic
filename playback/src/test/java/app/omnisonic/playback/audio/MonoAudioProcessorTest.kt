@@ -43,11 +43,13 @@ class MonoAudioProcessorTest {
     }
 
     @Test
-    fun `inactive for non-stereo`() {
+    fun `non-stereo input passes through while active`() {
         val processor = MonoAudioProcessor()
         processor.setEnabled(true)
         processor.configure(format(channels = 1))
-        assertThat(processor.isActive()).isFalse()
+        assertThat(processor.isActive()).isTrue()
+        val out = processor.process(shortsBuffer(shortArrayOf(300, 400, 500)))
+        assertThat(out.readShorts()).isEqualTo(shortArrayOf(300, 400, 500))
         processor.configure(format(channels = 2))
         assertThat(processor.isActive()).isTrue()
     }
@@ -57,13 +59,17 @@ class MonoAudioProcessorTest {
         val processor = MonoAudioProcessor()
         processor.configure(format())
         assertThat(processor.isEnabled).isFalse()
-        assertThat(processor.isActive()).isFalse()
+        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.process(shortsBuffer(shortArrayOf(1000, -500))).readShorts())
+            .isEqualTo(shortArrayOf(1000, -500))
 
         processor.setEnabled(true)
         assertThat(processor.isEnabled).isTrue()
-        assertThat(processor.isActive()).isTrue()
+        assertThat(processor.process(shortsBuffer(shortArrayOf(1000, -500))).readShorts())
+            .isEqualTo(shortArrayOf(250, 250))
 
         processor.setEnabled(false)
-        assertThat(processor.isActive()).isFalse()
+        assertThat(processor.process(shortsBuffer(shortArrayOf(1000, -500))).readShorts())
+            .isEqualTo(shortArrayOf(1000, -500))
     }
 }
