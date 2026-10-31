@@ -46,7 +46,7 @@ import okhttp3.Response
 class SubsonicClient(
     private val connection: ProviderConnection,
     private val http: OkHttpClient,
-    private val onPreferredBlockChange: (Int) -> Unit = {},
+    private val onPreferredBlockChange: suspend (Int) -> Unit = {},
 ) : MediaProvider {
 
     private val failover = BlockFailover(connection, onPreferredBlockChange)

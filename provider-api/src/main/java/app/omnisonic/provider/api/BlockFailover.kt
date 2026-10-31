@@ -11,52 +11,76 @@ sealed interface BlockAttempt<out T> {
 /**
  * Tries the remembered working block first, then the other configured block on
  * transport errors or >=500 responses; 4xx responses are terminal because both
- * blocks share the same credentials. Learned preference is surfaced through
- * [onPreferredBlockChange] with [ProviderConnection.PRIMARY_BLOCK] or
- * [ProviderConnection.SECONDARY_BLOCK] for the caller to persist.
+ * blocks share the same credentials. Hysteresis: only [FLIP_FAILURE_THRESHOLD]
+ * consecutive primary failures flip the preference to the secondary. While the
+ * secondary is preferred, the primary is re-probed after
+ * [DEFAULT_PREFER_PRIMARY_RETRY_INTERVAL_MS]; a successful probe reclaims the
+ * primary. Learned preference is surfaced through [onPreferredBlockChange]
+ * with [ProviderConnection.PRIMARY_BLOCK] or [ProviderConnection.SECONDARY_BLOCK]
+ * for the caller to persist.
  */
 class BlockFailover(
     private val connection: ProviderConnection,
-    private val onPreferredBlockChange: (Int) -> Unit = {},
+    private val onPreferredBlockChange: suspend (Int) -> Unit = {},
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val preferPrimaryRetryIntervalMs: Long = DEFAULT_PREFER_PRIMARY_RETRY_INTERVAL_MS,
 ) {
     var preferredBlock: Int = connection.lastWorkingBlock ?: ProviderConnection.PRIMARY_BLOCK
         private set
 
+    private var primaryFailures = 0
+    private var lastPrimaryProbeAtMs = clock()
+
     suspend fun <T> attempt(operation: suspend (ConnectionBlock) -> BlockAttempt<T>): BlockAttempt<T> {
-        val blocks = buildList {
-            add(ProviderConnection.PRIMARY_BLOCK to connection.primary)
-            connection.secondary?.let { add(ProviderConnection.SECONDARY_BLOCK to it) }
-        }
-        val ordered = if (blocks.size > 1 && blocks.any { it.first == preferredBlock }) {
-            blocks.sortedBy { if (it.first == preferredBlock) 0 else 1 }
-        } else {
-            blocks
-        }
-
-        for (index in ordered.indices) {
-            val (order, block) = ordered[index]
-            when (val outcome = operation(block)) {
-                is BlockAttempt.Success -> {
-                    if (order != preferredBlock) {
-                        preferredBlock = order
-                        onPreferredBlockChange(order)
+        val secondary = connection.secondary
+        if (secondary != null && preferredBlock == ProviderConnection.SECONDARY_BLOCK) {
+            if (clock() - lastPrimaryProbeAtMs >= preferPrimaryRetryIntervalMs) {
+                when (val probe = operation(connection.primary)) {
+                    is BlockAttempt.Success -> {
+                        primaryFailures = 0
+                        adopt(ProviderConnection.PRIMARY_BLOCK)
+                        return probe
                     }
-                    return outcome
-                }
 
-                is BlockAttempt.FatalError -> return outcome
-
-                else -> {
-                    val worthFlipping = outcome is BlockAttempt.TransportError ||
-                        (outcome is BlockAttempt.StatusError && outcome.httpCode >= FLIP_STATUS_MIN)
-                    if (!worthFlipping || index == ordered.lastIndex) return outcome
+                    is BlockAttempt.FatalError -> return probe
+                    else -> lastPrimaryProbeAtMs = clock()
                 }
             }
+            return operation(secondary)
         }
-        return BlockAttempt.FatalError(IllegalStateException("no connection blocks configured"))
+
+        return when (val outcome = operation(connection.primary)) {
+            is BlockAttempt.Success -> {
+                primaryFailures = 0
+                outcome
+            }
+
+            is BlockAttempt.FatalError -> outcome
+
+            else -> {
+                val worthFlipping = outcome is BlockAttempt.TransportError ||
+                    (outcome is BlockAttempt.StatusError && outcome.httpCode >= FLIP_STATUS_MIN)
+                primaryFailures += 1
+                if (!worthFlipping || secondary == null || primaryFailures < FLIP_FAILURE_THRESHOLD) {
+                    return outcome
+                }
+                adopt(ProviderConnection.SECONDARY_BLOCK)
+                operation(secondary)
+            }
+        }
+    }
+
+    private suspend fun adopt(block: Int) {
+        preferredBlock = block
+        if (block == ProviderConnection.SECONDARY_BLOCK) {
+            lastPrimaryProbeAtMs = clock()
+        }
+        onPreferredBlockChange(block)
     }
 
     companion object {
         const val FLIP_STATUS_MIN = 500
+        const val FLIP_FAILURE_THRESHOLD = 2
+        const val DEFAULT_PREFER_PRIMARY_RETRY_INTERVAL_MS = 5 * 60_000L
     }
 }

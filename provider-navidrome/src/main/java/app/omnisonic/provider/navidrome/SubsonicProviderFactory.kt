@@ -13,12 +13,16 @@ import okhttp3.OkHttpClient
 class SubsonicProviderFactory(
     private val httpClient: OkHttpClient? = null,
     private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),
+    private val onPreferredBlockChange: suspend (providerId: Long, block: Int) -> Unit = { _, _ -> },
 ) : MediaProviderFactory {
 
     override fun apiType(): String = "subsonic"
 
     override fun create(connection: ProviderConnection): MediaProvider =
-        SubsonicClient(connection, httpClient ?: defaultClient(connection))
+        SubsonicClient(
+            connection,
+            httpClient ?: defaultClient(connection),
+        ) { block -> onPreferredBlockChange(connection.providerId, block) }
 
     private fun defaultClient(connection: ProviderConnection): OkHttpClient =
         HttpClientFactory(logger).create(

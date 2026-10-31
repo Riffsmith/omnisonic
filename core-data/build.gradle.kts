@@ -44,6 +44,7 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(libs.moshi)
     implementation(libs.moshi.kotlin)
+    implementation(libs.okhttp)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     ksp(libs.room.compiler)
