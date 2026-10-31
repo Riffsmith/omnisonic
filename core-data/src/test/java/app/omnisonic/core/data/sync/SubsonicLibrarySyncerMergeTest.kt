@@ -386,7 +386,7 @@ private open class FakeSyncProvider(
 
     override fun downloadUrl(externalId: String, maxBitRateKbps: Int?, format: String?): String? = null
 
-    override suspend fun submitPlays(externalId: String, playCount: Int, lastPlayedAtMs: Long?): Int = 0
+    override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int = timestamps.size
 
     override suspend fun sendNowPlaying(externalId: String, playedMs: Long): Boolean = false
 

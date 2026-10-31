@@ -189,7 +189,7 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
 
     override fun downloadUrl(externalId: String, maxBitRateKbps: Int?, format: String?): String? = null
 
-    override suspend fun submitPlays(externalId: String, playCount: Int, lastPlayedAtMs: Long?): Int = playCount
+    override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int = timestamps.size
 
     override suspend fun sendNowPlaying(externalId: String, playedMs: Long): Boolean = true
 

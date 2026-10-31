@@ -15,6 +15,7 @@ data class OutboxPayload(
     val userRating: Int? = null,
     val resumePointMs: Long? = null,
     val lastPlayedAt: Long? = null,
+    val playTimestamps: List<Long>? = null,
 )
 
 @Singleton
@@ -60,23 +61,36 @@ class OutboxQueue @Inject constructor(
         providerId: Long,
         mediaType: String,
         externalId: String,
-        playCountDelta: Int,
+        playedAtMs: Long,
         now: Long,
     ) {
-        enqueueMediaChange(providerId, mediaType, externalId, ACTION_PLAY_COUNT, OutboxPayload(playCountDelta = playCountDelta), now)
+        enqueueMediaChange(
+            providerId,
+            mediaType,
+            externalId,
+            ACTION_PLAY_COUNT,
+            OutboxPayload(playCountDelta = 1, lastPlayedAt = playedAtMs, playTimestamps = listOf(playedAtMs)),
+            now,
+        )
     }
 
     private fun decode(encoded: String?): OutboxPayload =
         encoded?.let { runCatching { payloadAdapter.fromJson(it) }.getOrNull() } ?: OutboxPayload()
 
     private fun OutboxPayload.merge(incoming: OutboxPayload): OutboxPayload = if (incoming.playCountDelta != null) {
-        copy(playCountDelta = (playCountDelta ?: 0) + incoming.playCountDelta)
+        copy(
+            playCountDelta = (playCountDelta ?: 0) + incoming.playCountDelta,
+            lastPlayedAt = incoming.lastPlayedAt ?: lastPlayedAt,
+            playTimestamps = ((playTimestamps.orEmpty()) + incoming.playTimestamps.orEmpty())
+                .takeLast(MAX_PLAY_TIMESTAMPS),
+        )
     } else {
         copy(
             isFavorite = incoming.isFavorite ?: isFavorite,
             userRating = incoming.userRating ?: userRating,
             resumePointMs = incoming.resumePointMs ?: resumePointMs,
             lastPlayedAt = incoming.lastPlayedAt ?: lastPlayedAt,
+            playTimestamps = incoming.playTimestamps ?: playTimestamps,
         )
     }
 
@@ -85,5 +99,8 @@ class OutboxQueue @Inject constructor(
         const val ACTION_FAVORITE = "favorite"
         const val ACTION_USER_RATING = "user_rating"
         const val ACTION_RESUME_POINT = "resume_point"
+
+        /** Payload cap; overflow keeps the newest timestamps. */
+        const val MAX_PLAY_TIMESTAMPS = 100
     }
 }

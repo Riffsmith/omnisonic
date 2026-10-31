@@ -25,6 +25,7 @@ data class OutboxActionPayload(
     val userRating: Int? = null,
     val resumePointMs: Long? = null,
     val lastPlayedAt: Long? = null,
+    val playTimestamps: List<Long>? = null,
 )
 
 interface OutboxStore {
@@ -42,6 +43,8 @@ class OutboxDrainer(
 ) {
     data class DrainReport(val completed: Int, val progressed: Int, val deferred: Int)
 
+    private val probedProviders = mutableSetOf<Long>()
+
     suspend fun drain(providerId: Long? = null): DrainReport {
         var completed = 0
         var progressed = 0
@@ -53,6 +56,7 @@ class OutboxDrainer(
                 deferred++
                 continue
             }
+            if (task.action == ACTION_PLAY_COUNT) probeOnce(task.providerId, provider)
             val outcome = runCatching { execute(task, provider) }
                 .getOrElse { error ->
                     logger.error(TAG, "outbox task ${task.id} failed", error)
@@ -71,10 +75,21 @@ class OutboxDrainer(
         return DrainReport(completed, progressed, deferred)
     }
 
+    /** Probes a provider once per drainer instance before its first play-count task. */
+    private suspend fun probeOnce(providerId: Long, provider: MediaProvider) {
+        if (providerId in probedProviders) return
+        probedProviders += providerId
+        try {
+            provider.probe()
+        } catch (failure: Exception) {
+            logger.warn(TAG, "capability probe failed for provider $providerId: ${failure.message}")
+        }
+    }
+
     private suspend fun execute(task: OutboxTask, provider: MediaProvider): TaskOutcome {
         val payload = decodePayload(task.payloadJson)
         return when (task.action) {
-            ACTION_PLAY_COUNT -> handlePlayCount(task, payload.playCountDelta, payload.lastPlayedAt, provider)
+            ACTION_PLAY_COUNT -> handlePlayCount(task, payload, provider)
             ACTION_FAVORITE -> handleSimple(task) {
                 payload.isFavorite?.let { provider.setFavorite(mediaTypeOf(task.mediaType), task.externalId, it) }
             }
@@ -96,17 +111,36 @@ class OutboxDrainer(
         }
     }
 
-    private suspend fun handlePlayCount(task: OutboxTask, delta: Int?, lastPlayedAt: Long?, provider: MediaProvider): TaskOutcome {
+    private suspend fun handlePlayCount(task: OutboxTask, payload: OutboxActionPayload, provider: MediaProvider): TaskOutcome {
+        val delta = payload.playCountDelta
         if (delta == null || delta <= 0) {
             logger.warn(TAG, "outbox task ${task.id} has no positive play delta; dropping")
             return TaskOutcome.Completed
         }
-        val submitted = provider.submitPlays(task.externalId, delta, lastPlayedAt)
+        val timestamps = payload.playTimestamps
+            ?.takeIf { it.isNotEmpty() }
+            ?: payload.lastPlayedAt?.let { lastPlayedAt -> List(delta) { index -> lastPlayedAt + index } }
+            ?: emptyList()
+        if (timestamps.isEmpty()) {
+            logger.warn(TAG, "outbox task ${task.id} carries no play timestamps; dropping")
+            return TaskOutcome.Completed
+        }
+        val submitted = provider.submitPlays(task.externalId, timestamps)
         return when {
-            submitted >= delta -> TaskOutcome.Completed
+            submitted >= timestamps.size -> TaskOutcome.Completed
             submitted > 0 -> {
-                val remaining = encodePayload(playCountDelta = delta - submitted, lastPlayedAt = lastPlayedAt)
-                store.progress(task.id, remaining, clock())
+                val remaining = timestamps.drop(submitted)
+                store.progress(
+                    task.id,
+                    payloadAdapter.toJson(
+                        OutboxActionPayload(
+                            playCountDelta = remaining.size,
+                            lastPlayedAt = remaining.firstOrNull(),
+                            playTimestamps = remaining,
+                        ),
+                    ),
+                    clock(),
+                )
                 TaskOutcome.Progressed
             }
 
@@ -143,9 +177,6 @@ class OutboxDrainer(
 
     private fun decodePayload(encoded: String?): OutboxActionPayload =
         encoded?.let { runCatching { payloadAdapter.fromJson(it) }.getOrNull() } ?: OutboxActionPayload()
-
-    private fun encodePayload(playCountDelta: Int, lastPlayedAt: Long?): String =
-        payloadAdapter.toJson(OutboxActionPayload(playCountDelta = playCountDelta, lastPlayedAt = lastPlayedAt))
 
     private val payloadAdapter = moshi.adapter(OutboxActionPayload::class.java)
 

@@ -4,6 +4,7 @@ import app.omnisonic.core.data.db.entity.ProviderEntity
 import app.omnisonic.core.data.json.OmnisonicJson
 import app.omnisonic.core.data.security.CredentialCodec
 import app.omnisonic.core.data.security.SecretPayload
+import app.omnisonic.provider.api.BackdateScrobbles
 import app.omnisonic.provider.api.ConnectionBlock
 import app.omnisonic.provider.api.ProviderAuthMethod
 import app.omnisonic.provider.api.ProviderConnection
@@ -39,6 +40,7 @@ class ProviderConfigMapper(
             apiKey = secrets.secretValues[SECRET_API_KEY],
             customHeaders = headers.filter { it.key.isNotBlank() },
             serverSoftwareHint = options.serverSoftwareHint,
+            backdateScrobbles = decodeBackdateMode(options.backdateScrobbles),
         )
     }
 
@@ -81,6 +83,12 @@ class ProviderConfigMapper(
             ?.authMode
             ?: AUTH_MODE_TOKEN
 
+    private fun decodeBackdateMode(raw: String?): BackdateScrobbles = when (raw?.trim()?.lowercase()) {
+        "on" -> BackdateScrobbles.ON
+        "off" -> BackdateScrobbles.OFF
+        else -> BackdateScrobbles.AUTO
+    }
+
     private val parametersAdapter = moshi.adapter(AuthParametersJson::class.java)
 
     companion object {
@@ -94,4 +102,7 @@ class ProviderConfigMapper(
 
 data class AuthParametersJson(val authMode: String? = null)
 
-data class OptionsJson(val serverSoftwareHint: String? = null)
+data class OptionsJson(
+    val serverSoftwareHint: String? = null,
+    val backdateScrobbles: String? = null,
+)

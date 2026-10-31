@@ -32,6 +32,7 @@ data class ProviderConnection(
     val apiKey: String? = null,
     val customHeaders: Map<String, String> = emptyMap(),
     val serverSoftwareHint: String? = null,
+    val backdateScrobbles: BackdateScrobbles = BackdateScrobbles.AUTO,
     val connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
     val readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
 ) {

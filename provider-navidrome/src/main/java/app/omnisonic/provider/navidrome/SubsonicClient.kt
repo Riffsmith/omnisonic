@@ -64,6 +64,7 @@ class SubsonicClient(
         val caps = ProviderCapabilities(
             extensionNames = extensions.mapNotNull { it.name }.toSet(),
             serverSoftwareHint = connection.serverSoftwareHint,
+            backdateScrobbles = connection.backdateScrobbles,
         )
         capabilities = caps
         return caps
@@ -305,14 +306,19 @@ class SubsonicClient(
     override fun downloadUrl(externalId: String, maxBitRateKbps: Int?, format: String?): String =
         mediaUrl("download", externalId, maxBitRateKbps, format)
 
-    override suspend fun submitPlays(externalId: String, playCount: Int, lastPlayedAtMs: Long?): Int {
-        if (playCount <= 0) return 0
-        val params = scrobbleParams(externalId, submission = true, timeMs = lastPlayedAtMs)
+    override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int {
+        if (timestamps.isEmpty()) return 0
         var accepted = 0
-        repeat(playCount) {
+        var previous = Long.MIN_VALUE
+        timestamps.forEach { raw ->
+            // Backdated times must be strictly increasing; ties advance by 1 ms.
+            val effective = if (raw <= previous) previous + 1 else raw
+            previous = effective
             // A rejected submission counts as not-accepted rather than aborting
             // the batch: the drainer reports partial acceptance as progress.
-            val envelope = runCatching { call(Endpoint.SCROBBLE, params) { it } }.getOrNull()
+            val envelope = runCatching {
+                call(Endpoint.SCROBBLE, scrobbleParams(externalId, submission = true, timeMs = effective)) { it }
+            }.getOrNull()
             if (envelope?.status == STATUS_OK) accepted++
         }
         return accepted

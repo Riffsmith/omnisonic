@@ -21,14 +21,32 @@ class OutboxQueueTest : DatabaseTestBase() {
         val provider = newProvider(id = 1)
         val queue = OutboxQueue(db, outboxDao, moshi)
 
-        queue.enqueuePlayCountDelta(provider.id, "track", "song-1", 1, now = 1_000)
-        queue.enqueuePlayCountDelta(provider.id, "track", "song-1", 2, now = 2_000)
+        queue.enqueuePlayCountDelta(provider.id, "track", "song-1", playedAtMs = 1_500, now = 1_000)
+        queue.enqueuePlayCountDelta(provider.id, "track", "song-1", playedAtMs = 2_500, now = 2_000)
 
         val items = outboxDao.selectByProvider(provider.id)
         assertThat(items).hasSize(1)
         val payload = payloadOf(items.single().payloadJson!!)
-        assertThat(payload.playCountDelta).isEqualTo(3)
+        assertThat(payload.playCountDelta).isEqualTo(2)
+        assertThat(payload.playTimestamps).containsExactly(1_500L, 2_500L).inOrder()
         assertThat(items.single().nextAttemptAt).isEqualTo(0)
+    }
+
+    @Test
+    fun playTimestampsCapAtHundredKeepingTheNewest() = runDbTest {
+        val provider = newProvider(id = 1)
+        val queue = OutboxQueue(db, outboxDao, moshi)
+
+        repeat(120) { index ->
+            queue.enqueuePlayCountDelta(provider.id, "track", "song-1", playedAtMs = index.toLong(), now = index.toLong())
+        }
+
+        val payload = payloadOf(outboxDao.selectByProvider(provider.id).single().payloadJson!!)
+        assertThat(payload.playCountDelta).isEqualTo(120)
+        assertThat(payload.playTimestamps).hasSize(100)
+        // Overflow keeps the newest timestamps.
+        assertThat(payload.playTimestamps!!.first()).isEqualTo(20L)
+        assertThat(payload.playTimestamps!!.last()).isEqualTo(119L)
     }
 
     @Test

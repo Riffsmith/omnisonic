@@ -110,12 +110,23 @@ data class ProviderDirectory(
 data class ProviderCapabilities(
     val extensionNames: Set<String> = emptySet(),
     val serverSoftwareHint: String? = null,
+    val backdateScrobbles: BackdateScrobbles = BackdateScrobbles.AUTO,
 ) {
     /**
-     * Backdated scrobbles are accepted when the instance advertises an
-     * OpenSubsonic extension whose spec documents server-side acceptance of
-     * explicit replay timestamps (formPost, transcodeOffset).
+     * Backdated scrobble support follows the D-8 policy: the per-provider
+     * override forces on/off, and `auto` enables it only when the configured
+     * server software is known to honor the scrobble `time` parameter.
      */
     val supportsBackdatedScrobbles: Boolean
-        get() = extensionNames.contains("formPost") || extensionNames.contains("transcodeOffset")
+        get() = when (backdateScrobbles) {
+            BackdateScrobbles.ON -> true
+            BackdateScrobbles.OFF -> false
+            BackdateScrobbles.AUTO -> serverSoftwareHint?.trim()?.lowercase() in KNOWN_BACKDATING_SERVERS
+        }
+
+    companion object {
+        val KNOWN_BACKDATING_SERVERS = setOf("navidrome")
+    }
 }
+
+enum class BackdateScrobbles { AUTO, ON, OFF }

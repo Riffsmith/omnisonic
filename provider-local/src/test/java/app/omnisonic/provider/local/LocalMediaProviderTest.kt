@@ -289,7 +289,7 @@ class LocalMediaProviderTest {
     @Test
     fun `user data operations are local no-ops that report success`(): Unit = runBlocking {
         assertThat(provider.probe().extensionNames).isEmpty()
-        assertThat(provider.submitPlays("500", 2, lastPlayedAtMs = 1_000)).isEqualTo(2)
+        assertThat(provider.submitPlays("500", listOf(1_000L, 1_000L))).isEqualTo(2)
         assertThat(provider.setFavorite(app.omnisonic.provider.api.ProviderMediaType.SONG, "500", favorite = true)).isTrue()
         assertThat(provider.setUserRating(app.omnisonic.provider.api.ProviderMediaType.SONG, "500", rating = 4)).isTrue()
         assertThat(provider.saveBookmark("500", positionMs = 1_000)).isTrue()

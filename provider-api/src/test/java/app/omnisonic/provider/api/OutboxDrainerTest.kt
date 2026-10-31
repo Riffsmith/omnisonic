@@ -83,13 +83,13 @@ class OutboxDrainerTest {
     @Test
     fun `play count delta fully submitted completes the task`() = runTest {
         val drain = drainer()
-        store.add("play_count", OutboxActionPayload(playCountDelta = 3))
+        store.add("play_count", OutboxActionPayload(playCountDelta = 3, playTimestamps = listOf(1_000L, 2_000L, 3_000L)))
         provider.submitPlaysResult = 3
 
         val report = drain.drain()
 
         assertEquals(1, report.completed)
-        assertEquals(listOf(RecordingProvider.SubmittedPlay("song-1", 3, null)), provider.submittedPlays)
+        assertEquals(listOf(RecordingProvider.SubmittedPlay("song-1", listOf(1_000L, 2_000L, 3_000L))), provider.submittedPlays)
     }
 
     @Test
@@ -100,26 +100,61 @@ class OutboxDrainerTest {
 
         drain.drain()
 
-        assertEquals(5_000L, provider.submittedPlays.single().lastPlayedAtMs)
+        assertEquals(listOf(5_000L), provider.submittedPlays.single().timestamps)
+    }
+
+    @Test
+    fun `legacy payload without timestamps still submits one play per delta`() = runTest {
+        val drain = drainer()
+        store.add("play_count", OutboxActionPayload(playCountDelta = 3, lastPlayedAt = 5_000L))
+        provider.submitPlaysResult = 3
+
+        drain.drain()
+
+        assertEquals(listOf(5_000L, 5_001L, 5_002L), provider.submittedPlays.single().timestamps)
     }
 
     @Test
     fun `partially submitted delta records progress without re-attempting accepted part`() = runTest {
         val drain = drainer()
-        val task = store.add("play_count", OutboxActionPayload(playCountDelta = 3, lastPlayedAt = 5_000L))
+        val task = store.add(
+            "play_count",
+            OutboxActionPayload(playCountDelta = 3, lastPlayedAt = 5_000L, playTimestamps = listOf(5_000L, 5_001L, 5_002L)),
+        )
         provider.submitPlaysResult = 1
 
         val report = drain.drain()
 
         assertEquals(1, report.progressed)
         val remaining = store.progressed.single { it.id == task.id }.payloadJson
-        assertEquals(OutboxActionPayload(playCountDelta = 2, lastPlayedAt = 5_000L), remaining?.let { payloadAdapter.fromJson(it) })
+        assertEquals(
+            OutboxActionPayload(playCountDelta = 2, lastPlayedAt = 5_001L, playTimestamps = listOf(5_001L, 5_002L)),
+            remaining?.let { payloadAdapter.fromJson(it) },
+        )
+    }
+
+    @Test
+    fun `first play count task probes the provider exactly once per drainer`() = runTest {
+        val drain = drainer()
+        store.add("play_count", OutboxActionPayload(playCountDelta = 1, lastPlayedAt = 5_000L))
+        provider.submitPlaysResult = 1
+
+        drain.drain()
+
+        assertEquals(1, provider.probed.size)
+
+        store.add("play_count", OutboxActionPayload(playCountDelta = 1, lastPlayedAt = 6_000L))
+        provider.submitPlaysResult = 1
+        drain.drain()
+
+        assertEquals(1, provider.probed.size)
     }
 
     @Test
     fun `zero submissions defers with base backoff`() = runTest {
         val drain = drainer()
-        store.add("play_count", OutboxActionPayload(playCountDelta = 2))
+        store.add("play_count", OutboxActionPayload(playCountDelta = 2, playTimestamps = listOf(1L, 2L)))
+        provider.submitPlaysResult = 0
 
         val report = drain.drain()
 

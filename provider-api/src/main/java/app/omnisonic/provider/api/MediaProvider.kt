@@ -27,10 +27,10 @@ interface MediaProvider {
     fun downloadUrl(externalId: String, maxBitRateKbps: Int? = null, format: String? = null): String?
 
     /**
-     * Reports [playCount] listens for [externalId]; returns how many submissions
-     * the server accepted (implementations may batch individual increments).
+     * Reports the given play timestamps to the server (one submission per
+     * timestamp); returns how many submissions the server accepted.
      */
-    suspend fun submitPlays(externalId: String, playCount: Int, lastPlayedAtMs: Long?): Int
+    suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int
 
     suspend fun sendNowPlaying(externalId: String, playedMs: Long = 0L): Boolean
     suspend fun setFavorite(mediaType: ProviderMediaType, externalId: String, favorite: Boolean): Boolean

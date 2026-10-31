@@ -5,6 +5,7 @@ import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.network.ConnectionSpec
 import app.omnisonic.core.network.HttpClientFactory
 import app.omnisonic.provider.api.AlbumListType
+import app.omnisonic.provider.api.BackdateScrobbles
 import app.omnisonic.provider.api.ConnectionBlock
 import app.omnisonic.provider.api.ProviderAlbumRequest
 import app.omnisonic.provider.api.ProviderAuthMethod
@@ -46,6 +47,8 @@ private fun testConnection(
     authMethod: ProviderAuthMethod = ProviderAuthMethod.TOKEN,
     apiKey: String? = null,
     username: String = "admin",
+    serverSoftwareHint: String? = null,
+    backdateScrobbles: BackdateScrobbles = BackdateScrobbles.AUTO,
 ): ProviderConnection = ProviderConnection(
     providerId = 1L,
     username = username,
@@ -54,6 +57,8 @@ private fun testConnection(
     secondary = secondary,
     authMethod = authMethod,
     apiKey = apiKey,
+    serverSoftwareHint = serverSoftwareHint,
+    backdateScrobbles = backdateScrobbles,
 )
 
 private fun testClient(
@@ -313,7 +318,7 @@ class SubsonicClientTest {
     }
 
     @Test
-    fun `probe records advertised extensions and gates backdated scrobbles`() = runBlocking {
+    fun `probe records advertised extensions and hint-gates backdated scrobbles`() = runBlocking {
         MockWebServer().use { server ->
             server.dispatcher = pathDispatcher(
                 mapOf(
@@ -325,21 +330,76 @@ class SubsonicClientTest {
                 ),
             )
             server.start()
-            val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+            val client = testClient(
+                testConnection(
+                    ConnectionBlock("http", server.hostName, server.port),
+                    serverSoftwareHint = "navidrome",
+                ),
+            )
 
             val capabilities = runBlocking { client.probe() }
 
             assertThat(capabilities.extensionNames).containsExactly("formPost", "transcodeOffset")
             assertThat(capabilities.supportsBackdatedScrobbles).isTrue()
 
-            runBlocking { client.submitPlays("song-1", 2, lastPlayedAtMs = 1_700_000_000_000) }
+            runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000, 1_700_000_000_000)) }
             server.takeRequest()
             server.takeRequest()
             val first = server.takeRequest().requestUrl!!
             val second = server.takeRequest().requestUrl!!
             assertThat(first.encodedPath).endsWith("/rest/scrobble.view")
             assertThat(first.queryParameter("time")).isEqualTo("1700000000000")
-            assertThat(second.queryParameter("time")).isEqualTo("1700000000000")
+            // Ties advance by exactly one millisecond.
+            assertThat(second.queryParameter("time")).isEqualTo("1700000000001")
+        }
+    }
+
+    @Test
+    fun `override on forces backdated times without a hint`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(emptyMap())
+            server.start()
+            val client = testClient(
+                testConnection(
+                    ConnectionBlock("http", server.hostName, server.port),
+                    backdateScrobbles = BackdateScrobbles.ON,
+                ),
+            )
+
+            val capabilities = runBlocking { client.probe() }
+
+            assertThat(capabilities.supportsBackdatedScrobbles).isTrue()
+
+            runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000)) }
+            server.takeRequest()
+            server.takeRequest()
+            val request = server.takeRequest().requestUrl!!
+            assertThat(request.queryParameter("time")).isEqualTo("1700000000000")
+        }
+    }
+
+    @Test
+    fun `override off omits the time parameter even with a honoring hint`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(emptyMap())
+            server.start()
+            val client = testClient(
+                testConnection(
+                    ConnectionBlock("http", server.hostName, server.port),
+                    serverSoftwareHint = "navidrome",
+                    backdateScrobbles = BackdateScrobbles.OFF,
+                ),
+            )
+
+            val capabilities = runBlocking { client.probe() }
+
+            assertThat(capabilities.supportsBackdatedScrobbles).isFalse()
+
+            runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000)) }
+            server.takeRequest()
+            server.takeRequest()
+            val request = server.takeRequest().requestUrl!!
+            assertThat(request.queryParameter("time")).isNull()
         }
     }
 
@@ -350,7 +410,7 @@ class SubsonicClientTest {
             server.start()
             val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
 
-            val accepted = runBlocking { client.submitPlays("song-1", 3, lastPlayedAtMs = 1_700_000_000_000) }
+            val accepted = runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000, 1_700_000_000_000, 1_700_000_000_000)) }
 
             assertThat(accepted).isEqualTo(3)
             val first = server.takeRequest().requestUrl!!

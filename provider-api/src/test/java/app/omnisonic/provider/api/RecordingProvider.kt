@@ -49,8 +49,8 @@ class RecordingProvider : MediaProvider {
 
     override fun downloadUrl(externalId: String, maxBitRateKbps: Int?, format: String?): String? = null
 
-    override suspend fun submitPlays(externalId: String, playCount: Int, lastPlayedAtMs: Long?): Int {
-        submittedPlays += SubmittedPlay(externalId, playCount, lastPlayedAtMs)
+    override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int {
+        submittedPlays += SubmittedPlay(externalId, timestamps)
         return submitPlaysResult
     }
 
@@ -82,5 +82,5 @@ class RecordingProvider : MediaProvider {
 
     override suspend fun similarSongs(externalId: String, count: Int): List<ProviderSong> = emptyList()
 
-    data class SubmittedPlay(val externalId: String, val playCount: Int, val lastPlayedAtMs: Long?)
+    data class SubmittedPlay(val externalId: String, val timestamps: List<Long>)
 }
