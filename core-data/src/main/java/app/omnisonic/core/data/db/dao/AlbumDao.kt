@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import app.omnisonic.core.data.db.entity.AlbumEntity
 
 @Dao
@@ -14,6 +15,64 @@ interface AlbumDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(albums: List<AlbumEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertOrIgnore(album: AlbumEntity): Long
+
+    @Query("SELECT id FROM albums WHERE providerId = :providerId AND externalId = :externalId")
+    suspend fun selectIdByProviderAndExternal(providerId: Long, externalId: String): Long?
+
+    /** Server-owned columns only; locally-owned editorial and playback state is untouched. */
+    @Query(
+        """
+        UPDATE albums SET
+            title = :title,
+            titleRoman = :titleRoman,
+            sortTitle = :sortTitle,
+            displayArtist = :displayArtist,
+            year = :year,
+            imagePath = :imagePath,
+            durationMs = :durationMs,
+            songCount = :songCount,
+            genresJson = :genresJson,
+            updatedAt = :updatedAt
+        WHERE providerId = :providerId AND externalId = :externalId
+        """,
+    )
+    suspend fun updateServerFields(
+        providerId: Long,
+        externalId: String,
+        title: String,
+        titleRoman: String?,
+        sortTitle: String?,
+        displayArtist: String?,
+        year: Int?,
+        imagePath: String?,
+        durationMs: Long?,
+        songCount: Int,
+        genresJson: String?,
+        updatedAt: Long,
+    )
+
+    @Transaction
+    suspend fun upsertServerFields(album: AlbumEntity): Long {
+        insertOrIgnore(album)
+        updateServerFields(
+            providerId = album.providerId,
+            externalId = album.externalId ?: return 0,
+            title = album.title,
+            titleRoman = album.titleRoman,
+            sortTitle = album.sortTitle,
+            displayArtist = album.displayArtist,
+            year = album.year,
+            imagePath = album.imagePath,
+            durationMs = album.durationMs,
+            songCount = album.songCount,
+            genresJson = album.genresJson,
+            updatedAt = album.updatedAt,
+        )
+        return selectIdByProviderAndExternal(album.providerId, album.externalId) ?: 0
+    }
 
     @Query("SELECT * FROM albums ORDER BY id")
     suspend fun selectAll(): List<AlbumEntity>
@@ -36,6 +95,24 @@ interface AlbumDao {
         """,
     )
     suspend fun selectMostPlayed(providerId: Long, limit: Int): List<AlbumEntity>
+
+    /** Albums of this provider that were not seen in the sync and have no remaining songs. */
+    @Query(
+        """
+        SELECT id FROM albums
+        WHERE providerId = :providerId
+            AND externalId IS NOT NULL
+            AND externalId NOT IN (:seenExternalIds)
+            AND id NOT IN (
+                SELECT DISTINCT albumId FROM songs
+                WHERE providerId = :providerId AND albumId IS NOT NULL
+            )
+        """,
+    )
+    suspend fun selectUnseenWithoutSongsIds(providerId: Long, seenExternalIds: List<String>): List<Long>
+
+    @Query("DELETE FROM albums WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
 
     @Query("DELETE FROM albums WHERE id = :id")
     suspend fun deleteById(id: Long)

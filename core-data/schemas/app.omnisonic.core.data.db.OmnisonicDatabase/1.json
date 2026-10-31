@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "1dfdcac3ce97c3c506574a2686cbf6fb",
+    "identityHash": "463690589087fb5863fa009d8ddbbcd6",
     "entities": [
       {
         "tableName": "providers",
@@ -600,7 +600,7 @@
       },
       {
         "tableName": "songs",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerId` INTEGER NOT NULL, `externalId` TEXT, `externalDataJson` TEXT, `albumId` INTEGER, `title` TEXT NOT NULL, `titleRoman` TEXT, `sortTitle` TEXT, `displayArtist` TEXT, `filePath` TEXT, `durationMs` INTEGER, `trackNo` INTEGER, `discNo` INTEGER, `year` INTEGER, `genresJson` TEXT, `imagePath` TEXT, `playCount` INTEGER NOT NULL, `lastPlayed` INTEGER, `skipped` INTEGER NOT NULL, `lastSkipped` INTEGER, `userRating` INTEGER, `isFavorite` INTEGER NOT NULL, `favoriteAt` INTEGER, `serverRating` REAL, `resumePointMs` INTEGER, `replayGainTrack` REAL, `replayGainAlbum` REAL, `replayGainType` INTEGER, `clipStartMs` INTEGER, `clipEndMs` INTEGER, `isAudiobook` INTEGER NOT NULL, `codec` TEXT, `bitrateKbps` INTEGER, `sampleRate` INTEGER, `bitDepth` INTEGER, `channelCount` INTEGER, `updatedAt` INTEGER NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerId` INTEGER NOT NULL, `externalId` TEXT, `externalDataJson` TEXT, `albumId` INTEGER, `title` TEXT NOT NULL, `titleRoman` TEXT, `sortTitle` TEXT, `displayArtist` TEXT, `filePath` TEXT, `durationMs` INTEGER, `trackNo` INTEGER, `discNo` INTEGER, `year` INTEGER, `genresJson` TEXT, `imagePath` TEXT, `playCount` INTEGER NOT NULL, `lastPlayed` INTEGER, `skipped` INTEGER NOT NULL, `lastSkipped` INTEGER, `userRating` INTEGER, `isFavorite` INTEGER NOT NULL, `favoriteAt` INTEGER, `serverRating` REAL, `resumePointMs` INTEGER, `resumeUpdatedAt` INTEGER, `missingOnServer` INTEGER NOT NULL, `replayGainTrack` REAL, `replayGainAlbum` REAL, `replayGainType` INTEGER, `clipStartMs` INTEGER, `clipEndMs` INTEGER, `isAudiobook` INTEGER NOT NULL, `codec` TEXT, `bitrateKbps` INTEGER, `sampleRate` INTEGER, `bitDepth` INTEGER, `channelCount` INTEGER, `updatedAt` INTEGER NOT NULL)",
         "fields": [
           {
             "fieldPath": "id",
@@ -751,6 +751,18 @@
             "columnName": "resumePointMs",
             "affinity": "INTEGER",
             "notNull": false
+          },
+          {
+            "fieldPath": "resumeUpdatedAt",
+            "columnName": "resumeUpdatedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "missingOnServer",
+            "columnName": "missingOnServer",
+            "affinity": "INTEGER",
+            "notNull": true
           },
           {
             "fieldPath": "replayGainTrack",
@@ -2128,7 +2140,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1dfdcac3ce97c3c506574a2686cbf6fb')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '463690589087fb5863fa009d8ddbbcd6')"
     ]
   }
 }

@@ -9,6 +9,7 @@ import app.omnisonic.core.data.json.JsonText
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.ProviderAlbum
+import app.omnisonic.provider.api.ProviderAlbumDetails
 import app.omnisonic.provider.api.ProviderAlbumRequest
 import app.omnisonic.provider.api.ProviderArtist
 import app.omnisonic.provider.api.ProviderBookmark
@@ -33,13 +34,14 @@ private class FakeMediaProvider : MediaProvider {
     val artists = mutableListOf<ProviderArtist>()
     val albumPages = mutableMapOf<Int, List<ProviderAlbum>>()
     val requestedOffsets = mutableListOf<Int>()
-    val albumDetails = mutableMapOf<String, ProviderAlbum>()
+    val albumDetails = mutableMapOf<String, ProviderAlbumDetails>()
     val directories = mutableMapOf<String, ProviderDirectory>()
     val genres = mutableListOf<ProviderGenre>()
     val radios = mutableListOf<ProviderRadio>()
     val playlists = mutableListOf<ProviderPlaylistSummary>()
     val playlistDetails = mutableMapOf<String, ProviderPlaylist>()
     val bookmarks = mutableListOf<ProviderBookmark>()
+    var albumFetchCount = 0
 
     override suspend fun probe(): ProviderCapabilities = ProviderCapabilities()
 
@@ -48,7 +50,10 @@ private class FakeMediaProvider : MediaProvider {
     override suspend fun browseDirectory(externalId: String): ProviderDirectory =
         directories.getValue(externalId)
 
-    override suspend fun albumDetails(albumExternalId: String): ProviderAlbum? = albumDetails[albumExternalId]
+    override suspend fun getAlbum(albumExternalId: String): ProviderAlbumDetails? {
+        albumFetchCount += 1
+        return albumDetails[albumExternalId]
+    }
 
     override suspend fun songDetails(externalId: String): ProviderSong? = null
 
@@ -137,10 +142,9 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
                 ProviderAlbum(externalId = "alb-1", title = "Nik", artistExternalId = "art-1",
                     artistName = "Alpha", year = 1980, songCount = 2, genres = listOf("rock"), createdAtMs = 1_000),
             )
-            albumDetails["alb-1"] = albumPages.getValue(0).single()
-            directories["alb-1"] = ProviderDirectory(
-                externalId = "alb-1",
-                childSongs = listOf(
+            albumDetails["alb-1"] = ProviderAlbumDetails(
+                album = albumPages.getValue(0).single(),
+                songs = listOf(
                     ProviderSong(externalId = "song-1", title = "Bodhisattva", artistExternalId = "art-1",
                         artistName = "Alpha", trackNo = 1, discNo = 1, year = 1973, genre = "rock",
                         durationMs = 191_000, filePath = "sd/b.flac", codec = "flac", bitrateKbps = 1000),
@@ -184,7 +188,8 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         assertThat(song1.playCount).isEqualTo(7)
         assertThat(song1.userRating).isEqualTo(4)
         assertThat(song1.isFavorite).isTrue()
-        assertThat(song1.resumePointMs).isEqualTo(42_000)
+        // The server bookmark carries no timestamp, so the local resume state wins.
+        assertThat(song1.resumePointMs).isEqualTo(1_000)
         assertThat(song1.replayGainTrack).isEqualTo(-1.5)
         assertThat(song1.clipStartMs).isEqualTo(500)
         assertThat(song1.sampleRate).isEqualTo(44_100)
@@ -195,8 +200,9 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         val song2 = songDao.selectByProviderAndExternal(1, "song-2")!!
         assertThat(song2.albumId).isEqualTo(20)
         assertThat(song2.trackNo).isEqualTo(2)
-        val song3 = songDao.selectByProviderAndExternal(1, "song-3")!!
-        assertThat(song3.resumePointMs).isEqualTo(9_000)
+        // song-3 is no longer on the server and has no play history or outbox
+        // rows, so a full sync prunes it.
+        assertThat(songDao.selectByProviderAndExternal(1, "song-3")).isNull()
 
         assertThat(songArtistDao.selectBySong(30).single().artistId).isEqualTo(10)
         assertThat(albumArtistDao.selectByAlbum(20).single().artistId).isEqualTo(10)
@@ -229,7 +235,7 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
                 ProviderAlbum(externalId = "alb-new", title = "Fresh", createdAtMs = 9_000),
                 ProviderAlbum(externalId = "alb-old", title = "Stale", createdAtMs = 1_000),
             )
-            albumDetails["alb-new"] = ProviderAlbum(externalId = "alb-new", title = "Fresh")
+            albumDetails["alb-new"] = ProviderAlbumDetails(ProviderAlbum(externalId = "alb-new", title = "Fresh"))
             directories["alb-new"] = ProviderDirectory(externalId = "alb-new")
         }
 
@@ -252,8 +258,8 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
                 ProviderAlbum(externalId = "alb-a", title = "A", createdAtMs = 1),
                 ProviderAlbum(externalId = "alb-b", title = "B", createdAtMs = 2),
             )
-            albumDetails["alb-a"] = ProviderAlbum(externalId = "alb-a", title = "A")
-            albumDetails["alb-b"] = ProviderAlbum(externalId = "alb-b", title = "B")
+            albumDetails["alb-a"] = ProviderAlbumDetails(ProviderAlbum(externalId = "alb-a", title = "A"))
+            albumDetails["alb-b"] = ProviderAlbumDetails(ProviderAlbum(externalId = "alb-b", title = "B"))
             directories["alb-a"] = ProviderDirectory(externalId = "alb-a")
             directories["alb-b"] = ProviderDirectory(externalId = "alb-b")
         }
@@ -295,10 +301,10 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
             albumPages[0] = pageOne
             albumPages[pageSize] = listOf(ProviderAlbum(externalId = "alb-last", title = "Last"))
             pageOne.forEach { album ->
-                albumDetails[album.externalId] = album
+                albumDetails[album.externalId] = ProviderAlbumDetails(album)
                 directories[album.externalId] = ProviderDirectory(externalId = album.externalId)
             }
-            albumDetails["alb-last"] = ProviderAlbum(externalId = "alb-last", title = "Last")
+            albumDetails["alb-last"] = ProviderAlbumDetails(ProviderAlbum(externalId = "alb-last", title = "Last"))
             directories["alb-last"] = ProviderDirectory(externalId = "alb-last")
         }
 
@@ -307,5 +313,29 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         assertThat(outcome.albumsProcessed).isEqualTo(pageSize + 1)
         assertThat(provider.requestedOffsets).containsExactly(0, pageSize)
         assertThat(albumDao.selectByProvider(1)).hasSize(pageSize + 1)
+        // One getAlbum per album, never two requests per album.
+        assertThat(provider.albumFetchCount).isEqualTo(pageSize + 1)
+    }
+
+    @Test
+    fun `sync computes romanized titles and sort keys`() = runDbTest {
+        newProvider(id = 1)
+        val provider = FakeMediaProvider().apply {
+            artists += ProviderArtist(externalId = "art-1", title = "Björk")
+            albumPages[0] = listOf(ProviderAlbum(externalId = "alb-1", title = "Björk Greatest"))
+            albumDetails["alb-1"] = ProviderAlbumDetails(
+                album = ProviderAlbum(externalId = "alb-1", title = "Björk Greatest"),
+                songs = listOf(ProviderSong(externalId = "song-1", title = "Jöhansson")),
+            )
+        }
+
+        syncer(provider).runFullSync()
+
+        val artist = artistDao.selectByProviderAndExternal(1, "art-1")!!
+        assertThat(artist.sortTitle).isEqualTo("bjork")
+        val album = albumDao.selectByProviderAndExternal(1, "alb-1")!!
+        assertThat(album.sortTitle).isEqualTo("bjork greatest")
+        val song = songDao.selectByProviderAndExternal(1, "song-1")!!
+        assertThat(song.sortTitle).isEqualTo("johansson")
     }
 }

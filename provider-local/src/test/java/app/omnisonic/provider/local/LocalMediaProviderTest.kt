@@ -233,7 +233,7 @@ class LocalMediaProviderTest {
 
     @Test
     fun `album and song details map metadata with codec and disc split`(): Unit = runBlocking {
-        val album = provider.albumDetails("100")!!
+        val album = provider.getAlbum("100")!!.album
         assertThat(album.title).isEqualTo("Lovers Rock")
         assertThat(album.artistName).isEqualTo("Sade")
         assertThat(album.artistExternalId).isEqualTo("8")

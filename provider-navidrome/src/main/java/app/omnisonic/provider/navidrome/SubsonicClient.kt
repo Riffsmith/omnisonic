@@ -7,6 +7,7 @@ import app.omnisonic.provider.api.BlockFailover
 import app.omnisonic.provider.api.ConnectionBlock
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.ProviderAlbum
+import app.omnisonic.provider.api.ProviderAlbumDetails
 import app.omnisonic.provider.api.ProviderAlbumRequest
 import app.omnisonic.provider.api.ProviderArtist
 import app.omnisonic.provider.api.ProviderBookmark
@@ -88,10 +89,14 @@ class SubsonicClient(
         )
     }
 
-    override suspend fun albumDetails(albumExternalId: String): ProviderAlbum? = call(
+    override suspend fun getAlbum(albumExternalId: String): ProviderAlbumDetails? = call(
         Endpoint.GET_ALBUM,
         listOf("id" to albumExternalId),
-    ) { envelope -> envelope.album.firstOrNull()?.toAlbum() }
+    ) { envelope ->
+        val dto = envelope.album.firstOrNull() ?: return@call null
+        val album = dto.toAlbum() ?: return@call null
+        ProviderAlbumDetails(album, dto.song.mapNotNull { it.toSong() })
+    }
 
     override suspend fun songDetails(externalId: String): ProviderSong? = call(
         Endpoint.GET_SONG,

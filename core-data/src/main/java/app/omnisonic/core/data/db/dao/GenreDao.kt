@@ -21,6 +21,9 @@ interface GenreDao {
     @Query("SELECT * FROM genres WHERE providerId = :providerId ORDER BY title")
     suspend fun selectByProvider(providerId: Long): List<GenreEntity>
 
+    @Query("SELECT * FROM genres WHERE providerId = :providerId AND externalId = :externalId")
+    suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): GenreEntity?
+
     @Query("DELETE FROM genres WHERE id = :id")
     suspend fun deleteById(id: Long)
 

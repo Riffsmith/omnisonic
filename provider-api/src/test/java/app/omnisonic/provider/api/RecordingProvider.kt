@@ -21,7 +21,7 @@ class RecordingProvider : MediaProvider {
 
     override suspend fun browseDirectory(externalId: String): ProviderDirectory = ProviderDirectory(externalId)
 
-    override suspend fun albumDetails(albumExternalId: String): ProviderAlbum? = null
+    override suspend fun getAlbum(albumExternalId: String): ProviderAlbumDetails? = null
 
     override suspend fun songDetails(externalId: String): ProviderSong? = null
 

@@ -21,6 +21,9 @@ interface InternetRadioDao {
     @Query("SELECT * FROM internet_radios WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<InternetRadioEntity>
 
+    @Query("SELECT * FROM internet_radios WHERE providerId = :providerId AND externalId = :externalId")
+    suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): InternetRadioEntity?
+
     @Query("DELETE FROM internet_radios WHERE id = :id")
     suspend fun deleteById(id: Long)
 }

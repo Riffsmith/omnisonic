@@ -22,6 +22,20 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<PlaylistEntity>
 
+    @Query("SELECT * FROM playlists WHERE providerId = :providerId AND externalId = :externalId")
+    suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): PlaylistEntity?
+
+    /** Playlists of this provider not seen in a full sync; their entries are removed too. */
+    @Query(
+        """
+        DELETE FROM playlists
+        WHERE providerId = :providerId
+            AND externalId IS NOT NULL
+            AND externalId NOT IN (:seenExternalIds)
+        """,
+    )
+    suspend fun deleteUnseen(providerId: Long, seenExternalIds: List<String>)
+
     @Query("SELECT * FROM playlists WHERE id = :id")
     suspend fun selectById(id: Long): PlaylistEntity?
 
@@ -49,4 +63,7 @@ interface PlaylistEntryDao {
 
     @Query("DELETE FROM playlists_entries WHERE playlistId = :playlistId")
     suspend fun deleteByPlaylist(playlistId: Long)
+
+    @Query("DELETE FROM playlists_entries WHERE playlistId NOT IN (SELECT id FROM playlists)")
+    suspend fun deleteOrphanedEntries()
 }

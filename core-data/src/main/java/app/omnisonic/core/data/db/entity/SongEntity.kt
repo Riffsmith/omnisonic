@@ -40,6 +40,8 @@ data class SongEntity(
     val favoriteAt: Long? = null,
     val serverRating: Double? = null,
     val resumePointMs: Long? = null,
+    val resumeUpdatedAt: Long? = null,
+    val missingOnServer: Boolean = false,
     val replayGainTrack: Double? = null,
     val replayGainAlbum: Double? = null,
     val replayGainType: Int? = null,

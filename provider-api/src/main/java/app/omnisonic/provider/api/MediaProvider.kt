@@ -9,7 +9,7 @@ interface MediaProvider {
 
     suspend fun listArtists(): List<ProviderArtist>
     suspend fun browseDirectory(externalId: String): ProviderDirectory
-    suspend fun albumDetails(albumExternalId: String): ProviderAlbum?
+    suspend fun getAlbum(albumExternalId: String): ProviderAlbumDetails?
     suspend fun songDetails(externalId: String): ProviderSong?
     suspend fun listAlbums(request: ProviderAlbumRequest): List<ProviderAlbum>
     suspend fun listGenres(): List<ProviderGenre>

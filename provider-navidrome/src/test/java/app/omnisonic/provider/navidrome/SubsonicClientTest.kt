@@ -218,12 +218,15 @@ class SubsonicClientTest {
             server.start()
             val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
 
-            val album = runBlocking { client.albumDetails("al-1") }!!
+            val details = runBlocking { client.getAlbum("al-1") }!!
             val song = runBlocking { client.songDetails("song-1") }!!
+            val album = details.album
 
             assertThat(album.title).isEqualTo("Countdown")
             assertThat(album.artistExternalId).isEqualTo("ar-1")
             assertThat(album.songCount).isEqualTo(2)
+            // getAlbum carries the song list with the album payload (single request).
+            assertThat(details.songs.map { it.externalId }).containsExactly("song-1")
             assertThat(song.title).isEqualTo("Bodhisattva")
             assertThat(song.discNo).isEqualTo(1)
             assertThat(song.codec).isEqualTo("flac")

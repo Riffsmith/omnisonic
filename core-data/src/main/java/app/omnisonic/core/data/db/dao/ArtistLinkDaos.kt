@@ -21,6 +21,9 @@ interface AlbumArtistDao {
 
     @Query("DELETE FROM album_artists WHERE albumId = :albumId")
     suspend fun deleteByAlbum(albumId: Long)
+
+    @Query("DELETE FROM album_artists WHERE albumId IN (:albumIds)")
+    suspend fun deleteByAlbumIds(albumIds: List<Long>)
 }
 
 @Dao
@@ -37,4 +40,7 @@ interface SongArtistDao {
 
     @Query("DELETE FROM song_artists WHERE songId = :songId")
     suspend fun deleteBySong(songId: Long)
+
+    @Query("DELETE FROM song_artists WHERE songId IN (:songIds)")
+    suspend fun deleteBySongIds(songIds: List<Long>)
 }

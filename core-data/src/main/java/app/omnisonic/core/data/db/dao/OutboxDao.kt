@@ -60,4 +60,20 @@ interface OutboxDao {
 
     @Query("SELECT COUNT(*) FROM outbox_items")
     suspend fun count(): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM outbox_items
+        WHERE providerId = :providerId AND externalId = :externalId
+        """,
+    )
+    suspend fun countPendingByExternal(providerId: Long, externalId: String): Int
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM outbox_items
+        WHERE providerId = :providerId AND externalId = :externalId AND action = :action
+        """,
+    )
+    suspend fun countPendingByExternalAndAction(providerId: Long, externalId: String, action: String): Int
 }

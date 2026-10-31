@@ -35,6 +35,12 @@ data class ProviderAlbum(
     val createdAtMs: Long? = null,
 )
 
+/** One album payload together with its song list, from a single fetch. */
+data class ProviderAlbumDetails(
+    val album: ProviderAlbum,
+    val songs: List<ProviderSong> = emptyList(),
+)
+
 data class ProviderSong(
     val externalId: String,
     val title: String,

@@ -12,6 +12,7 @@ import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.MediaProviderFactory
 import app.omnisonic.provider.api.ProviderAlbum
+import app.omnisonic.provider.api.ProviderAlbumDetails
 import app.omnisonic.provider.api.ProviderAlbumRequest
 import app.omnisonic.provider.api.ProviderArtist
 import app.omnisonic.provider.api.ProviderBookmark
@@ -72,13 +73,15 @@ class LocalMediaProvider(private val contentResolver: ContentResolver) : MediaPr
         )
     }
 
-    override suspend fun albumDetails(albumExternalId: String): ProviderAlbum? =
-        query(
+    override suspend fun getAlbum(albumExternalId: String): ProviderAlbumDetails? {
+        val album = query(
             MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
             ALBUM_PROJECTION,
             selection = "${MediaStore.Audio.Albums._ID} = ?",
             selectionArgs = arrayOf(albumExternalId),
-        )?.use { cursor -> if (cursor.moveToFirst()) cursor.toAlbum() else null }
+        )?.use { cursor -> if (cursor.moveToFirst()) cursor.toAlbum() else null } ?: return null
+        return ProviderAlbumDetails(album, songsBy(MediaStore.Audio.Media.ALBUM_ID, albumExternalId))
+    }
 
     override suspend fun songDetails(externalId: String): ProviderSong? =
         query(
