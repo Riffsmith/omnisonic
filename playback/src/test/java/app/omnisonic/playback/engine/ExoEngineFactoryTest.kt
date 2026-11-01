@@ -3,7 +3,6 @@ package app.omnisonic.playback.engine
 import android.content.Context
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
-import app.omnisonic.playback.api.player.DecoderPreference
 import app.omnisonic.playback.api.player.EngineConfig
 import app.omnisonic.playback.api.player.OffloadMode
 import app.omnisonic.playback.audio.FadeAudioProcessor
@@ -32,7 +31,7 @@ class ExoEngineFactoryTest {
             )
         }
         val config = EngineConfig(
-            decoderPreference = DecoderPreference.EXTENSION_FIRST,
+            minBufferMs = 45_000,
             offloadMode = OffloadMode.AUTO,
         )
         val engine = factory.create(config)

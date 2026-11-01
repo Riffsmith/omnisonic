@@ -10,7 +10,6 @@ import androidx.media3.test.utils.FakeClock
 import androidx.test.core.app.ApplicationProvider
 import app.omnisonic.playback.api.equalizer.PeqConfig
 import app.omnisonic.playback.api.player.AudioEngineFactory
-import app.omnisonic.playback.api.player.DecoderPreference
 import app.omnisonic.playback.api.player.EngineConfig
 import app.omnisonic.playback.api.player.OmniPlayerListener
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
@@ -312,7 +311,7 @@ class OmniPlayerImplTest {
         })
         player.seekTo(120)
 
-        player.applyEngineConfig(EngineConfig(decoderPreference = DecoderPreference.EXTENSION_FIRST))
+        player.applyEngineConfig(EngineConfig(minBufferMs = 45_000))
 
         await("swapped engine prepared") {
             player.exposedPlayer() === exposedPlayer &&

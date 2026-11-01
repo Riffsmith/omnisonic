@@ -1,6 +1,5 @@
 package app.omnisonic.playback.api.settings
 
-import app.omnisonic.playback.api.player.DecoderPreference
 import app.omnisonic.playback.api.player.OffloadMode
 import app.omnisonic.playback.api.rg.ReplayGainMode
 import app.omnisonic.playback.api.rg.RgNormalisation
@@ -12,7 +11,6 @@ enum class NotificationAction { NONE, REPEAT, SHUFFLE, FAVORITE, STOP, RADIO, CH
 
 /** Read-only playback engine settings; writes live in the settings store impl. */
 interface PlaybackSettings {
-    val decoderPreference: Flow<DecoderPreference>
     val offloadMode: Flow<OffloadMode>
     val replayGainMode: Flow<ReplayGainMode>
     val replayGainNormalisation: Flow<RgNormalisation>

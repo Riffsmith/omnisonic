@@ -14,7 +14,6 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
-import app.omnisonic.playback.api.player.DecoderPreference
 import app.omnisonic.playback.api.player.OffloadMode
 import app.omnisonic.playback.api.rg.ReplayGainMode
 import app.omnisonic.playback.api.rg.ReplayGainSelector
@@ -32,7 +31,6 @@ import kotlinx.coroutines.flow.map
 import java.io.File
 
 object PlaybackPrefs {
-    val DECODER = stringPreferencesKey("engine.decoder_preference")
     val OFFLOAD = intPreferencesKey("engine.offload_mode")
     val RG_MODE = intPreferencesKey("engine.replay_gain_mode")
     val RG_NORM = intPreferencesKey("engine.replay_gain_normalisation")
@@ -53,14 +51,6 @@ object PlaybackPrefs {
 class PlaybackSettingsStore(
     private val dataStore: DataStore<Preferences>,
 ) : PlaybackSettings {
-    override val decoderPreference: Flow<DecoderPreference> = dataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { prefs ->
-            runCatching { DecoderPreference.valueOf(prefs[PlaybackPrefs.DECODER] ?: "") }
-                .getOrNull()
-                ?: DecoderPreference.MEDIA_FIRST
-        }
-
     override val offloadMode: Flow<OffloadMode> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { prefs ->
@@ -128,7 +118,6 @@ class PlaybackSettingsStore(
         .catch { emit(emptyPreferences()) }
         .map { prefs -> prefs[PlaybackPrefs.SHORT_FADE_MS] ?: DEFAULT_SHORT_FADE_MS }
 
-    suspend fun setDecoderPreference(value: DecoderPreference) = edit { it[PlaybackPrefs.DECODER] = value.name }
     suspend fun setOffloadMode(value: OffloadMode) = edit { it[PlaybackPrefs.OFFLOAD] = value.ordinal }
     suspend fun setReplayGainMode(value: ReplayGainMode) = edit { it[PlaybackPrefs.RG_MODE] = value.ordinal }
     suspend fun setReplayGainNormalisation(value: RgNormalisation) = edit { it[PlaybackPrefs.RG_NORM] = value.ordinal }

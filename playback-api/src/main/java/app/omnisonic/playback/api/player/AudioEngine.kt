@@ -1,7 +1,5 @@
 package app.omnisonic.playback.api.player
 
-enum class DecoderPreference { MEDIA_FIRST, EXTENSION_FIRST }
-
 enum class WakeMode { LOCAL, NETWORK }
 
 /** Immutable per-engine construction parameters. */
@@ -10,7 +8,6 @@ data class EngineConfig(
     val bufferForPlaybackAfterRebufferMs: Int = 5_000,
     val minBufferMs: Int = 60_000,
     val maxBufferMs: Int = 60_000,
-    val decoderPreference: DecoderPreference = DecoderPreference.MEDIA_FIRST,
     val offloadMode: OffloadMode = OffloadMode.DISABLED,
     val wakeMode: WakeMode = WakeMode.NETWORK,
 )

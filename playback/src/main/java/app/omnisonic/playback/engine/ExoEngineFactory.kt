@@ -13,7 +13,6 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import app.omnisonic.playback.api.player.AudioEngine
 import app.omnisonic.playback.api.player.AudioEngineFactory
-import app.omnisonic.playback.api.player.DecoderPreference
 import app.omnisonic.playback.api.player.EngineConfig
 import app.omnisonic.playback.api.player.EngineInfo
 import app.omnisonic.playback.api.player.OffloadMode
@@ -60,12 +59,6 @@ class ExoEngineFactory(
             private set
 
         init {
-            setExtensionRendererMode(
-                when (config.decoderPreference) {
-                    DecoderPreference.MEDIA_FIRST -> EXTENSION_RENDERER_MODE_ON
-                    DecoderPreference.EXTENSION_FIRST -> EXTENSION_RENDERER_MODE_PREFER
-                },
-            )
             setEnableDecoderFallback(true)
         }
 

@@ -2,7 +2,6 @@ package app.omnisonic.playback.settings
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
-import app.omnisonic.playback.api.player.DecoderPreference
 import app.omnisonic.playback.api.player.OffloadMode
 import app.omnisonic.playback.api.rg.ReplayGainMode
 import app.omnisonic.playback.api.rg.RgNormalisation
@@ -52,7 +51,6 @@ class PlaybackSettingsStoreTest {
     @Test
     fun `fresh store yields defaults`() = runTest {
         val store = newStore()
-        assertThat(store.decoderPreference.first()).isEqualTo(DecoderPreference.MEDIA_FIRST)
         assertThat(store.offloadMode.first()).isEqualTo(OffloadMode.DISABLED)
         assertThat(store.replayGainMode.first()).isEqualTo(ReplayGainMode.OFF)
         assertThat(store.replayGainNormalisation.first()).isEqualTo(RgNormalisation.RG2)
@@ -70,7 +68,6 @@ class PlaybackSettingsStoreTest {
     @Test
     fun `writes survive roundtrip`() = runTest {
         val store = newStore()
-        store.setDecoderPreference(DecoderPreference.EXTENSION_FIRST)
         store.setOffloadMode(OffloadMode.AUTO)
         store.setReplayGainMode(ReplayGainMode.PREFER_ALBUM)
         store.setReplayGainNormalisation(RgNormalisation.OFF)
@@ -82,7 +79,6 @@ class PlaybackSettingsStoreTest {
         store.setShortFadeMs(80)
         store.setNotificationActions(listOf(NotificationAction.SEEK_BACK_10, NotificationAction.NONE, NotificationAction.NONE, NotificationAction.NONE, NotificationAction.NONE))
 
-        assertThat(store.decoderPreference.first()).isEqualTo(DecoderPreference.EXTENSION_FIRST)
         assertThat(store.offloadMode.first()).isEqualTo(OffloadMode.AUTO)
         assertThat(store.replayGainMode.first()).isEqualTo(ReplayGainMode.PREFER_ALBUM)
         assertThat(store.replayGainNormalisation.first()).isEqualTo(RgNormalisation.OFF)

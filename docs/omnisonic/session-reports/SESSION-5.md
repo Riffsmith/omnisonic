@@ -160,9 +160,17 @@ the recommended option made in the last session"):
 - Result: `./gradlew test :app:assembleDebug` → BUILD SUCCESSFUL; 322 tests, 0
   failures, 0 errors, 4 skipped.
 - Commit: **a62ec69** `fix(T15): report offload and extension availability honestly`
-- **DECISION PENDING (blocks the remaining T15 work):** FFmpeg decoder module —
-  options and recommendation in the section below. Nothing decision-dependent has
-  been implemented; `DecoderPreference.EXTENSION_FIRST` remains inert until answered.
+- **Decision received (user):** option (3) — defer the decoder extension to Phase 4.
+  Implemented: `EngineConfig.decoderPreference` and the `DecoderPreference` enum
+  removed from playback-api; `PlaybackSettings.decoderPreference`, its setter and the
+  persisted `engine.decoder_preference` DataStore key removed from the settings store
+  (nothing released, no migration); `ExoEngineFactory` builds with the default
+  extension mode (decoder fallback retained). Tests: failing-first
+  `DecoderPreferenceRemovalTest` (`expected not to contain: decoderPreference`) now
+  green; settings/engine/player tests updated to the knob-free API. Test failing
+  state shown before removal. Docs `offload-and-extensions.md` updated to record the
+  resolved decision.
+- Commit: **see git log** `fix(T15): defer the decoder preference to Phase 4`
 
 ---
 
@@ -188,12 +196,11 @@ the recommended option made in the last session"):
   gapless handoff on hardware, audible fade/replay-gain measurement on real output,
   and device offload behavior remain unverified. No live server needed this session.
 
-## Awaited decision (T15 remainder)
+## Decision outcome (T15 remainder)
 
-FFmpeg decoder module: (1) build/vendor the Media3 FFmpeg extension (native build
-cost, per-ABI `.so`), (2) depend on a maintained prebuilt Media3 FFmpeg decoder
-artifact (license/ABI/size must be vetted before adoption), (3) keep the current
-decoder preference inert until Phase 4 explicitly schedules it — **recommended (3)
-now, (1) or (2) later**. Per the prompt this is a DECISION gate: waiting for the
-user's answer before implementing the chosen option. Session ends here either way
-(T13–T15 checkpoint).
+FFmpeg decoder module options were presented with recommendation (3); the user chose
+**(3) Defer to Phase 4** and the removal was implemented and committed in this
+session (see the T15 section). Final session aggregate: **324 tests, 0 failures,
+0 errors, 4 skipped**, `:app:assembleDebug` green, banned-name scan clean. The
+T13–T15 checkpoint is reached; Phase 4 may proceed only after the T13 gate is
+confirmed satisfied (it is: all prompt proofs pass).
