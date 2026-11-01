@@ -174,6 +174,70 @@ the recommended option made in the last session"):
 
 ---
 
+## T13b — T13 proof audit and stale-stream patching
+
+- Scope: audit the committed T13 behavior against its original proof list and patch
+  only gaps that the audit exposed. No T16 work was started.
+- Part 1 proof results (failing-first where the proof was missing):
+  - a. Stable exposed identity across an engine swap: **OK** — existing
+    `OmniPlayerImplTest` identity/controllability assertions.
+  - b. Queue-aware previous commands: **partially covered** — next was tested,
+    previous was not. Added `SEEK_TO_PREVIOUS` / `SEEK_TO_PREVIOUS_MEDIA_ITEM`
+    availability and withdrawal assertions. Green.
+  - c. Gapless prepared-next smoke: **OK** — existing two-track test.
+  - d. Listener re-attachment across swaps: **new test** — exactly two ready
+    callbacks and one finish after one swap, no lost ready/finish and no duplicate
+    error. Green.
+  - e. ROADMAP §0.3 naming drift: **code names unchanged** — the approved T13
+    decision explicitly defers the ROADMAP table edit to T24. The T13b prompt does
+    not authorize the T24 edit, so the reconciliation remains a recorded T24
+    deliverable.
+  - f. Engine swap with a prepared next: **new test** — position, speed, pitch and
+    play intent survive, and the prepared next stays in the two-window timeline.
+    Green.
+- Gaps patched:
+  1. `ResolvedStream.expiresAtMs` + `isStale(nowMs, skewMs = 60 s)`; `OmniPlayerImpl`
+     re-resolves before a start, on resume after a 30 s pause, on engine-swap
+     restart, and when a stale prepared next is promoted. Null expiry never
+     re-resolves.
+  2. One `401`/`403`/`410` per stream triggers exactly one resolver call and a
+     restart at the captured position; a second failure surfaces one error and does
+     not loop.
+  3. `StreamTransport` (`PROVIDER_HTTP`, `DIRECT_URI`, `CUSTOM`) plus
+     `customDataSourceFactory`; `DataSourceRegistry` lives in `:playback` because
+     it holds Media3 `DataSource.Factory`. `PlaybackCacheManager` routes provider
+     HTTP, direct URI, and custom transport while keeping the stable cache key.
+     Unregistered custom ids surface a playback error.
+- Public API changes: `ResolvedStream.expiresAtMs`,
+  `ResolvedStream.transport`, `ResolvedStream.customDataSourceFactory`,
+  `ResolvedStream.isStale`, `StreamTransport`, `DataSourceRegistry`, and the
+  optional `DataSourceRegistry` constructor argument on `PlaybackCacheManager`.
+  `OmniPlayerImpl` also gains an optional `clock` constructor argument so expiry
+  tests are deterministic; production callers keep the default
+  `System::currentTimeMillis`.
+- Failing-first evidence: the new tests initially failed to compile
+  (`Unresolved reference 'StreamTransport'`, `'DataSourceRegistry'`,
+  `No parameter with name 'expiresAtMs'`, `'transport'`,
+  `'customDataSourceFactory'`, and the extra `OmniPlayerImpl` argument), then
+  exercised the behavior failures before the implementation turned them green.
+- Tests added: engine-swap proof with prepared next; listener re-attachment proof;
+  stale engine-swap re-resolution; one-403 recovery; repeated-403 single error;
+  null-expiry no re-resolve; custom transport; unregistered custom id; stale
+  prepared-next promotion. Existing headers/mTLS, gapless, and identity tests
+  remain green.
+- Docs: `playback/stream-cache-identity.md` gained freshness and transport
+  sections; `playback/per-provider-media-clients.md` records that provider HTTP is
+  used only for `PROVIDER_HTTP`.
+- Verification: `./gradlew test :app:assembleDebug` → BUILD SUCCESSFUL; debug
+  aggregate **333 tests, 0 failures, 0 errors, 4 skipped** (playback 128,
+  playback-api 10). `scripts/check-banned-names.sh` over all changed files → clean.
+- Commit: `fix(T13b): re-resolve stale streams and route stream transports`
+  (single task commit; this report is included).
+- Blocked/unknown: on-device audible gapless and auth-expiry behavior still need a
+  device; production resolver/data-source-registry wiring is not added here.
+
+---
+
 ## Session-wide verification
 
 - `./gradlew test :app:assembleDebug` after each task → BUILD SUCCESSFUL each time;

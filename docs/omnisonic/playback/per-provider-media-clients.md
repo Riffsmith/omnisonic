@@ -10,9 +10,10 @@ Confidence:
 - [VERIFIED] A stream request with `X-Test: 1` from a provider MEDIA client reaches MockWebServer through `OmniPlayerImpl`; the same request without that header is rejected by the server and surfaces as a playback error.
 - [VERIFIED] A PKCS#12 client identity and an extra trusted server certificate complete a mutual-TLS handshake through `OkHttpDataSource`.
 - [INFERRED] Callers must pass the provider's MEDIA-profile client to `MediaDataSourceFactoryProvider`; an API-profile client would keep API compression and timeout behavior on audio reads.
+- [VERIFIED] The provider HTTP factory is used only for `StreamTransport.PROVIDER_HTTP`; direct and custom transports bypass it.
 - [UNKNOWN] Production dependency-injection wiring for provider ids and client factories is not present yet; it belongs to the provider/client lifecycle work.
 
-Date: 2026-10-30
+Date: 2026-11-01
 
 Links: `../network/client-profiles.md`, `stream-cache-identity.md`
 
@@ -30,6 +31,8 @@ ResolvedStream(providerId)
 ```
 
 [VERIFIED] The cache manager no longer holds one global upstream factory. Its public operations (`cacheFor`, `directFor`, `factoryFor`) accept the `ResolvedStream` they are building for.
+
+[VERIFIED] Transport routing happens inside `PlaybackCacheManager.wrappedUpstream`: provider HTTP uses `upstreamFactory(stream)`, `DIRECT_URI` uses a plain `DefaultDataSource`, and `CUSTOM` resolves its factory id from `DataSourceRegistry`.
 
 [VERIFIED] `OkHttpDataSource` is supplied by `androidx.media3:media3-datasource-okhttp` at the same version as the rest of Media3.
 

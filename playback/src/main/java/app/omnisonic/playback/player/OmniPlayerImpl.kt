@@ -10,6 +10,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
@@ -29,6 +30,7 @@ import app.omnisonic.playback.api.stream.ResolvedStream
 import app.omnisonic.playback.api.stream.StreamResolver
 import app.omnisonic.playback.cache.PlaybackCacheManager
 import app.omnisonic.playback.settings.PlaybackSettingsStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
@@ -55,8 +57,10 @@ import kotlinx.coroutines.launch
  * Replay-gain values ([ReplayGainSource]) and the RG settings are read per
  * track start inside [play]; a later [setReplayGainLinear] overrides the
  * factor until the next [play]. Radio and locally-routed streams bypass the
- * cache. [setStreamResolver] holds the upstream resolver for future
- * re-resolution glue; engine swaps replay the remembered streams.
+ * cache. [setStreamResolver] holds the resolver used to refresh streams whose
+ * [ResolvedStream.expiresAtMs] has passed: before a start, on resume after a
+ * long pause, on engine swaps, and when a stale prepared item is promoted.
+ * One 401/403/410 per stream triggers a single re-resolve and restart.
  */
 class OmniPlayerImpl(
     private val engineFactory: AudioEngineFactory,
@@ -66,6 +70,7 @@ class OmniPlayerImpl(
     private val replayGainSource: ReplayGainSource,
     private val externalScope: CoroutineScope,
     private val queuePort: QueueCommandPort,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : OmniPlayer, QueueAwareBridge.Actions {
 
     private var engine: AudioEngine
@@ -90,6 +95,8 @@ class OmniPlayerImpl(
     private var peqConfig: PeqConfig? = null
     private var replayGainLinear = 1f
     private var monoEnabled = false
+    private var authRetried = false
+    private var pausedAtMs: Long? = null
     private var released = false
 
     private val engineListener = object : Player.Listener {
@@ -110,6 +117,30 @@ class OmniPlayerImpl(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            val stream = currentStream
+            if (stream != null && !authRetried && isAuthExpiryError(error)) {
+                authRetried = true
+                startJob?.cancel()
+                val position = engine.player.currentPosition.coerceAtLeast(0L)
+                val playWhenReady = engine.player.playWhenReady
+                startJob = externalScope.launch {
+                    val fresh = try {
+                        resolver.resolve(stream.entry)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (fresh == null) {
+                        bridge.publishError(error)
+                        listener?.onError(currentEntry, error)
+                        return@launch
+                    }
+                    currentStream = fresh
+                    startSafely(fresh, position, playWhenReady)
+                }
+                return
+            }
             bridge.publishError(error)
             listener?.onError(currentEntry, error)
         }
@@ -164,13 +195,17 @@ class OmniPlayerImpl(
         val hadCurrent = currentEntry != null
         currentEntry = entry
         currentStream = stream
+        authRetried = false
+        pausedAtMs = null
         if (hadCurrent) clearPrepared()
         startJob?.cancel()
         mainHandler.removeCallbacks(fadePauseAction)
         bridge.clearPublishedError()
         startJob = externalScope.launch {
+            val playable = reResolveIfStale(stream) ?: return@launch
+            currentStream = playable
             applyReplayGainFor(entry)
-            startCurrentStream(stream.startPositionMs, playWhenReady = true)
+            startSafely(playable, playable.startPositionMs, playWhenReady = true)
         }
     }
 
@@ -191,11 +226,28 @@ class OmniPlayerImpl(
 
     override fun pause() {
         if (released) return
+        pausedAtMs = clock()
         engine.player.pause()
     }
 
     override fun resume() {
         if (released) return
+        val stream = currentStream
+        val pausedAt = pausedAtMs
+        pausedAtMs = null
+        val now = clock()
+        if (stream != null && pausedAt != null && now - pausedAt >= RESUME_REFRESH_AFTER_MS &&
+            stream.isStale(now)
+        ) {
+            startJob?.cancel()
+            val position = engine.player.currentPosition.coerceAtLeast(0L)
+            startJob = externalScope.launch {
+                val fresh = reResolveIfStale(stream) ?: return@launch
+                currentStream = fresh
+                startSafely(fresh, position, playWhenReady = true)
+            }
+            return
+        }
         engine.player.play()
     }
 
@@ -208,6 +260,8 @@ class OmniPlayerImpl(
         engine.player.clearMediaItems()
         currentEntry = null
         currentStream = null
+        authRetried = false
+        pausedAtMs = null
         clearPrepared()
         bridge.republish()
     }
@@ -295,7 +349,16 @@ class OmniPlayerImpl(
         }
         newEngine.player.addListener(engineListener)
         newEngine.player.playbackParameters = PlaybackParameters(speed, pitch)
-        if (currentStream != null) startCurrentStream(restorePosition, playWhenReady = wasPlaying)
+        authRetried = false
+        pausedAtMs = null
+        val stream = currentStream
+        if (stream != null) {
+            startJob = externalScope.launch {
+                val playable = reResolveIfStale(stream) ?: return@launch
+                currentStream = playable
+                startSafely(playable, restorePosition, wasPlaying)
+            }
+        }
         oldEngine.release()
         bridge.republish()
     }
@@ -436,7 +499,18 @@ class OmniPlayerImpl(
             currentEntry = nextEntry
             currentStream = nextStream
             clearPrepared()
+            authRetried = false
             listener?.onAutoAdvance(nextEntry)
+            if (nextStream.isStale(clock())) {
+                startJob?.cancel()
+                val position = engine.player.currentPosition.coerceAtLeast(0L)
+                val playWhenReady = engine.player.playWhenReady
+                startJob = externalScope.launch {
+                    val fresh = reResolveIfStale(nextStream) ?: return@launch
+                    currentStream = fresh
+                    startSafely(fresh, position, playWhenReady)
+                }
+            }
             return
         }
         val entry = currentEntry ?: return
@@ -450,8 +524,34 @@ class OmniPlayerImpl(
         )
     }
 
-    private fun startCurrentStream(fromPositionMs: Long, playWhenReady: Boolean) {
-        val stream = currentStream ?: return
+    private suspend fun reResolveIfStale(stream: ResolvedStream): ResolvedStream? {
+        if (!stream.isStale(clock())) return stream
+        val resolved = try {
+            resolver.resolve(stream.entry)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            surfaceError("failed to re-resolve stream", error)
+            return null
+        }
+        if (resolved == null) {
+            surfaceError("stream expired and no resolver returned a fresh stream")
+            return null
+        }
+        return resolved
+    }
+
+    private fun startSafely(stream: ResolvedStream, fromPositionMs: Long, playWhenReady: Boolean) {
+        try {
+            startCurrentStream(stream, fromPositionMs, playWhenReady)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            surfaceError("failed to start stream", error)
+        }
+    }
+
+    private fun startCurrentStream(stream: ResolvedStream, fromPositionMs: Long, playWhenReady: Boolean) {
         processors.fade.flush()
         val player = engine.player as ExoPlayer
         val sources = buildList {
@@ -461,6 +561,32 @@ class OmniPlayerImpl(
         player.setMediaSources(sources, 0, fromPositionMs)
         player.prepare()
         if (playWhenReady) player.play()
+    }
+
+    private fun surfaceError(message: String, cause: Throwable? = null) {
+        val error = if (cause is PlaybackException) {
+            cause
+        } else {
+            val detail = cause?.message?.takeIf { it.isNotBlank() }
+            PlaybackException(
+                if (detail == null) message else "$message: $detail",
+                cause,
+                PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+            )
+        }
+        bridge.publishError(error)
+        listener?.onError(currentEntry, error)
+    }
+
+    private fun isAuthExpiryError(error: PlaybackException): Boolean {
+        var cause: Throwable? = error
+        while (cause != null) {
+            if (cause is HttpDataSource.InvalidResponseCodeException) {
+                return cause.responseCode == 401 || cause.responseCode == 403 || cause.responseCode == 410
+            }
+            cause = cause.cause
+        }
+        return false
     }
 
     private fun attachPreparedToEngine() {
@@ -504,6 +630,10 @@ class OmniPlayerImpl(
                 peq = effective,
             ),
         )
+    }
+
+    private companion object {
+        const val RESUME_REFRESH_AFTER_MS = 30_000L
     }
 
     private data class SettingsSnapshot(

@@ -5,6 +5,9 @@ import android.net.Uri
 import android.os.Looper
 import androidx.media3.common.Player
 import androidx.media3.database.StandaloneDatabaseProvider
+import androidx.media3.datasource.BaseDataSource
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.test.utils.FakeClock
 import androidx.test.core.app.ApplicationProvider
@@ -20,11 +23,14 @@ import app.omnisonic.playback.api.rg.ReplayGainMode
 import app.omnisonic.playback.api.rg.ReplayGainSource
 import app.omnisonic.playback.api.rg.ReplayGainValues
 import app.omnisonic.playback.api.stream.ResolvedStream
+import app.omnisonic.playback.api.stream.StreamResolver
+import app.omnisonic.playback.api.stream.StreamTransport
 import app.omnisonic.core.model.log.LogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.network.ClientProfile
 import app.omnisonic.core.network.ConnectionSpec
 import app.omnisonic.core.network.HttpClientFactory
+import app.omnisonic.playback.cache.DataSourceRegistry
 import app.omnisonic.playback.cache.MediaDataSourceFactoryProvider
 import app.omnisonic.playback.cache.PlaybackCacheManager
 import app.omnisonic.playback.engine.ExoEngineFactory
@@ -50,6 +56,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -61,6 +68,7 @@ class OmniPlayerImplTest {
     private lateinit var settings: PlaybackSettingsStore
     private lateinit var chainFactory: SinkProcessorChainFactory
     private lateinit var cacheManager: PlaybackCacheManager
+    private lateinit var dataSourceRegistry: DataSourceRegistry
     private lateinit var mediaDataSources: MediaDataSourceFactoryProvider
     private lateinit var providerClients: MutableMap<Long, OkHttpClient>
     private lateinit var engineFactory: AudioEngineFactory
@@ -82,12 +90,14 @@ class OmniPlayerImplTest {
         cacheDir = File(context.cacheDir, "t6-${System.nanoTime()}")
         providerClients = mutableMapOf(1L to OkHttpClient())
         mediaDataSources = MediaDataSourceFactoryProvider { id -> providerClients.getValue(id) }
+        dataSourceRegistry = DataSourceRegistry()
         cacheManager = PlaybackCacheManager(
             context = context,
             cacheDir = cacheDir,
             databaseProvider = StandaloneDatabaseProvider(context),
             initialMaxBytes = 32L * 1024 * 1024,
             upstreamFactory = { stream -> mediaDataSources.factoryFor(stream.entry.providerId) },
+            dataSourceRegistry = dataSourceRegistry,
         )
         port = TestQueuePort()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -324,6 +334,261 @@ class OmniPlayerImplTest {
     }
 
     @Test
+    fun `engine swap preserves position speed pitch and play intent with a prepared next`() {
+        val player = newPlayer()
+        repeat(4) { serveWav(durationMs = 5_000) }
+        player.play(httpStream(), entry(externalId = "song-1", queueItemId = 1))
+        await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
+        player.prepareNext(
+            httpStream(path = "/track-2.wav", externalId = "song-2", queueItemId = 2),
+        )
+        await("prepared next published") { player.exposedPlayer().currentTimeline.windowCount == 2 }
+        player.setPlaybackSpeed(1.25f)
+        player.setPlaybackPitch(0.8f)
+        player.seekTo(200)
+
+        val exposed = player.exposedPlayer()
+        player.applyEngineConfig(EngineConfig(minBufferMs = 45_000))
+
+        await("swapped engine ready with the prepared next") {
+            exposed.playbackState == Player.STATE_READY &&
+                exposed.currentMediaItem?.mediaId == "1" &&
+                exposed.currentPosition >= 180L &&
+                exposed.currentTimeline.windowCount == 2
+        }
+        assertThat(exposed.playbackParameters.speed).isEqualTo(1.25f)
+        assertThat(exposed.playbackParameters.pitch).isEqualTo(0.8f)
+        assertThat(exposed.playWhenReady).isTrue()
+    }
+
+    @Test
+    fun `engine swap reattaches exactly one listener without losing engine events`() {
+        val player = newPlayer()
+        val spy = ListenerSpy()
+        player.setListener(spy)
+        repeat(4) { serveWav(durationMs = 1_200) }
+
+        player.play(httpStream(), entry())
+        await("first engine ready") { spy.ready.size == 1 }
+
+        player.applyEngineConfig(EngineConfig(minBufferMs = 45_000))
+
+        await("new engine ready") { spy.ready.size == 2 }
+        await("finished once after the swap") { spy.finished.size == 1 }
+        shadowOf(Looper.getMainLooper()).idle()
+        assertThat(spy.ready).hasSize(2)
+        assertThat(spy.finished).hasSize(1)
+        assertThat(spy.errors).isEmpty()
+    }
+
+    @Test
+    fun `stale stream is re-resolved before an engine swap restart`() {
+        var now = 1_000_000L
+        val requested = mutableListOf<PlaybackQueueEntry>()
+        val resolver = object : StreamResolver {
+            override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream {
+                requested += entry
+                return ResolvedStream(
+                    entry = entry,
+                    uri = server.url("/fresh.wav").toString(),
+                    expiresAtMs = now + 600_000,
+                )
+            }
+        }
+        val paths = recordWavServer(durationMs = 5_000)
+        val player = newPlayer(clock = { now })
+        player.setStreamResolver(resolver)
+        val entry = entry()
+        val initial = ResolvedStream(
+            entry = entry,
+            uri = server.url("/initial.wav").toString(),
+            expiresAtMs = now + 600_000,
+        )
+
+        player.play(initial, entry)
+        await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
+        assertThat(requested).isEmpty()
+
+        now += 1_000_000
+        player.applyEngineConfig(EngineConfig(minBufferMs = 45_000))
+
+        await("fresh stream ready") {
+            requested.size == 1 && player.exposedPlayer().playbackState == Player.STATE_READY
+        }
+        assertThat(player.exposedPlayer().currentMediaItem?.mediaId).isEqualTo(entry.queueItemId.toString())
+        assertThat(paths).contains("/initial.wav")
+        assertThat(paths).contains("/fresh.wav")
+    }
+
+    @Test
+    fun `expired stream recovers from one unauthorized response with a single re-resolve`() {
+        val requested = mutableListOf<PlaybackQueueEntry>()
+        val resolver = object : StreamResolver {
+            override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream =
+                ResolvedStream(entry, server.url("/ok.wav").toString()).also { requested += entry }
+        }
+        val paths = CopyOnWriteArrayList<String>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                paths += request.path.orEmpty()
+                return if (request.path == "/bad.wav") {
+                    MockResponse().setResponseCode(403)
+                } else {
+                    MockResponse().setBody(okio.Buffer().write(wavBytes(300)))
+                }
+            }
+        }
+        val player = newPlayer()
+        val spy = ListenerSpy()
+        player.setListener(spy)
+        player.setStreamResolver(resolver)
+        val entry = entry()
+
+        player.play(ResolvedStream(entry, server.url("/bad.wav").toString()), entry)
+
+        await("recovered") { player.exposedPlayer().playbackState == Player.STATE_READY }
+        assertThat(requested).hasSize(1)
+        assertThat(spy.errors).isEmpty()
+        assertThat(paths).contains("/ok.wav")
+        assertThat(player.exposedPlayer().currentPosition).isAtMost(1_000L)
+    }
+
+    @Test
+    fun `repeated unauthorized response surfaces one error without looping`() {
+        val requested = mutableListOf<PlaybackQueueEntry>()
+        val resolver = object : StreamResolver {
+            override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream =
+                ResolvedStream(entry, server.url("/bad2.wav").toString()).also { requested += entry }
+        }
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                MockResponse().setResponseCode(403)
+        }
+        val player = newPlayer()
+        val spy = ListenerSpy()
+        player.setListener(spy)
+        player.setStreamResolver(resolver)
+        val entry = entry()
+
+        player.play(ResolvedStream(entry, server.url("/bad.wav").toString()), entry)
+
+        await("error surfaced") { spy.errors.isNotEmpty() }
+        shadowOf(Looper.getMainLooper()).idle()
+        assertThat(requested).hasSize(1)
+        assertThat(spy.errors).hasSize(1)
+    }
+
+    @Test
+    fun `stream without an expiry is never re-resolved`() {
+        val requested = mutableListOf<PlaybackQueueEntry>()
+        val resolver = object : StreamResolver {
+            override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream {
+                requested += entry
+                return ResolvedStream(entry, server.url("/fresh.wav").toString())
+            }
+        }
+        serveWav(durationMs = 300)
+        val player = newPlayer()
+        player.setStreamResolver(resolver)
+        val entry = entry()
+
+        player.play(
+            ResolvedStream(entry, server.url("/track.wav").toString(), expiresAtMs = null),
+            entry,
+        )
+
+        await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
+        assertThat(requested).isEmpty()
+    }
+
+    @Test
+    fun `custom transport is served by the registered data source factory`() {
+        dataSourceRegistry.register(
+            "fake",
+            object : DataSource.Factory {
+                override fun createDataSource(): DataSource = ByteArrayDataSource(wavBytes(400))
+            },
+        )
+        val player = newPlayer()
+        val entry = entry()
+
+        player.play(
+            ResolvedStream(
+                entry = entry,
+                uri = "custom://track.wav",
+                transport = StreamTransport.CUSTOM,
+                customDataSourceFactory = "fake",
+            ),
+            entry,
+        )
+
+        await("custom stream ready") {
+            player.exposedPlayer().playbackState == Player.STATE_READY
+        }
+    }
+
+    @Test
+    fun `unregistered custom data source surfaces an error`() {
+        val player = newPlayer()
+        val spy = ListenerSpy()
+        player.setListener(spy)
+        val entry = entry()
+
+        player.play(
+            ResolvedStream(
+                entry = entry,
+                uri = "custom://track.wav",
+                transport = StreamTransport.CUSTOM,
+                customDataSourceFactory = "missing",
+            ),
+            entry,
+        )
+
+        await("error surfaced") { spy.errors.isNotEmpty() }
+        assertThat(spy.errors.single().second.message.orEmpty()).contains("missing")
+    }
+
+    @Test
+    fun `stale prepared next is re-resolved at promotion`() {
+        var now = 1_000_000L
+        val requested = CopyOnWriteArrayList<PlaybackQueueEntry>()
+        val freshNext = server.url("/next-fresh.wav").toString()
+        val resolver = object : StreamResolver {
+            override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream {
+                requested += entry
+                return ResolvedStream(entry, freshNext, expiresAtMs = now + 600_000)
+            }
+        }
+        val paths = recordWavServer(durationMs = 5_000)
+        val player = newPlayer(clock = { now })
+        val spy = ListenerSpy()
+        player.setListener(spy)
+        player.setStreamResolver(resolver)
+        val first = entry(externalId = "song-1", queueItemId = 1)
+        val second = entry(externalId = "song-2", queueItemId = 2)
+
+        player.play(ResolvedStream(first, server.url("/current.wav").toString()), first)
+        await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
+
+        player.prepareNext(
+            ResolvedStream(
+                entry = second,
+                uri = server.url("/next-old.wav").toString(),
+                expiresAtMs = now + 120_000,
+            ),
+        )
+        assertThat(requested).isEmpty()
+
+        now += 300_000
+
+        await("auto advance") { spy.autoAdvances.isNotEmpty() }
+        await("fresh next resolved and used") {
+            requested.size == 1 && paths.contains("/next-fresh.wav")
+        }
+        assertThat(requested.single().queueItemId).isEqualTo(2L)
+    }
+
+    @Test
     fun `two queued wavs advance without idle or buffering between tracks`() {
         val player = newPlayer()
         val spy = ListenerSpy()
@@ -411,8 +676,11 @@ class OmniPlayerImplTest {
     private val processors: SinkProcessorChain
         get() = checkNotNull(chainFactory.active)
 
-    private fun newPlayer(rgSource: ReplayGainSource = NoReplayGainSource): OmniPlayerImpl =
-        OmniPlayerImpl(engineFactory, chainFactory, cacheManager, settings, rgSource, scope, port)
+    private fun newPlayer(
+        rgSource: ReplayGainSource = NoReplayGainSource,
+        clock: () -> Long = System::currentTimeMillis,
+    ): OmniPlayerImpl =
+        OmniPlayerImpl(engineFactory, chainFactory, cacheManager, settings, rgSource, scope, port, clock)
             .also { player = it }
 
     private fun entry(providerId: Long = 1L, externalId: String = "song-1", queueItemId: Long? = null) = PlaybackQueueEntry(
@@ -446,6 +714,17 @@ class OmniPlayerImplTest {
 
     private fun serveWav(durationMs: Int = 300) {
         server.enqueue(MockResponse().setBody(okio.Buffer().write(wavBytes(durationMs))))
+    }
+
+    private fun recordWavServer(durationMs: Int = 300): MutableList<String> {
+        val paths = CopyOnWriteArrayList<String>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                paths += request.path.orEmpty()
+                return MockResponse().setBody(okio.Buffer().write(wavBytes(durationMs)))
+            }
+        }
+        return paths
     }
 
     private fun await(message: String, timeoutMs: Long = 10_000, condition: () -> Boolean) {
@@ -488,6 +767,34 @@ class OmniPlayerImplTest {
             le16((sin(2.0 * PI * 440.0 * i / sampleRate) * 8_000).toInt())
         }
         return out.toByteArray()
+    }
+
+    private class ByteArrayDataSource(private val bytes: ByteArray) : BaseDataSource(false) {
+        private var position = 0
+        private var uri: Uri? = null
+
+        override fun open(dataSpec: DataSpec): Long {
+            uri = dataSpec.uri
+            position = dataSpec.position.toInt()
+            transferInitializing(dataSpec)
+            transferStarted(dataSpec)
+            return (bytes.size - position).toLong()
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (position >= bytes.size) return androidx.media3.common.C.RESULT_END_OF_INPUT
+            val count = minOf(length, bytes.size - position)
+            System.arraycopy(bytes, position, buffer, offset, count)
+            position += count
+            bytesTransferred(count)
+            return count
+        }
+
+        override fun getUri(): Uri? = uri
+
+        override fun close() {
+            transferEnded()
+        }
     }
 
     private class ListenerSpy : OmniPlayerListener {

@@ -10,8 +10,10 @@ Confidence:
 - [VERIFIED] `ResolvedStream` carries a provider-stable `cacheKey`; `OmniPlayerImpl` sets both `MediaItem.customCacheKey` and the cache factory key from it.
 - [INFERRED] Providers should derive the key from `StreamKey(providerId, externalId, maxBitRateKbps, format)` so transcode bitrate or format variants remain distinct while auth salts do not.
 - [VERIFIED] The Coil `CoverKeyer` maps `CoverImageKey` to `cover:$providerId:$imageId:$size`.
+- [VERIFIED] `ResolvedStream.expiresAtMs == null` never expires; a non-null value becomes stale 60 seconds before the deadline.
+- [VERIFIED] `StreamTransport` selects the upstream path: provider HTTP, direct URI, or a registered custom `DataSource.Factory`; the cache key is unchanged.
 
-Date: 2026-10-30
+Date: 2026-11-01
 
 Links: `../protocol/subsonic-auth.md`
 
@@ -34,6 +36,20 @@ stream:<providerId>:<externalId>:<maxBitRateKbps-or-auto>:<format-or-auto>
 [VERIFIED] `cachedBytesFor`, `isCached`, `setPerUriCacheFirst`, and `clearPerUriOverride` accept the stable cache key rather than a URL string.
 
 [VERIFIED] A write through the first salted URL is read through a second salted URL with no additional MockWebServer request when both use the same stream key.
+
+## Stream freshness
+
+[VERIFIED] `OmniPlayerImpl` re-resolves a stale stream before starting it, when an engine swap restarts playback, when resuming after a pause of at least 30 seconds, and when a stale prepared next item is promoted. The replacement stream keeps the queue entry and cache key, so a refreshed signed URL reads the same cache entry.
+
+[VERIFIED] One `401`, `403`, or `410` response per stream triggers a single resolver call and a restart at the captured position; a second failure surfaces one error to the listener and is not retried.
+
+[VERIFIED] A stream without `expiresAtMs` is never re-resolved by the player.
+
+## Transport selection
+
+[VERIFIED] `ResolvedStream.transport` defaults to `PROVIDER_HTTP`, which keeps the existing per-provider OkHttp path. `DIRECT_URI` (and the legacy `content://`/`file://` route) uses `DefaultDataSource` without a provider base factory. `CUSTOM` looks up `customDataSourceFactory` in the `DataSourceRegistry` owned by `PlaybackCacheManager`; an unregistered id surfaces a playback error instead of silently falling back.
+
+[VERIFIED] Cache wrapping still happens before transport selection, so a custom or direct source can opt into caching through the same `cacheKey` and per-URI override.
 
 ## Cover images
 

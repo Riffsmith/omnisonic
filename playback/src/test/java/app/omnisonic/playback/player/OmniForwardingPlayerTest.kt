@@ -166,6 +166,9 @@ class OmniForwardingPlayerTest {
         }
         assertThat(p.exposedPlayer().isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)).isTrue()
 
+        assertThat(p.exposedPlayer().isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS)).isTrue()
+        assertThat(p.exposedPlayer().isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)).isTrue()
+
         port.state.value = QueueState(entries = listOf(queueEntry(1), queueEntry(2)), playIndex = 1)
         await("next withdrawn at the end") {
             !p.exposedPlayer().availableCommands.contains(Player.COMMAND_SEEK_TO_NEXT)
@@ -178,6 +181,12 @@ class OmniForwardingPlayerTest {
         )
         await("next returns under repeat all") {
             p.exposedPlayer().availableCommands.contains(Player.COMMAND_SEEK_TO_NEXT)
+        }
+
+        port.state.value = QueueState()
+        await("next and previous withdrawn with no current entry") {
+            !p.exposedPlayer().availableCommands.contains(Player.COMMAND_SEEK_TO_NEXT) &&
+                !p.exposedPlayer().availableCommands.contains(Player.COMMAND_SEEK_TO_PREVIOUS)
         }
     }
 

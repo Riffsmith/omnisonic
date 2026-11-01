@@ -8,6 +8,7 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import app.omnisonic.playback.api.stream.ResolvedStream
+import app.omnisonic.playback.api.stream.StreamTransport
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -22,6 +23,7 @@ class PlaybackCacheManager(
     private val databaseProvider: DatabaseProvider,
     initialMaxBytes: Long,
     private val upstreamFactory: (ResolvedStream) -> DataSource.Factory,
+    private val dataSourceRegistry: DataSourceRegistry = DataSourceRegistry(),
 ) {
     private val lock = Any()
     private var maxBytes = initialMaxBytes
@@ -91,8 +93,19 @@ class PlaybackCacheManager(
         }
     }
 
-    private fun wrappedUpstream(stream: ResolvedStream): DataSource.Factory =
-        DefaultDataSource.Factory(context, upstreamFactory(stream))
+    private fun wrappedUpstream(stream: ResolvedStream): DataSource.Factory = when {
+        stream.transport == StreamTransport.CUSTOM -> {
+            val id = requireNotNull(stream.customDataSourceFactory) {
+                "custom stream is missing customDataSourceFactory"
+            }
+            val factory = dataSourceRegistry.get(id)
+                ?: error("no data source factory registered for '$id'")
+            DefaultDataSource.Factory(context, factory)
+        }
+        stream.transport == StreamTransport.DIRECT_URI || stream.routedDirect ->
+            DefaultDataSource.Factory(context)
+        else -> DefaultDataSource.Factory(context, upstreamFactory(stream))
+    }
 
     private fun newCache(maxBytes: Long): SimpleCache =
         SimpleCache(cacheDir, LeastRecentlyUsedCacheEvictor(maxBytes), databaseProvider)
