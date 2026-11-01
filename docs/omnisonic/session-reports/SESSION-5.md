@@ -170,7 +170,7 @@ the recommended option made in the last session"):
   green; settings/engine/player tests updated to the knob-free API. Test failing
   state shown before removal. Docs `offload-and-extensions.md` updated to record the
   resolved decision.
-- Commit: **see git log** `fix(T15): defer the decoder preference to Phase 4`
+- Commit: **8e1c2df** `fix(T15): defer the decoder preference to Phase 4`
 
 ---
 
@@ -182,7 +182,7 @@ the recommended option made in the last session"):
   provider-navidrome 26 (4 skipped) = **322 tests, 0 failures, 0 errors, 4 skipped**.
 - `scripts/check-banned-names.sh` over every changed non-docs file per task → clean
   each time. Docs files checked too.
-- Commits (separate per task): 4ffcce6 (T13), d9cee18 (T14), a62ec69 (T15).
+- Commits: 4ffcce6 (T13), d9cee18 (T14), a62ec69 (T15 verified-part), 8e1c2df (T15 decision implementation + decision docs), 4c04b78 and the report amendment (session docs).
 
 ## Decisions received this session
 
