@@ -1,19 +1,39 @@
 package app.omnisonic.core.data.db.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.GenreEntity
 
 @Dao
 interface GenreDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(genre: GenreEntity): Long
+    @Upsert
+    suspend fun upsertRow(genre: GenreEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(genres: List<GenreEntity>)
+    @Transaction
+    suspend fun upsert(genre: GenreEntity): Long {
+        val existingId = genre.id.takeIf { it != 0L }
+            ?: genre.externalId?.let { selectIdByProviderAndExternal(genre.providerId, it) }
+        return if (existingId == null) {
+            upsertRow(genre)
+        } else {
+            upsertRow(genre.copy(id = existingId))
+            existingId
+        }
+    }
+
+    @Upsert
+    suspend fun upsertRows(genres: List<GenreEntity>)
+
+    @Transaction
+    suspend fun upsertAll(genres: List<GenreEntity>) {
+        genres.forEach { upsert(it) }
+    }
+
+    @Query("SELECT id FROM genres WHERE providerId = :providerId AND externalId = :externalId")
+    suspend fun selectIdByProviderAndExternal(providerId: Long, externalId: String): Long?
 
     @Query("SELECT * FROM genres ORDER BY id")
     suspend fun selectAll(): List<GenreEntity>

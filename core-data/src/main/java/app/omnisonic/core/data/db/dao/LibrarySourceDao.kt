@@ -1,19 +1,39 @@
 package app.omnisonic.core.data.db.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.LibrarySourceEntity
 
 @Dao
 interface LibrarySourceDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(source: LibrarySourceEntity): Long
+    @Upsert
+    suspend fun upsertRow(source: LibrarySourceEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(sources: List<LibrarySourceEntity>)
+    @Transaction
+    suspend fun upsert(source: LibrarySourceEntity): Long {
+        val existingId = source.id.takeIf { it != 0L }
+            ?: source.externalId?.let { selectIdByProviderAndExternal(source.providerId, it) }
+        return if (existingId == null) {
+            upsertRow(source)
+        } else {
+            upsertRow(source.copy(id = existingId))
+            existingId
+        }
+    }
+
+    @Upsert
+    suspend fun upsertRows(sources: List<LibrarySourceEntity>)
+
+    @Transaction
+    suspend fun upsertAll(sources: List<LibrarySourceEntity>) {
+        sources.forEach { upsert(it) }
+    }
+
+    @Query("SELECT id FROM library_sources WHERE providerId = :providerId AND externalId = :externalId")
+    suspend fun selectIdByProviderAndExternal(providerId: Long, externalId: String): Long?
 
     @Query("SELECT * FROM library_sources WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<LibrarySourceEntity>

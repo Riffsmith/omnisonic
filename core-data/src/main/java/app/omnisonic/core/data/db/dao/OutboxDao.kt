@@ -2,6 +2,7 @@ package app.omnisonic.core.data.db.dao
 
 import androidx.room.Dao
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.OutboxItemEntity
 
@@ -9,7 +10,15 @@ import app.omnisonic.core.data.db.entity.OutboxItemEntity
 interface OutboxDao {
 
     @Upsert
-    suspend fun upsert(item: OutboxItemEntity)
+    suspend fun upsertRow(item: OutboxItemEntity)
+
+    @Transaction
+    suspend fun upsert(item: OutboxItemEntity) {
+        val existingId = item.id.takeIf { it != 0L } ?: selectTarget(
+            item.providerId, item.mediaType, item.externalId, item.action,
+        )?.id
+        upsertRow(if (existingId == null) item else item.copy(id = existingId))
+    }
 
     @Query(
         """

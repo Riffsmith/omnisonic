@@ -5,16 +5,34 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.ArtistEntity
 
 @Dao
 interface ArtistDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(artist: ArtistEntity): Long
+    @Upsert
+    suspend fun upsertRow(artist: ArtistEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(artists: List<ArtistEntity>)
+    @Transaction
+    suspend fun upsert(artist: ArtistEntity): Long {
+        val existingId = artist.id.takeIf { it != 0L }
+            ?: artist.externalId?.let { selectIdByProviderAndExternal(artist.providerId, it) }
+        return if (existingId == null) {
+            upsertRow(artist)
+        } else {
+            upsertRow(artist.copy(id = existingId))
+            existingId
+        }
+    }
+
+    @Upsert
+    suspend fun upsertRows(artists: List<ArtistEntity>)
+
+    @Transaction
+    suspend fun upsertAll(artists: List<ArtistEntity>) {
+        artists.forEach { upsert(it) }
+    }
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertOrIgnore(artist: ArtistEntity): Long

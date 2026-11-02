@@ -3,6 +3,7 @@ package app.omnisonic.core.data.db.dao
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.QueueEntryEntity
 import app.omnisonic.core.data.db.entity.QueueStateEntity
 
@@ -24,7 +25,7 @@ interface QueueDao {
     @Query("DELETE FROM queue_entries")
     suspend fun deleteEntries()
 
-    @Insert
+    @Upsert
     suspend fun upsertState(state: QueueStateEntity)
 
     @Query("SELECT * FROM queue_state WHERE id = :id")

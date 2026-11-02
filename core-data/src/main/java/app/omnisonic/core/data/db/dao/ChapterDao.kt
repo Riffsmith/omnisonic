@@ -1,18 +1,17 @@
 package app.omnisonic.core.data.db.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.ChapterEntity
 
 @Dao
 interface ChapterDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(chapter: ChapterEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(chapters: List<ChapterEntity>)
 
     @Query("SELECT * FROM chapters WHERE songId = :songId ORDER BY chapterIndex")

@@ -1,15 +1,14 @@
 package app.omnisonic.core.data.db.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.ProviderEntity
 
 @Dao
 interface ProviderDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(provider: ProviderEntity): Long
 
     @Query("SELECT * FROM providers ORDER BY displayOrder, id")

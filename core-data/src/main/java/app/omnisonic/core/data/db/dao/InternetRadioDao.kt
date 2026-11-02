@@ -1,19 +1,39 @@
 package app.omnisonic.core.data.db.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.InternetRadioEntity
 
 @Dao
 interface InternetRadioDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(radio: InternetRadioEntity): Long
+    @Upsert
+    suspend fun upsertRow(radio: InternetRadioEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(radios: List<InternetRadioEntity>)
+    @Transaction
+    suspend fun upsert(radio: InternetRadioEntity): Long {
+        val existingId = radio.id.takeIf { it != 0L }
+            ?: radio.externalId?.let { selectIdByProviderAndExternal(radio.providerId, it) }
+        return if (existingId == null) {
+            upsertRow(radio)
+        } else {
+            upsertRow(radio.copy(id = existingId))
+            existingId
+        }
+    }
+
+    @Upsert
+    suspend fun upsertRows(radios: List<InternetRadioEntity>)
+
+    @Transaction
+    suspend fun upsertAll(radios: List<InternetRadioEntity>) {
+        radios.forEach { upsert(it) }
+    }
+
+    @Query("SELECT id FROM internet_radios WHERE providerId = :providerId AND externalId = :externalId")
+    suspend fun selectIdByProviderAndExternal(providerId: Long, externalId: String): Long?
 
     @Query("SELECT * FROM internet_radios ORDER BY id")
     suspend fun selectAll(): List<InternetRadioEntity>

@@ -32,21 +32,13 @@ class SongRepository @Inject constructor(
             val songDao = db.songDao()
             val albumId = snapshot.albumExternalId
                 ?.let { db.albumDao().selectIdByProviderAndExternal(providerId, it) }
-            songDao.insertOrIgnore(
-                SongEntity(
-                    providerId = providerId,
-                    externalId = externalId,
-                    albumId = albumId,
-                    title = snapshot.title,
-                    displayArtist = snapshot.artistName,
-                    imagePath = snapshot.coverImageId,
-                    durationMs = snapshot.durationMs,
-                    // Epoch marks "never synced"; the syncer overwrites it with
-                    // the server value on the next pass.
-                    updatedAt = 0,
-                ),
-            )
-            songDao.fillSnapshotFields(
+            val existing = songDao.selectByProviderAndExternal(providerId, externalId)
+            val row = existing?.copy(
+                albumId = existing.albumId ?: albumId,
+                displayArtist = existing.displayArtist ?: snapshot.artistName,
+                imagePath = existing.imagePath ?: snapshot.coverImageId,
+                durationMs = existing.durationMs ?: snapshot.durationMs,
+            ) ?: SongEntity(
                 providerId = providerId,
                 externalId = externalId,
                 albumId = albumId,
@@ -54,7 +46,11 @@ class SongRepository @Inject constructor(
                 displayArtist = snapshot.artistName,
                 imagePath = snapshot.coverImageId,
                 durationMs = snapshot.durationMs,
+                // Epoch marks "never synced"; the syncer overwrites it with
+                // the server value on the next pass.
+                updatedAt = 0,
             )
+            songDao.upsert(row)
             songDao.selectIdByProviderAndExternal(providerId, externalId)
                 ?: error("song row missing after materialisation: provider $providerId external $externalId")
         }

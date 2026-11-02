@@ -1,20 +1,37 @@
 package app.omnisonic.core.data.db.dao
 
 import androidx.room.Dao
-import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 
 @Dao
 interface PlaylistDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(playlist: PlaylistEntity): Long
+    @Upsert
+    suspend fun upsertRow(playlist: PlaylistEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(playlists: List<PlaylistEntity>)
+    @Transaction
+    suspend fun upsert(playlist: PlaylistEntity): Long {
+        val existingId = playlist.id.takeIf { it != 0L }
+            ?: playlist.externalId?.let { selectByProviderAndExternal(playlist.providerId, it)?.id }
+        return if (existingId == null) {
+            upsertRow(playlist)
+        } else {
+            upsertRow(playlist.copy(id = existingId))
+            existingId
+        }
+    }
+
+    @Upsert
+    suspend fun upsertRows(playlists: List<PlaylistEntity>)
+
+    @Transaction
+    suspend fun upsertAll(playlists: List<PlaylistEntity>) {
+        playlists.forEach { upsert(it) }
+    }
 
     @Query("SELECT * FROM playlists ORDER BY id")
     suspend fun selectAll(): List<PlaylistEntity>
@@ -49,10 +66,10 @@ interface PlaylistDao {
 @Dao
 interface PlaylistEntryDao {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(entry: PlaylistEntryEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsertAll(entries: List<PlaylistEntryEntity>)
 
     @Query("SELECT * FROM playlists_entries WHERE playlistId = :playlistId ORDER BY entryOrder")
