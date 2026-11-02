@@ -27,6 +27,7 @@ class ProviderClientRegistry(
     private val mapper: ProviderConfigMapper,
     private val mediaClientFactory: (ConnectionSpec) -> OkHttpClient = ::defaultMediaClient,
     private val apiClientFactory: (ConnectionSpec) -> OkHttpClient = ::defaultApiClient,
+    private val onCredentialsUnreadable: suspend (Long) -> Unit = {},
     private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),
 ) {
     private data class CachedClient(
@@ -68,24 +69,35 @@ class ProviderClientRegistry(
         }
         cache[providerId]?.takeIf { it.builtForUpdatedAt == row.updatedAt }?.let { return it }
 
-        val connection = mapper.from(row) ?: run {
-            logger.warn(TAG, "provider $providerId has no usable connection block")
-            return null
+        when (val load = mapper.from(row)) {
+            is ProviderLoadResult.CredentialsUnreadable -> {
+                logger.warn(TAG, "provider $providerId credentials are unreadable; re-enter the password")
+                onCredentialsUnreadable(providerId)
+                return null
+            }
+
+            is ProviderLoadResult.Unloadable -> {
+                logger.warn(TAG, "provider $providerId has no usable connection block")
+                return null
+            }
+
+            is ProviderLoadResult.Loaded -> load.connection
+        }.let { connection ->
+            val provider = providerRegistry.create(row.api, connection) ?: run {
+                logger.warn(TAG, "no provider factory for api ${row.api}")
+                return null
+            }
+            val mediaSpec = specFor(connection, ClientProfile.MEDIA) ?: run {
+                logger.warn(TAG, "provider $providerId has an unloadable client keystore; mTLS would be silently dropped")
+                return null
+            }
+            val apiSpec = specFor(connection, ClientProfile.API) ?: return null
+            val mediaClient = mediaClientFactory(mediaSpec)
+            val apiClient = apiClientFactory(apiSpec)
+            val cached = CachedClient(provider, mediaClient, apiClient, row.updatedAt)
+            cache[providerId] = cached
+            return cached
         }
-        val provider = providerRegistry.create(row.api, connection) ?: run {
-            logger.warn(TAG, "no provider factory for api ${row.api}")
-            return null
-        }
-        val mediaSpec = specFor(connection, ClientProfile.MEDIA) ?: run {
-            logger.warn(TAG, "provider $providerId has an unloadable client keystore; mTLS would be silently dropped")
-            return null
-        }
-        val apiSpec = specFor(connection, ClientProfile.API) ?: return null
-        val mediaClient = mediaClientFactory(mediaSpec)
-        val apiClient = apiClientFactory(apiSpec)
-        val cached = CachedClient(provider, mediaClient, apiClient, row.updatedAt)
-        cache[providerId] = cached
-        return cached
     }
 
     /**

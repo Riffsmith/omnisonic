@@ -308,6 +308,23 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
         assertThat(registry.httpClientFor(1)).isNull()
     }
 
+    @Test
+    fun `unreadable credentials leave the provider unserved`() = runDbTest {
+        newProvider(id = 1, name = "a").let { seeded ->
+            providerDao.upsert(seeded.copy(api = "counting", secretBlob = "not-a-sealed-blob"))
+        }
+        val registry = ProviderClientRegistry(
+            database = db,
+            providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
+            mapper = ProviderConfigMapper(codec),
+            mediaClientFactory = { OkHttpClient() },
+            apiClientFactory = { OkHttpClient() },
+        )
+
+        assertThat(registry.providerFor(1)).isNull()
+        assertThat(registry.httpClientFor(1)).isNull()
+    }
+
     private fun pkcs12Bytes(): ByteArray {
         val certificate = HeldCertificate.Builder()
             .addSubjectAlternativeName("omnisonic-client")

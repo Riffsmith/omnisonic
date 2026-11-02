@@ -18,6 +18,21 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.Base64
 
+/**
+ * Outcome of loading a persisted provider row:
+ * - [Loaded]: a usable connection.
+ * - [CredentialsUnreadable]: the sealed secret blob exists but cannot be
+ *   unsealed (device-bound key gone, corrupt data). Never surfaced as empty
+ *   credentials; the caller shows re-enter-password via ProviderStatusTracker.
+ * - [Unloadable]: structurally unusable row (invalid endpoint, failed mTLS or
+ *   trust-anchor decode). This is the old `null`.
+ */
+sealed interface ProviderLoadResult {
+    data class Loaded(val connection: ProviderConnection) : ProviderLoadResult
+    data class CredentialsUnreadable(val providerId: Long) : ProviderLoadResult
+    data object Unloadable : ProviderLoadResult
+}
+
 class ProviderConfigMapper(
     private val codec: CredentialCodec,
     moshi: Moshi = OmnisonicJson.moshi,
@@ -34,32 +49,38 @@ class ProviderConfigMapper(
 
     private val certificateFactory = CertificateFactory.getInstance("X.509")
 
-    fun from(row: ProviderEntity): ProviderConnection? {
-        val endpoint = endpointFor(row) ?: return null
-        val secrets = codec.unseal(row.secretBlob) ?: SecretPayload()
+    fun from(row: ProviderEntity): ProviderLoadResult {
+        val endpoint = endpointFor(row) ?: return ProviderLoadResult.Unloadable
+        val secrets = when {
+            row.secretBlob == null -> SecretPayload()
+            else -> codec.unseal(row.secretBlob) ?: return ProviderLoadResult.CredentialsUnreadable(row.id)
+        }
         val options = runCatching { optionsAdapter.fromJson(row.optionsJson) }.getOrNull() ?: OptionsJson()
         val headers = runCatching { headersAdapter.fromJson(row.customHeadersJson) }.getOrNull() ?: emptyMap()
-        val trustedServerCertificates = decodeTrustedCertificates(row.trustedCertsBlob) ?: return null
+        val trustedServerCertificates = decodeTrustedCertificates(row.trustedCertsBlob)
+            ?: return ProviderLoadResult.Unloadable
         val clientCertificate = when (val mtls = decodeMtls(row, secrets)) {
             MtlsConfig.Disabled -> null
             is MtlsConfig.Ready -> mtls.spec
-            MtlsConfig.Invalid -> return null
+            MtlsConfig.Invalid -> return ProviderLoadResult.Unloadable
         }
 
-        return ProviderConnection(
-            providerId = row.id,
-            displayName = row.name,
-            endpoint = endpoint,
-            lastWorkingBlock = row.lastWorkingBlock,
-            authMethod = authMethodFor(row.authParametersJson, secrets),
-            username = row.username,
-            password = secrets.secretValues[SECRET_PASSWORD],
-            apiKey = secrets.secretValues[SECRET_API_KEY],
-            customHeaders = headers.filter { it.key.isNotBlank() },
-            serverSoftwareHint = options.serverSoftwareHint,
-            backdateScrobbles = decodeBackdateMode(options.backdateScrobbles),
-            clientCertificate = clientCertificate,
-            trustedServerCertificates = trustedServerCertificates,
+        return ProviderLoadResult.Loaded(
+            ProviderConnection(
+                providerId = row.id,
+                displayName = row.name,
+                endpoint = endpoint,
+                lastWorkingBlock = row.lastWorkingBlock,
+                authMethod = authMethodFor(row.authParametersJson, secrets),
+                username = row.username,
+                password = secrets.secretValues[SECRET_PASSWORD],
+                apiKey = secrets.secretValues[SECRET_API_KEY],
+                customHeaders = headers.filter { it.key.isNotBlank() },
+                serverSoftwareHint = options.serverSoftwareHint,
+                backdateScrobbles = decodeBackdateMode(options.backdateScrobbles),
+                clientCertificate = clientCertificate,
+                trustedServerCertificates = trustedServerCertificates,
+            ),
         )
     }
 

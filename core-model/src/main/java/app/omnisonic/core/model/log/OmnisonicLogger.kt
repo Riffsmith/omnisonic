@@ -36,7 +36,28 @@ class OmnisonicLogger(
     private fun write(level: LogLevel, tag: String, message: String, error: Throwable?) {
         if (level < minLevel) return
         val scrubbed = redactor.scrub(message)
-        val withCause = error?.let { "$scrubbed: ${redactor.scrub(it.toString())}" } ?: scrubbed
-        sink.write(level, tag, withCause, error)
+        // Sinks (Logcat in particular) print the throwable itself, so the raw
+        // error must never reach them: hand over a scrubbed wrapper that keeps
+        // the stack trace and cause chain.
+        sink.write(level, tag, scrubbed, error?.scrubbed())
+    }
+
+    private fun Throwable.scrubbed(depth: Int = 0): Throwable {
+        val copy = ScrubbedThrowable(redactor.scrub(message.orEmpty()), this)
+        if (depth < MAX_CAUSE_SCRUB_DEPTH) {
+            cause?.let { copy.initCause(it.scrubbed(depth + 1)) }
+        }
+        return copy
+    }
+
+    /** Same class shape and stack trace as the original, redacted message. */
+    private class ScrubbedThrowable(message: String, original: Throwable) : Throwable(message) {
+        init {
+            stackTrace = original.stackTrace
+        }
+    }
+
+    private companion object {
+        private const val MAX_CAUSE_SCRUB_DEPTH = 8
     }
 }

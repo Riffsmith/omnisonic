@@ -20,6 +20,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -111,7 +112,7 @@ class LocalProviderPersistenceTest {
             db.providerDao().upsert(row("DEVICE"))
             val loaded = db.providerDao().selectById(7L)!!
 
-            assertThat(mapper.from(loaded)!!.endpoint).isEqualTo(
+            assertThat((mapper.from(loaded) as ProviderLoadResult.Loaded).connection.endpoint).isEqualTo(
                 app.omnisonic.provider.api.ProviderEndpoint.None,
             )
             assertThat(providerRegistry().traitsFor(loaded.api)).isEqualTo(
@@ -130,7 +131,7 @@ class LocalProviderPersistenceTest {
         withDatabase { db ->
             db.providerDao().upsert(row("REMOTE_SERVER", api = "subsonic", host = " ", port = 4_433))
 
-            assertThat(mapper.from(db.providerDao().selectById(7L)!!)).isNull()
+            assertTrue(mapper.from(db.providerDao().selectById(7L)!!) is ProviderLoadResult.Unloadable)
             val registry = ProviderClientRegistry(db, providerRegistry(), mapper)
             assertThat(registry.providerFor(7L)).isNull()
         }
