@@ -24,7 +24,7 @@ interface OutboxDao {
         """
         SELECT * FROM outbox_items
         WHERE providerId = :providerId
-        ORDER BY nextAttemptAt, createdAt
+        ORDER BY nextAttemptAt, createdAt, id
         """,
     )
     suspend fun selectByProvider(providerId: Long): List<OutboxItemEntity>
@@ -33,7 +33,7 @@ interface OutboxDao {
         """
         SELECT * FROM outbox_items
         WHERE providerId = :providerId AND nextAttemptAt <= :now
-        ORDER BY nextAttemptAt
+        ORDER BY nextAttemptAt, createdAt, id
         """,
     )
     suspend fun selectDue(providerId: Long, now: Long): List<OutboxItemEntity>
@@ -42,7 +42,7 @@ interface OutboxDao {
         """
         SELECT * FROM outbox_items
         WHERE nextAttemptAt <= :now
-        ORDER BY nextAttemptAt, createdAt
+        ORDER BY nextAttemptAt, createdAt, id
         """,
     )
     suspend fun selectAllDue(now: Long): List<OutboxItemEntity>

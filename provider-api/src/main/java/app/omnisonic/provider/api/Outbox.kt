@@ -29,6 +29,22 @@ data class OutboxActionPayload(
     val playTimestamps: List<Long>? = null,
 )
 
+/**
+ * Action vocabulary shared by the enqueue side and the drainer. The Room
+ * outbox column stores these constants verbatim.
+ */
+object OutboxActions {
+    const val PLAY_COUNT = "play_count"
+    const val FAVORITE = "favorite"
+    const val USER_RATING = "user_rating"
+    const val RESUME_POINT = "resume_point"
+
+    /** Execution order per item; a resume-point clear never overtakes a play count. */
+    val ITEM_ORDER = listOf(PLAY_COUNT, FAVORITE, USER_RATING, RESUME_POINT)
+
+    fun orderOf(action: String): Int = ITEM_ORDER.indexOf(action).let { if (it < 0) ITEM_ORDER.size else it }
+}
+
 interface OutboxStore {
     suspend fun dueTasks(now: Long, providerId: Long?): List<OutboxTask>
     suspend fun complete(id: Long)
@@ -64,7 +80,14 @@ class OutboxDrainer(
         var completed = 0
         var progressed = 0
         var deferred = 0
-        for (task in store.dueTasks(clock(), providerId)) {
+        val due = store.dueTasks(clock(), providerId)
+        // Per-item action order: for the same (provider, type, id), play_count
+        // runs before favorite/user_rating before resume_point. Item groups
+        // keep their relative due order.
+        val ordered = due
+            .groupBy { Triple(it.providerId, it.mediaType, it.externalId) }
+            .flatMap { (_, tasks) -> tasks.sortedBy { OutboxActions.orderOf(it.action) } }
+        for (task in ordered) {
             if (providerId == null && runGate.check(task.providerId) != ProviderStatus.OK) {
                 logger.debug(TAG, "outbox task ${task.id} stays due; provider ${task.providerId} is blocked by the run gate")
                 continue
@@ -75,7 +98,7 @@ class OutboxDrainer(
                 deferred++
                 continue
             }
-            if (task.action == ACTION_PLAY_COUNT) probeOnce(task.providerId, provider)
+            if (task.action == OutboxActions.PLAY_COUNT) probeOnce(task.providerId, provider)
             val outcome = runCatchingCancellable { execute(task, provider) }
                 .getOrElse { error ->
                     logger.error(TAG, "outbox task ${task.id} failed", error)
@@ -105,18 +128,19 @@ class OutboxDrainer(
     }
 
     private suspend fun execute(task: OutboxTask, provider: MediaProvider): TaskOutcome {
+        val mediaType = mediaTypeOf(task)
         val payload = decodePayload(task.payloadJson)
         return when (task.action) {
-            ACTION_PLAY_COUNT -> handlePlayCount(task, payload, provider)
-            ACTION_FAVORITE -> handleSimple(task) {
-                payload.isFavorite?.let { provider.setFavorite(mediaTypeOf(task.mediaType), task.externalId, it) }
+            OutboxActions.PLAY_COUNT -> handlePlayCount(task, payload, provider)
+            OutboxActions.FAVORITE -> handleSimple(task) {
+                payload.isFavorite?.let { provider.setFavorite(mediaType, task.externalId, it) }
             }
 
-            ACTION_USER_RATING -> handleSimple(task) {
-                payload.userRating?.let { provider.setUserRating(mediaTypeOf(task.mediaType), task.externalId, it) }
+            OutboxActions.USER_RATING -> handleSimple(task) {
+                payload.userRating?.let { provider.setUserRating(mediaType, task.externalId, it) }
             }
 
-            ACTION_RESUME_POINT -> handleSimple(task) {
+            OutboxActions.RESUME_POINT -> handleSimple(task) {
                 payload.resumePointMs?.let { position ->
                     if (position > 0) provider.saveBookmark(task.externalId, position) else provider.deleteBookmark(task.externalId)
                 }
@@ -132,16 +156,14 @@ class OutboxDrainer(
     private suspend fun handlePlayCount(task: OutboxTask, payload: OutboxActionPayload, provider: MediaProvider): TaskOutcome {
         val delta = payload.playCountDelta
         if (delta == null || delta <= 0) {
-            logger.warn(TAG, "outbox task ${task.id} has no positive play delta; dropping")
-            return TaskOutcome.Completed
+            return parkEmptyPayload(task)
         }
         val timestamps = payload.playTimestamps
             ?.takeIf { it.isNotEmpty() }
             ?: payload.lastPlayedAt?.let { lastPlayedAt -> List(delta) { index -> lastPlayedAt + index } }
             ?: emptyList()
         if (timestamps.isEmpty()) {
-            logger.warn(TAG, "outbox task ${task.id} carries no play timestamps; dropping")
-            return TaskOutcome.Completed
+            return parkEmptyPayload(task)
         }
         val submitted = provider.submitPlays(task.externalId, timestamps)
         return when {
@@ -171,10 +193,7 @@ class OutboxDrainer(
 
     private suspend fun handleSimple(task: OutboxTask, action: suspend () -> Boolean?): TaskOutcome =
         when (val applied = action.invoke()) {
-            null -> {
-                logger.warn(TAG, "outbox task ${task.id} carries no payload value; dropping")
-                TaskOutcome.Completed
-            }
+            null -> parkEmptyPayload(task)
 
             true -> TaskOutcome.Completed
 
@@ -184,8 +203,27 @@ class OutboxDrainer(
             }
         }
 
-    private fun mediaTypeOf(raw: String): ProviderMediaType =
-        runCatching { ProviderMediaType.valueOf(raw) }.getOrDefault(ProviderMediaType.SONG)
+    /**
+     * A known action whose payload carries no usable value is structural
+     * corruption, not success: the row stays parked with a visible error
+     * instead of being dropped as COMPLETED (which would silently lose the
+     * user's favorite/rating/resume change).
+     */
+    private suspend fun parkEmptyPayload(task: OutboxTask): TaskOutcome {
+        logger.warn(TAG, "outbox task ${task.id} carries an empty payload; parking as failed")
+        store.fail(task.id, task.attempts + 1, clock() + backoffMs(task.attempts + 1), EMPTY_PAYLOAD_ERROR)
+        return TaskOutcome.Deferred
+    }
+
+    /** Unknown media-type values are parked; they are never guessed as songs. */
+    private fun mediaTypeOf(task: OutboxTask): ProviderMediaType {
+        val parsed = ProviderMediaType.entries.firstOrNull { it.name == task.mediaType }
+        if (parsed == null) {
+            logger.warn(TAG, "outbox task ${task.id} has unknown mediaType ${task.mediaType}")
+            throw UnknownMediaTypeException(task.mediaType)
+        }
+        return parsed
+    }
 
     private fun backoffMs(attempts: Int): Long =
         (BACKOFF_BASE_MS * shlExponent(attempts - 1)).coerceAtMost(BACKOFF_MAX_MS)
@@ -204,12 +242,11 @@ class OutboxDrainer(
         data object Deferred : TaskOutcome
     }
 
+    private class UnknownMediaTypeException(raw: String) : IllegalStateException("unknown media type: $raw")
+
     companion object {
         private const val TAG = "OutboxDrainer"
-        private const val ACTION_PLAY_COUNT = "play_count"
-        private const val ACTION_FAVORITE = "favorite"
-        private const val ACTION_USER_RATING = "user_rating"
-        private const val ACTION_RESUME_POINT = "resume_point"
+        const val EMPTY_PAYLOAD_ERROR = "empty payload"
         const val BACKOFF_BASE_MS = 15_000L
         const val BACKOFF_MAX_MS = 3_600_000L
         private const val MIN_BACKOFF_MULTIPLIER = 1L

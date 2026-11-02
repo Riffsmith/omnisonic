@@ -2,6 +2,7 @@ package app.omnisonic.core.data
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import app.omnisonic.provider.api.OutboxActions
 import org.junit.Before
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.OmnisonicDatabaseFactory
@@ -236,9 +237,9 @@ abstract class DatabaseTestBase {
             OutboxItemEntity(
                 id = 0,
                 providerId = providerId,
-                mediaType = "track",
+                mediaType = app.omnisonic.provider.api.ProviderMediaType.SONG.name,
                 externalId = "song-1",
-                action = OutboxQueueActions.PLAY_COUNT,
+                action = OutboxActions.PLAY_COUNT,
                 nextAttemptAt = 0,
                 createdAt = 1_000,
             ),
@@ -308,6 +309,3 @@ abstract class DatabaseTestBase {
         providerDao.selectById(providerId) ?: error("provider $providerId not found")
 }
 
-object OutboxQueueActions {
-    const val PLAY_COUNT = "play_count"
-}

@@ -3,6 +3,7 @@ package app.omnisonic.core.data.repository
 import androidx.room.withTransaction
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.queue.OutboxQueue
+import app.omnisonic.provider.api.ProviderMediaType
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,7 +38,7 @@ class PlayCounter @Inject constructor(
         )
         outboxQueue.enqueuePlayCountDelta(
             providerId = providerId,
-            mediaType = MEDIA_TYPE,
+            mediaType = ProviderMediaType.SONG,
             externalId = externalId,
             playedAtMs = playedAtMs,
             now = now,
@@ -62,9 +63,5 @@ class PlayCounter @Inject constructor(
             durationMs = durationMs,
         )
         songId
-    }
-
-    private companion object {
-        const val MEDIA_TYPE = "track"
     }
 }

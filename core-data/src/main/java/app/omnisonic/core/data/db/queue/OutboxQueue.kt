@@ -7,20 +7,14 @@ import app.omnisonic.core.data.db.entity.OutboxItemEntity
 import app.omnisonic.core.data.json.OmnisonicJson
 import app.omnisonic.core.data.providers.DefaultTraitsSource
 import app.omnisonic.core.data.providers.ProviderTraitsSource
+import app.omnisonic.provider.api.OutboxActionPayload
+import app.omnisonic.provider.api.OutboxActions
 import app.omnisonic.provider.api.OutboxEnqueueResult
+import app.omnisonic.provider.api.ProviderMediaType
 import app.omnisonic.provider.api.ProviderTraits
 import com.squareup.moshi.Moshi
 import javax.inject.Inject
 import javax.inject.Singleton
-
-data class OutboxPayload(
-    val playCountDelta: Int? = null,
-    val isFavorite: Boolean? = null,
-    val userRating: Int? = null,
-    val resumePointMs: Long? = null,
-    val lastPlayedAt: Long? = null,
-    val playTimestamps: List<Long>? = null,
-)
 
 @Singleton
 class OutboxQueue @Inject constructor(
@@ -30,7 +24,7 @@ class OutboxQueue @Inject constructor(
     moshi: Moshi = OmnisonicJson.moshi,
 ) {
 
-    private val payloadAdapter = moshi.adapter(OutboxPayload::class.java)
+    private val payloadAdapter = moshi.adapter(OutboxActionPayload::class.java)
 
     /**
      * Providers whose traits report no user-data reporting are skipped
@@ -38,17 +32,17 @@ class OutboxQueue @Inject constructor(
      */
     suspend fun enqueueMediaChange(
         providerId: Long,
-        mediaType: String,
+        mediaType: ProviderMediaType,
         externalId: String,
         action: String,
-        payload: OutboxPayload,
+        payload: OutboxActionPayload,
         now: Long,
     ): OutboxEnqueueResult {
         if (!traitsFor(providerId).reportsUserData) {
             return OutboxEnqueueResult.SkippedNoUserDataReporting
         }
         db.withTransaction {
-            val existing = outboxDao.selectTarget(providerId, mediaType, externalId, action)
+            val existing = outboxDao.selectTarget(providerId, mediaType.name, externalId, action)
             val merged = existing
                 ?.let { decode(it.payloadJson).merge(payload) }
                 ?: payload
@@ -56,7 +50,7 @@ class OutboxQueue @Inject constructor(
                 OutboxItemEntity(
                     id = existing?.id ?: 0,
                     providerId = providerId,
-                    mediaType = mediaType,
+                    mediaType = mediaType.name,
                     externalId = externalId,
                     action = action,
                     payloadJson = payloadAdapter.toJson(merged),
@@ -72,7 +66,7 @@ class OutboxQueue @Inject constructor(
 
     suspend fun enqueuePlayCountDelta(
         providerId: Long,
-        mediaType: String,
+        mediaType: ProviderMediaType,
         externalId: String,
         playedAtMs: Long,
         now: Long,
@@ -81,8 +75,8 @@ class OutboxQueue @Inject constructor(
             providerId,
             mediaType,
             externalId,
-            ACTION_PLAY_COUNT,
-            OutboxPayload(playCountDelta = 1, lastPlayedAt = playedAtMs, playTimestamps = listOf(playedAtMs)),
+            OutboxActions.PLAY_COUNT,
+            OutboxActionPayload(playCountDelta = 1, lastPlayedAt = playedAtMs, playTimestamps = listOf(playedAtMs)),
             now,
         )
 
@@ -96,32 +90,30 @@ class OutboxQueue @Inject constructor(
         return traitsSource.traitsFor(api)
     }
 
-    private fun decode(encoded: String?): OutboxPayload =
-        encoded?.let { runCatching { payloadAdapter.fromJson(it) }.getOrNull() } ?: OutboxPayload()
+    private fun decode(encoded: String?): OutboxActionPayload =
+        encoded?.let { runCatching { payloadAdapter.fromJson(it) }.getOrNull() } ?: OutboxActionPayload()
 
-    private fun OutboxPayload.merge(incoming: OutboxPayload): OutboxPayload = if (incoming.playCountDelta != null) {
-        copy(
-            playCountDelta = (playCountDelta ?: 0) + incoming.playCountDelta,
-            lastPlayedAt = incoming.lastPlayedAt ?: lastPlayedAt,
-            playTimestamps = ((playTimestamps.orEmpty()) + incoming.playTimestamps.orEmpty())
-                .takeLast(MAX_PLAY_TIMESTAMPS),
-        )
-    } else {
-        copy(
-            isFavorite = incoming.isFavorite ?: isFavorite,
-            userRating = incoming.userRating ?: userRating,
-            resumePointMs = incoming.resumePointMs ?: resumePointMs,
-            lastPlayedAt = incoming.lastPlayedAt ?: lastPlayedAt,
-            playTimestamps = incoming.playTimestamps ?: playTimestamps,
-        )
+    private fun OutboxActionPayload.merge(incoming: OutboxActionPayload): OutboxActionPayload {
+        val incomingDelta = incoming.playCountDelta
+        return if (incomingDelta != null) {
+            copy(
+                playCountDelta = (playCountDelta ?: 0) + incomingDelta,
+                lastPlayedAt = incoming.lastPlayedAt ?: lastPlayedAt,
+                playTimestamps = ((playTimestamps.orEmpty()) + incoming.playTimestamps.orEmpty())
+                    .takeLast(MAX_PLAY_TIMESTAMPS),
+            )
+        } else {
+            copy(
+                isFavorite = incoming.isFavorite ?: isFavorite,
+                userRating = incoming.userRating ?: userRating,
+                resumePointMs = incoming.resumePointMs ?: resumePointMs,
+                lastPlayedAt = incoming.lastPlayedAt ?: lastPlayedAt,
+                playTimestamps = incoming.playTimestamps ?: playTimestamps,
+            )
+        }
     }
 
     companion object {
-        const val ACTION_PLAY_COUNT = "play_count"
-        const val ACTION_FAVORITE = "favorite"
-        const val ACTION_USER_RATING = "user_rating"
-        const val ACTION_RESUME_POINT = "resume_point"
-
         /** Payload cap; overflow keeps the newest timestamps. */
         const val MAX_PLAY_TIMESTAMPS = 100
     }

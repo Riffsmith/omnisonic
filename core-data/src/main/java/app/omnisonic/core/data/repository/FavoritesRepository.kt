@@ -2,8 +2,10 @@ package app.omnisonic.core.data.repository
 
 import androidx.room.withTransaction
 import app.omnisonic.core.data.db.OmnisonicDatabase
-import app.omnisonic.core.data.db.queue.OutboxPayload
 import app.omnisonic.core.data.db.queue.OutboxQueue
+import app.omnisonic.provider.api.OutboxActionPayload
+import app.omnisonic.provider.api.OutboxActions
+import app.omnisonic.provider.api.ProviderMediaType
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,16 +28,12 @@ class FavoritesRepository @Inject constructor(
         db.songDao().setFavorite(songId, favorite = favorite, now = now)
         outboxQueue.enqueueMediaChange(
             providerId = providerId,
-            mediaType = MEDIA_TYPE,
+            mediaType = ProviderMediaType.SONG,
             externalId = externalId,
-            action = OutboxQueue.ACTION_FAVORITE,
-            payload = OutboxPayload(isFavorite = favorite),
+            action = OutboxActions.FAVORITE,
+            payload = OutboxActionPayload(isFavorite = favorite),
             now = now,
         )
         songId
-    }
-
-    private companion object {
-        const val MEDIA_TYPE = "track"
     }
 }

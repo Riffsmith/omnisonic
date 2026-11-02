@@ -31,7 +31,7 @@ private class FakeOutboxStore : OutboxStore {
     val failures = mutableListOf<TrackedFailure>()
     val progressed = mutableListOf<TrackedProgress>()
 
-    data class TrackedFailure(val id: Long, val attempts: Int, val nextAttemptAt: Long)
+    data class TrackedFailure(val id: Long, val attempts: Int, val nextAttemptAt: Long, val lastError: String?)
     data class TrackedProgress(val id: Long, val payloadJson: String?)
 
     override suspend fun dueTasks(now: Long, providerId: Long?): List<OutboxTask> = tasks.toList()
@@ -42,7 +42,7 @@ private class FakeOutboxStore : OutboxStore {
     }
 
     override suspend fun fail(id: Long, attempts: Int, nextAttemptAt: Long, lastError: String) {
-        failures += TrackedFailure(id, attempts, nextAttemptAt)
+        failures += TrackedFailure(id, attempts, nextAttemptAt, lastError)
         tasks.removeAll { it.id == id }
     }
 
@@ -51,12 +51,17 @@ private class FakeOutboxStore : OutboxStore {
         tasks.removeAll { it.id == id }
     }
 
-    fun add(action: String, payload: OutboxActionPayload, attempts: Int = 0): OutboxTask {
+    fun add(
+        action: String,
+        payload: OutboxActionPayload,
+        attempts: Int = 0,
+        mediaType: String = ProviderMediaType.SONG.name,
+    ): OutboxTask {
         val encoded = if (defaultValued(payload)) null else moshi.adapter(OutboxActionPayload::class.java).toJson(payload)
         val task = OutboxTask(
             id = (tasks.size + 1L),
             providerId = 7L,
-            mediaType = "SONG",
+            mediaType = mediaType,
             externalId = "song-1",
             action = action,
             attempts = attempts,
@@ -64,6 +69,10 @@ private class FakeOutboxStore : OutboxStore {
         )
         tasks += task
         return task
+    }
+
+    fun addRaw(task: OutboxTask) {
+        tasks += task
     }
 
     private fun defaultValued(payload: OutboxActionPayload) =
@@ -330,14 +339,76 @@ class OutboxDrainerTest {
     }
 
     @Test
-    fun `missing payload value drops the task`() = runTest {
+    fun `missing payload value parks the task as failed instead of completing it`() = runTest {
         val drain = drainer()
         store.add("favorite", OutboxActionPayload())
 
         val report = drain.drain()
 
-        assertEquals(1, report.completed)
+        assertEquals(1, report.deferred)
+        assertEquals(0, report.completed)
         assertTrue(provider.favorites.isEmpty())
+        val failure = store.failures.single()
+        assertEquals("empty payload", failure.lastError)
+        assertTrue(store.completed.isEmpty())
+    }
+
+    @Test
+    fun `play count task without a delta parks as failed`() = runTest {
+        val drain = drainer()
+        store.add("play_count", OutboxActionPayload())
+
+        val report = drain.drain()
+
+        assertEquals(1, report.deferred)
+        assertEquals("empty payload", store.failures.single().lastError)
+        assertTrue(provider.submittedPlays.isEmpty())
+    }
+
+    @Test
+    fun `unknown media type parks the task as failed without touching the provider`() = runTest {
+        val drain = drainer()
+        store.add("favorite", OutboxActionPayload(isFavorite = true), mediaType = "track")
+
+        val report = drain.drain()
+
+        assertEquals(1, report.deferred)
+        assertEquals(0, report.completed)
+        assertEquals("unknown media type: track", store.failures.single().lastError)
+        assertTrue(provider.favorites.isEmpty())
+        assertTrue(provider.submittedPlays.isEmpty())
+    }
+
+    @Test
+    fun `resume point clear runs after a play count task for the same item`() = runTest {
+        val drain = drainer()
+        // The resume_point row is due first (lower createdAt), the play_count row later.
+        val resume = OutboxTask(
+            id = 1L,
+            providerId = 7L,
+            mediaType = ProviderMediaType.SONG.name,
+            externalId = "song-1",
+            action = "resume_point",
+            attempts = 0,
+            payloadJson = payloadAdapter.toJson(OutboxActionPayload(resumePointMs = 0L)),
+        )
+        val play = OutboxTask(
+            id = 2L,
+            providerId = 7L,
+            mediaType = ProviderMediaType.SONG.name,
+            externalId = "song-1",
+            action = "play_count",
+            attempts = 0,
+            payloadJson = payloadAdapter.toJson(OutboxActionPayload(playCountDelta = 1, playTimestamps = listOf(5_000L))),
+        )
+        store.addRaw(resume)
+        store.addRaw(play)
+        provider.submitPlaysResult = 1
+
+        val report = drain.drain()
+
+        assertEquals(2, report.completed)
+        assertEquals(listOf("submitPlays", "deleteBookmark"), provider.events)
     }
 
     @Test

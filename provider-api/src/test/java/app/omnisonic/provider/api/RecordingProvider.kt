@@ -8,6 +8,9 @@ class RecordingProvider : MediaProvider {
     val deletedBookmarks = mutableListOf<String>()
     val probed = mutableListOf<Boolean>()
 
+    /** Cross-call ordered log of every provider interaction. */
+    val events = mutableListOf<String>()
+
     var submitPlaysResult: Int = 0
     var favoriteResult: Boolean = true
     var ratingResult: Boolean = true
@@ -51,6 +54,7 @@ class RecordingProvider : MediaProvider {
 
     override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int {
         submittedPlays += SubmittedPlay(externalId, timestamps)
+        events += "submitPlays"
         return submitPlaysResult
     }
 
@@ -62,21 +66,25 @@ class RecordingProvider : MediaProvider {
             throw IllegalStateException("injected")
         }
         favorites += Triple(mediaType, externalId, favorite)
+        events += "setFavorite"
         return favoriteResult
     }
 
     override suspend fun setUserRating(mediaType: ProviderMediaType, externalId: String, rating: Int): Boolean {
         userRatings += Triple(mediaType, externalId, rating)
+        events += "setUserRating"
         return ratingResult
     }
 
     override suspend fun saveBookmark(externalId: String, positionMs: Long): Boolean {
         savedBookmarks += externalId to positionMs
+        events += "saveBookmark"
         return bookmarkResult
     }
 
     override suspend fun deleteBookmark(externalId: String): Boolean {
         deletedBookmarks += externalId
+        events += "deleteBookmark"
         return bookmarkResult
     }
 

@@ -1,6 +1,9 @@
 package app.omnisonic.core.data
 
-import app.omnisonic.core.data.db.queue.OutboxPayload
+import app.omnisonic.core.data.db.entity.OutboxItemEntity
+import app.omnisonic.provider.api.OutboxActionPayload
+import app.omnisonic.provider.api.OutboxActions
+import app.omnisonic.provider.api.ProviderMediaType
 import app.omnisonic.core.data.db.queue.OutboxQueue
 import app.omnisonic.provider.api.OutboxEnqueueResult
 import app.omnisonic.provider.api.ProviderTraits
@@ -23,8 +26,8 @@ class OutboxQueueTest : DatabaseTestBase() {
         val provider = newProvider(id = 1)
         val queue = OutboxQueue(db, outboxDao, moshi = moshi)
 
-        queue.enqueuePlayCountDelta(provider.id, "track", "song-1", playedAtMs = 1_500, now = 1_000)
-        queue.enqueuePlayCountDelta(provider.id, "track", "song-1", playedAtMs = 2_500, now = 2_000)
+        queue.enqueuePlayCountDelta(provider.id, ProviderMediaType.SONG, "song-1", playedAtMs = 1_500, now = 1_000)
+        queue.enqueuePlayCountDelta(provider.id, ProviderMediaType.SONG, "song-1", playedAtMs = 2_500, now = 2_000)
 
         val items = outboxDao.selectByProvider(provider.id)
         assertThat(items).hasSize(1)
@@ -40,7 +43,7 @@ class OutboxQueueTest : DatabaseTestBase() {
         val queue = OutboxQueue(db, outboxDao, moshi = moshi)
 
         repeat(120) { index ->
-            queue.enqueuePlayCountDelta(provider.id, "track", "song-1", playedAtMs = index.toLong(), now = index.toLong())
+            queue.enqueuePlayCountDelta(provider.id, ProviderMediaType.SONG, "song-1", playedAtMs = index.toLong(), now = index.toLong())
         }
 
         val payload = payloadOf(outboxDao.selectByProvider(provider.id).single().payloadJson!!)
@@ -56,12 +59,12 @@ class OutboxQueueTest : DatabaseTestBase() {
         val provider = newProvider(id = 1)
         val queue = OutboxQueue(db, outboxDao, moshi = moshi)
 
-        queue.enqueueMediaChange(provider.id, "track", "song-1", OutboxQueue.ACTION_RESUME_POINT, OutboxPayload(playCountDelta = null), now = 1_000)
-        queue.enqueueMediaChange(provider.id, "track", "song-1", OutboxQueue.ACTION_RESUME_POINT, OutboxPayload(resumePointMs = 500, lastPlayedAt = 2_000), now = 2_000)
+        queue.enqueueMediaChange(provider.id, ProviderMediaType.SONG, "song-1", OutboxActions.RESUME_POINT, OutboxActionPayload(playCountDelta = null), now = 1_000)
+        queue.enqueueMediaChange(provider.id, ProviderMediaType.SONG, "song-1", OutboxActions.RESUME_POINT, OutboxActionPayload(resumePointMs = 500, lastPlayedAt = 2_000), now = 2_000)
 
         val items = outboxDao.selectByProvider(provider.id)
         assertThat(items).hasSize(1)
-        assertThat(items.single().action).isEqualTo(OutboxQueue.ACTION_RESUME_POINT)
+        assertThat(items.single().action).isEqualTo(OutboxActions.RESUME_POINT)
         val payload = payloadOf(items.single().payloadJson!!)
         assertThat(payload.playCountDelta).isNull()
         assertThat(payload.lastPlayedAt).isEqualTo(2_000)
@@ -73,12 +76,12 @@ class OutboxQueueTest : DatabaseTestBase() {
         val provider = newProvider(id = 1)
         val queue = OutboxQueue(db, outboxDao, moshi = moshi)
 
-        queue.enqueueMediaChange(provider.id, "track", "song-1", OutboxQueue.ACTION_FAVORITE, OutboxPayload(isFavorite = true), now = 1_000)
-        queue.enqueueMediaChange(provider.id, "track", "song-1", OutboxQueue.ACTION_USER_RATING, OutboxPayload(userRating = 5), now = 1_000)
+        queue.enqueueMediaChange(provider.id, ProviderMediaType.SONG, "song-1", OutboxActions.FAVORITE, OutboxActionPayload(isFavorite = true), now = 1_000)
+        queue.enqueueMediaChange(provider.id, ProviderMediaType.SONG, "song-1", OutboxActions.USER_RATING, OutboxActionPayload(userRating = 5), now = 1_000)
 
         val items = outboxDao.selectByProvider(provider.id)
         assertThat(items).hasSize(2)
-        assertThat(items.map { it.action }).containsExactly(OutboxQueue.ACTION_FAVORITE, OutboxQueue.ACTION_USER_RATING)
+        assertThat(items.map { it.action }).containsExactly(OutboxActions.FAVORITE, OutboxActions.USER_RATING)
     }
 
     @Test
@@ -87,7 +90,7 @@ class OutboxQueueTest : DatabaseTestBase() {
         seedOutboxItem(providerId = provider.id)
 
         val queued = outboxDao.selectDue(providerId = provider.id, now = 5_000)
-        assertThat(queued.map { it.action }).containsExactly(OutboxQueueActions.PLAY_COUNT)
+        assertThat(queued.map { it.action }).containsExactly(OutboxActions.PLAY_COUNT)
     }
 
     @Test
@@ -97,9 +100,9 @@ class OutboxQueueTest : DatabaseTestBase() {
         val queue = OutboxQueue(db, outboxDao, traitsSource = { localTraits }, moshi)
 
         val favorite = queue.enqueueMediaChange(
-            provider.id, "track", "song-1", OutboxQueue.ACTION_FAVORITE, OutboxPayload(isFavorite = true), now = 1_000,
+            provider.id, ProviderMediaType.SONG, "song-1", OutboxActions.FAVORITE, OutboxActionPayload(isFavorite = true), now = 1_000,
         )
-        val plays = queue.enqueuePlayCountDelta(provider.id, "track", "song-1", playedAtMs = 1_500, now = 2_000)
+        val plays = queue.enqueuePlayCountDelta(provider.id, ProviderMediaType.SONG, "song-1", playedAtMs = 1_500, now = 2_000)
 
         assertThat(favorite).isEqualTo(OutboxEnqueueResult.SkippedNoUserDataReporting)
         assertThat(plays).isEqualTo(OutboxEnqueueResult.SkippedNoUserDataReporting)
@@ -117,15 +120,69 @@ class OutboxQueueTest : DatabaseTestBase() {
             moshi,
         )
 
-        val result = queue.enqueuePlayCountDelta(remote.id, "track", "song-1", playedAtMs = 1_500, now = 1_000)
+        val result = queue.enqueuePlayCountDelta(remote.id, ProviderMediaType.SONG, "song-1", playedAtMs = 1_500, now = 1_000)
 
         assertThat(result).isEqualTo(OutboxEnqueueResult.Enqueued)
         assertThat(seenApis).containsExactly("subsonic")
         assertThat(outboxDao.selectByProvider(remote.id)).hasSize(1)
     }
 
-    private fun payloadOf(encoded: String): OutboxPayload {
-        val adapter = moshi.adapter(OutboxPayload::class.java)
+    @Test
+    fun roomColumnStoresTheProviderMediaTypeEnumName() = runDbTest {
+        val provider = newProvider(id = 1)
+        val queue = OutboxQueue(db, outboxDao, moshi = moshi)
+
+        queue.enqueuePlayCountDelta(provider.id, ProviderMediaType.SONG, "song-1", playedAtMs = 1_500, now = 1_000)
+
+        val item = outboxDao.selectByProvider(provider.id).single()
+        assertThat(item.mediaType).isEqualTo(app.omnisonic.provider.api.ProviderMediaType.SONG.name)
+    }
+
+    @Test
+    fun selectDueOrdersByNextAttemptThenCreatedAtThenId() = runDbTest {
+        val provider = newProvider(id = 1)
+        // Same nextAttemptAt for both rows; created later but inserted first.
+        outboxDao.upsert(
+            OutboxItemEntity(
+                providerId = provider.id,
+                mediaType = "SONG",
+                externalId = "song-a",
+                action = "favorite",
+                payloadJson = null,
+                nextAttemptAt = 5_000,
+                createdAt = 20,
+            ),
+        )
+        outboxDao.upsert(
+            OutboxItemEntity(
+                providerId = provider.id,
+                mediaType = "SONG",
+                externalId = "song-b",
+                action = "favorite",
+                payloadJson = null,
+                nextAttemptAt = 5_000,
+                createdAt = 10,
+            ),
+        )
+        outboxDao.upsert(
+            OutboxItemEntity(
+                providerId = provider.id,
+                mediaType = "SONG",
+                externalId = "song-c",
+                action = "favorite",
+                payloadJson = null,
+                nextAttemptAt = 5_000,
+                createdAt = 10,
+            ),
+        )
+
+        val due = outboxDao.selectDue(providerId = provider.id, now = 6_000)
+
+        assertThat(due.map { it.externalId }).containsExactly("song-b", "song-c", "song-a").inOrder()
+    }
+
+    private fun payloadOf(encoded: String): OutboxActionPayload {
+        val adapter = moshi.adapter(OutboxActionPayload::class.java)
         return adapter.fromJson(encoded) ?: error("payload not decodable")
     }
 }

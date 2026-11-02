@@ -1,7 +1,9 @@
 package app.omnisonic.core.data.queue
 
 import app.omnisonic.core.data.DatabaseTestBase
-import app.omnisonic.core.data.db.queue.OutboxPayload
+import app.omnisonic.provider.api.OutboxActionPayload
+import app.omnisonic.provider.api.OutboxActions
+import app.omnisonic.provider.api.ProviderMediaType
 import app.omnisonic.core.data.db.queue.OutboxQueue
 import app.omnisonic.core.data.db.queue.RoomOutboxStore
 import app.omnisonic.core.model.log.ConsoleLogSink
@@ -35,9 +37,9 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             server.start()
             val client = clientFor(server, serverSoftwareHint = "navidrome")
             val queue = OutboxQueue(db, outboxDao)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_500, now = 2)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_001_000, now = 3)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_500, now = 2)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_001_000, now = 3)
 
             val report = OutboxDrainer(
                 store = RoomOutboxStore(outboxDao),
@@ -70,8 +72,8 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             server.start()
             val client = clientFor(server, serverSoftwareHint = "navidrome")
             val queue = OutboxQueue(db, outboxDao)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 2)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 2)
 
             OutboxDrainer(
                 store = RoomOutboxStore(outboxDao),
@@ -100,7 +102,7 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             server.start()
             val client = clientFor(server, serverSoftwareHint = "navidrome")
             val queue = OutboxQueue(db, outboxDao)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
 
             val drainer = OutboxDrainer(
                 store = RoomOutboxStore(outboxDao),
@@ -113,7 +115,7 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             server.takeRequest()
             val scrobbleOne = server.takeRequest().requestUrl!!
 
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_123, now = 3)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_123, now = 3)
             drainer.drain(providerId = 1)
             val scrobbleTwo = server.takeRequest().requestUrl!!
 
@@ -132,7 +134,7 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             server.start()
             val client = clientFor(server, serverSoftwareHint = "navidrome", backdateScrobbles = "off")
             val queue = OutboxQueue(db, outboxDao)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
 
             OutboxDrainer(
                 store = RoomOutboxStore(outboxDao),
@@ -156,7 +158,7 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             server.start()
             val client = clientFor(server, serverSoftwareHint = "unknown-server")
             val queue = OutboxQueue(db, outboxDao)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
 
             OutboxDrainer(
                 store = RoomOutboxStore(outboxDao),
@@ -180,13 +182,13 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             server.start()
             val client = clientFor(server, serverSoftwareHint = "navidrome")
             val queue = OutboxQueue(db, outboxDao)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
             queue.enqueueMediaChange(
                 providerId = 1,
-                mediaType = "SONG",
+                mediaType = ProviderMediaType.SONG,
                 externalId = "song-1",
-                action = OutboxQueue.ACTION_RESUME_POINT,
-                payload = OutboxPayload(resumePointMs = 0),
+                action = OutboxActions.RESUME_POINT,
+                payload = OutboxActionPayload(resumePointMs = 0),
                 now = 2,
             )
 
@@ -228,7 +230,7 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             repeat(3) { index ->
                 queue.enqueuePlayCountDelta(
                     providerId = 1,
-                    mediaType = "SONG",
+                    mediaType = ProviderMediaType.SONG,
                     externalId = "song-1",
                     playedAtMs = 1_700_000_000_000 + index,
                     now = 1,
@@ -259,8 +261,8 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             val client = clientFor(server, serverSoftwareHint = "navidrome")
             val store = RoomOutboxStore(outboxDao)
             val queue = OutboxQueue(db, outboxDao)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
-            queue.enqueuePlayCountDelta(providerId = 1, mediaType = "SONG", externalId = "song-1", playedAtMs = 1_700_000_000_001, now = 1)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_000, now = 1)
+            queue.enqueuePlayCountDelta(providerId = 1, mediaType = ProviderMediaType.SONG, externalId = "song-1", playedAtMs = 1_700_000_000_001, now = 1)
 
             val report = OutboxDrainer(store = store, providerLocator = { client }, clock = { 2_000L })
                 .drain(providerId = 1)

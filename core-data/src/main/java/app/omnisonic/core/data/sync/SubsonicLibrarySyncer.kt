@@ -13,7 +13,7 @@ import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 import app.omnisonic.core.data.db.entity.SongArtistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.core.data.db.entity.SyncStatusEntity
-import app.omnisonic.core.data.db.queue.OutboxQueue
+import app.omnisonic.provider.api.OutboxActions
 import app.omnisonic.core.data.json.JsonText
 import app.omnisonic.core.model.text.TextNormalizer
 import app.omnisonic.provider.api.AlbumListType
@@ -412,7 +412,7 @@ class SubsonicLibrarySyncer(
                 val pendingResume = outboxDao.countPendingByExternalAndAction(
                     providerId,
                     bookmark.entryExternalId,
-                    OutboxQueue.ACTION_RESUME_POINT,
+                    OutboxActions.RESUME_POINT,
                 ) > 0
                 val serverUpdatedAt = bookmark.updatedAtMs
                 if (pendingResume || serverUpdatedAt == null) return@forEach

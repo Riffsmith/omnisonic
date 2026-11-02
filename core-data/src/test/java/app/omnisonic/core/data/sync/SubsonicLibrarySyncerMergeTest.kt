@@ -4,7 +4,7 @@ import app.omnisonic.core.data.DatabaseTestBase
 import app.omnisonic.core.data.db.entity.AlbumEntity
 import app.omnisonic.core.data.db.entity.OutboxItemEntity
 import app.omnisonic.core.data.db.entity.SongEntity
-import app.omnisonic.core.data.db.queue.OutboxQueue
+import app.omnisonic.provider.api.OutboxActions
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.ProviderAlbum
 import app.omnisonic.provider.api.ProviderAlbumDetails
@@ -141,7 +141,7 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         outboxDao.upsert(
             OutboxItemEntity(
                 id = 0, providerId = 1, mediaType = "SONG", externalId = "song-1",
-                action = OutboxQueue.ACTION_RESUME_POINT, nextAttemptAt = 0, createdAt = 500,
+                action = OutboxActions.RESUME_POINT, nextAttemptAt = 0, createdAt = 500,
             ),
         )
         val provider = providerOf(
@@ -196,7 +196,7 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         outboxDao.upsert(
             OutboxItemEntity(
                 id = 0, providerId = 1, mediaType = "SONG", externalId = "song-gone",
-                action = OutboxQueue.ACTION_PLAY_COUNT, nextAttemptAt = 0, createdAt = 500,
+                action = OutboxActions.PLAY_COUNT, nextAttemptAt = 0, createdAt = 500,
             ),
         )
         val provider = providerOf(
@@ -308,7 +308,7 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
                 outboxDao.upsert(
                     OutboxItemEntity(
                         id = 0, providerId = 1, mediaType = "SONG", externalId = "other",
-                        action = OutboxQueue.ACTION_PLAY_COUNT, nextAttemptAt = 0, createdAt = 1,
+                        action = OutboxActions.PLAY_COUNT, nextAttemptAt = 0, createdAt = 1,
                     ),
                 )
                 enqueueDone = true

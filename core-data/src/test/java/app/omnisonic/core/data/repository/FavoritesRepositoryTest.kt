@@ -30,7 +30,7 @@ class FavoritesRepositoryTest : DatabaseTestBase() {
         assertThat(song.title).isEqualTo("Unsynced title")
         assertThat(song.isFavorite).isTrue()
         assertThat(song.favoriteAt).isEqualTo(1_000)
-        assertThat(outboxDao.selectByProvider(1).single().action).isEqualTo(OutboxQueue.ACTION_FAVORITE)
+        assertThat(outboxDao.selectByProvider(1).single().action).isEqualTo(app.omnisonic.provider.api.OutboxActions.FAVORITE)
     }
 
     @Test
