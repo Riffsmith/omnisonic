@@ -1,5 +1,7 @@
+
 package app.omnisonic.playback.engine
 
+import androidx.media3.common.util.UnstableApi
 import android.content.Context
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -18,6 +20,7 @@ import app.omnisonic.playback.api.player.EngineInfo
 import app.omnisonic.playback.api.player.OffloadMode
 import app.omnisonic.playback.api.player.WakeMode
 
+@UnstableApi
 class ExoEngineFactory(
     private val context: Context,
     private val clock: Clock = Clock.DEFAULT,
@@ -104,6 +107,7 @@ class ExoEngineFactory(
     }
 }
 
+@UnstableApi
 internal class ExoAudioEngine(
     config: EngineConfig,
     override val player: Player,
@@ -125,6 +129,7 @@ internal class ExoAudioEngine(
     }
 }
 
+@UnstableApi
 private fun WakeMode.toPlayerWakeMode(): Int = when (this) {
     WakeMode.LOCAL -> C.WAKE_MODE_LOCAL
     WakeMode.NETWORK -> C.WAKE_MODE_NETWORK

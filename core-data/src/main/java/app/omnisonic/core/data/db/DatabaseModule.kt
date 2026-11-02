@@ -1,7 +1,10 @@
 package app.omnisonic.core.data.db
 
 import android.content.Context
+import android.net.ConnectivityManager
 import app.omnisonic.core.data.json.OmnisonicJson
+import app.omnisonic.core.data.network.ConnectivityManagerNetworkMonitor
+import app.omnisonic.core.data.network.NetworkMonitor
 import app.omnisonic.core.data.security.AesGcmCredentialCodec
 import app.omnisonic.core.data.security.AndroidKeystoreKeySource
 import app.omnisonic.core.data.security.CredentialCodec
@@ -28,4 +31,12 @@ object DatabaseModule {
     @Provides
     fun credentialCodec(): CredentialCodec =
         AesGcmCredentialCodec(keySource = AndroidKeystoreKeySource())
+
+    @Provides
+    @Singleton
+    fun networkMonitor(@ApplicationContext context: Context): NetworkMonitor =
+        ConnectivityManagerNetworkMonitor(
+            context.getSystemService(ConnectivityManager::class.java)
+                ?: error("ConnectivityManager unavailable"),
+        )
 }

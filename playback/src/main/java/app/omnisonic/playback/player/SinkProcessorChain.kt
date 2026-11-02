@@ -1,5 +1,6 @@
 package app.omnisonic.playback.player
 
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.audio.AudioProcessor
 import app.omnisonic.playback.audio.FadeAudioProcessor
 import app.omnisonic.playback.audio.MonoAudioProcessor
@@ -12,6 +13,7 @@ import app.omnisonic.playback.api.equalizer.PeqConfig
  * produces so engine swaps keep settings, and pushed to the active chain on
  * change so runtime adjustments are immediate.
  */
+@UnstableApi
 data class ProcessorConfig(
     val replayGainLinear: Float = 1f,
     val duckLinear: Float = 1f,
@@ -23,6 +25,7 @@ data class ProcessorConfig(
  * One stateful sink processor set for one engine. Instances are created only
  * through [SinkProcessorChainFactory]; two live engines never share a chain.
  */
+@UnstableApi
 class SinkProcessorChain(
     val replayGain: ReplayGainAudioProcessor = ReplayGainAudioProcessor(),
     val peq: PeqAudioProcessor = PeqAudioProcessor(),
@@ -52,6 +55,7 @@ class SinkProcessorChain(
  * chain so settings changes are immediate; [create] publishes each chain as
  * [active] while the engine factory is building its sink.
  */
+@UnstableApi
 class SinkProcessorChainFactory(initialConfig: ProcessorConfig = ProcessorConfig()) {
     @Volatile var config: ProcessorConfig = initialConfig
         private set

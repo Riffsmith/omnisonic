@@ -1,15 +1,22 @@
 package app.omnisonic.core.data.providers
 
 import app.omnisonic.core.data.db.entity.ProviderEntity
+import app.omnisonic.core.data.db.entity.ProviderKind
 import app.omnisonic.core.data.json.OmnisonicJson
 import app.omnisonic.core.data.security.CredentialCodec
 import app.omnisonic.core.data.security.SecretPayload
 import app.omnisonic.provider.api.BackdateScrobbles
+import app.omnisonic.provider.api.ClientCertSpec
 import app.omnisonic.provider.api.ConnectionBlock
 import app.omnisonic.provider.api.ProviderAuthMethod
 import app.omnisonic.provider.api.ProviderConnection
+import app.omnisonic.provider.api.ProviderEndpoint
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
+import java.io.ByteArrayInputStream
+import java.security.cert.CertificateFactory
+import java.security.cert.X509Certificate
+import java.util.Base64
 
 class ProviderConfigMapper(
     private val codec: CredentialCodec,
@@ -21,18 +28,28 @@ class ProviderConfigMapper(
 
     private val optionsAdapter = moshi.adapter(OptionsJson::class.java)
 
+    private val certListAdapter = moshi.adapter<List<String>>(
+        Types.newParameterizedType(List::class.java, String::class.java),
+    )
+
+    private val certificateFactory = CertificateFactory.getInstance("X.509")
+
     fun from(row: ProviderEntity): ProviderConnection? {
-        val primary = row.primaryBlock() ?: return null
-        val secondary = if (row.useSecondary) row.secondaryBlock() else null
+        val endpoint = endpointFor(row) ?: return null
         val secrets = codec.unseal(row.secretBlob) ?: SecretPayload()
         val options = runCatching { optionsAdapter.fromJson(row.optionsJson) }.getOrNull() ?: OptionsJson()
         val headers = runCatching { headersAdapter.fromJson(row.customHeadersJson) }.getOrNull() ?: emptyMap()
+        val trustedServerCertificates = decodeTrustedCertificates(row.trustedCertsBlob) ?: return null
+        val clientCertificate = when (val mtls = decodeMtls(row, secrets)) {
+            MtlsConfig.Disabled -> null
+            is MtlsConfig.Ready -> mtls.spec
+            MtlsConfig.Invalid -> return null
+        }
 
         return ProviderConnection(
             providerId = row.id,
             displayName = row.name,
-            primary = primary,
-            secondary = secondary,
+            endpoint = endpoint,
             lastWorkingBlock = row.lastWorkingBlock,
             authMethod = authMethodFor(row.authParametersJson, secrets),
             username = row.username,
@@ -41,8 +58,66 @@ class ProviderConfigMapper(
             customHeaders = headers.filter { it.key.isNotBlank() },
             serverSoftwareHint = options.serverSoftwareHint,
             backdateScrobbles = decodeBackdateMode(options.backdateScrobbles),
+            clientCertificate = clientCertificate,
+            trustedServerCertificates = trustedServerCertificates,
         )
     }
+
+    /**
+     * mTLS is an explicit opt-in: disabled rows ignore every stored keystore
+     * blob and alias, so persisted certificate data can never enable mTLS by
+     * itself. Enabled rows must carry an unsealable keystore blob or the row
+     * is unloadable (fail closed; never silently connect without the client
+     * certificate). The keystore password rides the sealed secret payload and
+     * is never logged.
+     */
+    private fun decodeMtls(row: ProviderEntity, secrets: SecretPayload): MtlsConfig {
+        if (!row.mtlsEnabled) return MtlsConfig.Disabled
+        val keystoreBytes = codec.unsealBytes(row.mtlsKeystoreBlob)
+        if (keystoreBytes == null || keystoreBytes.isEmpty()) return MtlsConfig.Invalid
+        return MtlsConfig.Ready(
+            ClientCertSpec(
+                keystorePkcs12 = keystoreBytes,
+                keystorePassword = secrets.secretValues[SECRET_MTLS_KEYSTORE_PASSWORD],
+                alias = row.mtlsAlias?.takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
+    /**
+     * Sealed trust anchors replace platform trust only when present and
+     * parseable; an unreadable blob makes the row unloadable instead of
+     * downgrading verification. Null blob keeps ordinary server-certificate
+     * verification.
+     */
+    private fun decodeTrustedCertificates(blob: String?): List<X509Certificate>? {
+        if (blob == null) return emptyList()
+        val sealedBytes = codec.unsealBytes(blob) ?: return null
+        val encoded = runCatching { certListAdapter.fromJson(String(sealedBytes, Charsets.UTF_8)) }.getOrNull()
+            ?: return null
+        return runCatching {
+            encoded.map { der ->
+                certificateFactory.generateCertificate(ByteArrayInputStream(Base64.getDecoder().decode(der)))
+                    as X509Certificate
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * REMOTE_SERVER keeps the strict URL validation: a row that fails it stays
+     * unloadable. DEVICE and VIRTUAL catalogs have no server endpoint at all,
+     * so they never depend on the primary columns.
+     */
+    private fun endpointFor(row: ProviderEntity): ProviderEndpoint? =
+        when (ProviderKind.fromName(row.kind)) {
+            ProviderKind.REMOTE_SERVER -> {
+                val primary = row.primaryBlock() ?: return null
+                val secondary = if (row.useSecondary) row.secondaryBlock() else null
+                ProviderEndpoint.Remote(primary, secondary)
+            }
+
+            ProviderKind.DEVICE, ProviderKind.VIRTUAL -> ProviderEndpoint.None
+        }
 
     private fun ProviderEntity.primaryBlock(): ConnectionBlock? =
         block(primaryScheme, primaryHost, primaryPort, primaryPath)
@@ -53,10 +128,10 @@ class ProviderConfigMapper(
         return block(secondaryScheme ?: "http", host, port, secondaryPath)
     }
 
-    private fun block(scheme: String, host: String, port: Int, path: String?): ConnectionBlock? {
-        if (host.isBlank()) return null
-        if (port < 1 || port > 65_535) return null
-        val normalizedScheme = scheme.trim().lowercase()
+    private fun block(scheme: String?, host: String?, port: Int?, path: String?): ConnectionBlock? {
+        if (host.isNullOrBlank()) return null
+        if (port == null || port < 1 || port > 65_535) return null
+        val normalizedScheme = scheme?.trim()?.lowercase()
         if (normalizedScheme != "http" && normalizedScheme != "https") return null
         return ConnectionBlock(
             scheme = normalizedScheme,
@@ -91,9 +166,16 @@ class ProviderConfigMapper(
 
     private val parametersAdapter = moshi.adapter(AuthParametersJson::class.java)
 
+    private sealed interface MtlsConfig {
+        data object Disabled : MtlsConfig
+        data class Ready(val spec: ClientCertSpec) : MtlsConfig
+        data object Invalid : MtlsConfig
+    }
+
     companion object {
         const val SECRET_PASSWORD = "password"
         const val SECRET_API_KEY = "apiKey"
+        const val SECRET_MTLS_KEYSTORE_PASSWORD = "mtlsKeystorePassword"
         const val AUTH_MODE_TOKEN = "token"
         const val AUTH_MODE_LEGACY = "legacy"
         const val AUTH_MODE_API_KEY = "apiKey"

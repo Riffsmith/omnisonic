@@ -16,10 +16,11 @@ import app.omnisonic.core.data.db.dao.InternetRadioDao
 import app.omnisonic.core.data.db.dao.LibrarySourceDao
 import app.omnisonic.core.data.db.dao.OfflineFileDao
 import app.omnisonic.core.data.db.dao.OutboxDao
-import app.omnisonic.core.data.db.dao.PlaybackEventDao
+import app.omnisonic.core.data.db.dao.PlayEventDao
 import app.omnisonic.core.data.db.dao.PlaylistDao
 import app.omnisonic.core.data.db.dao.PlaylistEntryDao
 import app.omnisonic.core.data.db.dao.ProviderDao
+import app.omnisonic.core.data.db.dao.QueueDao
 import app.omnisonic.core.data.db.dao.SavedFilterDao
 import app.omnisonic.core.data.db.dao.SongArtistDao
 import app.omnisonic.core.data.db.dao.SongDao
@@ -34,7 +35,7 @@ import app.omnisonic.core.data.db.entity.InternetRadioEntity
 import app.omnisonic.core.data.db.entity.LibrarySourceEntity
 import app.omnisonic.core.data.db.entity.OfflineFileEntity
 import app.omnisonic.core.data.db.entity.OutboxItemEntity
-import app.omnisonic.core.data.db.entity.PlaybackEventEntity
+import app.omnisonic.core.data.db.entity.PlayEventEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.ProviderEntity
@@ -67,7 +68,8 @@ abstract class DatabaseTestBase {
     protected val playlistEntryDao: PlaylistEntryDao get() = db.playlistEntryDao()
     protected val internetRadioDao: InternetRadioDao get() = db.internetRadioDao()
     protected val chapterDao: ChapterDao get() = db.chapterDao()
-    protected val playbackEventDao: PlaybackEventDao get() = db.playbackEventDao()
+    protected val playEventDao: PlayEventDao get() = db.playEventDao()
+    protected val queueDao: QueueDao get() = db.queueDao()
     protected val outboxDao: OutboxDao get() = db.outboxDao()
     protected val downloadDao: DownloadDao get() = db.downloadDao()
     protected val offlineFileDao: OfflineFileDao get() = db.offlineFileDao()
@@ -224,9 +226,9 @@ abstract class DatabaseTestBase {
         return chapterDao.selectBySong(songId!!).first()
     }
 
-    protected suspend fun seedPlaybackEvent(providerId: Long): PlaybackEventEntity {
-        playbackEventDao.recordDayEvent(providerId, "song-1", 1, played = true, skipped = false, durationMs = 1)
-        return playbackEventDao.selectByProvider(providerId).first()
+    protected suspend fun seedPlaybackEvent(providerId: Long): PlayEventEntity {
+        playEventDao.recordPlay(providerId, "song-1", playedAtMs = 1, durationMs = 1)
+        return playEventDao.selectByProvider(providerId).first()
     }
 
     protected suspend fun seedOutboxItem(providerId: Long): OutboxItemEntity {
@@ -244,11 +246,12 @@ abstract class DatabaseTestBase {
         return outboxDao.selectByProvider(providerId).first()
     }
 
-    protected suspend fun seedDownloadItem(): DownloadItemEntity {
+    protected suspend fun seedDownloadItem(providerId: Long): DownloadItemEntity {
         downloadDao.upsert(
             DownloadItemEntity(
                 id = 0,
                 mediaKey = "key-1",
+                providerId = providerId,
                 status = "pending",
                 title = "Track one",
                 createdAt = 1_000,

@@ -7,6 +7,7 @@ import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.core.data.db.entity.SyncStatusEntity
 import app.omnisonic.core.data.json.JsonText
 import app.omnisonic.provider.api.AlbumListType
+import app.omnisonic.provider.api.AllowAllRunGate
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.ProviderAlbum
 import app.omnisonic.provider.api.ProviderAlbumDetails
@@ -14,6 +15,9 @@ import app.omnisonic.provider.api.ProviderAlbumRequest
 import app.omnisonic.provider.api.ProviderArtist
 import app.omnisonic.provider.api.ProviderBookmark
 import app.omnisonic.provider.api.ProviderCapabilities
+import app.omnisonic.provider.api.ProviderRunGate
+import app.omnisonic.provider.api.ProviderStatus
+import app.omnisonic.provider.api.ProviderTraits
 import app.omnisonic.provider.api.ProviderDirectory
 import app.omnisonic.provider.api.ProviderGenre
 import app.omnisonic.provider.api.ProviderMediaType
@@ -103,8 +107,60 @@ private class FakeMediaProvider : MediaProvider {
 @Config(sdk = [34])
 class SubsonicLibrarySyncerTest : DatabaseTestBase() {
 
-    private fun syncer(provider: MediaProvider, nowMs: () -> Long = { 7_000L }) =
-        SubsonicLibrarySyncer(db, provider, providerId = 1L, nowMs = nowMs)
+    private fun syncer(
+        provider: MediaProvider,
+        nowMs: () -> Long = { 7_000L },
+        traits: ProviderTraits = ProviderTraits(),
+        runGate: ProviderRunGate = AllowAllRunGate,
+    ) = SubsonicLibrarySyncer(
+        db,
+        provider,
+        providerId = 1L,
+        traits = traits,
+        runGate = runGate,
+        nowMs = nowMs,
+    )
+
+    @Test
+    fun `offline run gate blocks the sync before any read or write`() = runDbTest {
+        newProvider(id = 1)
+        val outcome = syncer(
+            FakeMediaProvider(),
+            runGate = ProviderRunGate { ProviderStatus.OFFLINE },
+        ).runFullSync()
+
+        assertThat(outcome.blockedBy).isEqualTo(ProviderStatus.OFFLINE)
+        assertThat(outcome.albumsProcessed).isEqualTo(0)
+        assertThat(syncStatusDao.selectByProvider(1)).isNull()
+        assertThat(artistDao.selectAll()).isEmpty()
+    }
+
+    @Test
+    fun `needs-wifi run gate blocks the sync with a typed status`() = runDbTest {
+        newProvider(id = 1)
+        val outcome = syncer(
+            FakeMediaProvider(),
+            runGate = ProviderRunGate { ProviderStatus.NEEDS_WIFI },
+        ).runDiffSync()
+
+        assertThat(outcome.blockedBy).isEqualTo(ProviderStatus.NEEDS_WIFI)
+        assertThat(syncStatusDao.selectByProvider(1)).isNull()
+    }
+
+    @Test
+    fun `providers without library sync skip politely`() = runDbTest {
+        newProvider(id = 1)
+        val outcome = syncer(
+            FakeMediaProvider(),
+            traits = ProviderTraits(hasLibrarySync = false),
+        ).runFullSync()
+
+        assertThat(outcome.skippedNoLibrarySync).isTrue()
+        assertThat(outcome.blockedBy).isNull()
+        assertThat(outcome.albumsProcessed).isEqualTo(0)
+        assertThat(syncStatusDao.selectByProvider(1)).isNull()
+        assertThat(artistDao.selectAll()).isEmpty()
+    }
 
     @Test
     fun `full sync merges server fields while preserving local playback state`() = runDbTest {

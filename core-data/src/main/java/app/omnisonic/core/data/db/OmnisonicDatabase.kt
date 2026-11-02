@@ -14,10 +14,11 @@ import app.omnisonic.core.data.db.dao.InternetRadioDao
 import app.omnisonic.core.data.db.dao.LibrarySourceDao
 import app.omnisonic.core.data.db.dao.OfflineFileDao
 import app.omnisonic.core.data.db.dao.OutboxDao
-import app.omnisonic.core.data.db.dao.PlaybackEventDao
 import app.omnisonic.core.data.db.dao.PlaylistDao
 import app.omnisonic.core.data.db.dao.PlaylistEntryDao
+import app.omnisonic.core.data.db.dao.PlayEventDao
 import app.omnisonic.core.data.db.dao.ProviderDao
+import app.omnisonic.core.data.db.dao.QueueDao
 import app.omnisonic.core.data.db.dao.SavedFilterDao
 import app.omnisonic.core.data.db.dao.SongArtistDao
 import app.omnisonic.core.data.db.dao.SongDao
@@ -32,10 +33,13 @@ import app.omnisonic.core.data.db.entity.InternetRadioEntity
 import app.omnisonic.core.data.db.entity.LibrarySourceEntity
 import app.omnisonic.core.data.db.entity.OfflineFileEntity
 import app.omnisonic.core.data.db.entity.OutboxItemEntity
-import app.omnisonic.core.data.db.entity.PlaybackEventEntity
+import app.omnisonic.core.data.db.entity.PlayEventEntity
+import app.omnisonic.core.data.db.entity.PlaybackDayRollup
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 import app.omnisonic.core.data.db.entity.ProviderEntity
+import app.omnisonic.core.data.db.entity.QueueEntryEntity
+import app.omnisonic.core.data.db.entity.QueueStateEntity
 import app.omnisonic.core.data.db.entity.SavedFilterEntity
 import app.omnisonic.core.data.db.entity.SongArtistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
@@ -55,13 +59,16 @@ import app.omnisonic.core.data.db.entity.SyncStatusEntity
         PlaylistEntryEntity::class,
         InternetRadioEntity::class,
         ChapterEntity::class,
-        PlaybackEventEntity::class,
+        PlayEventEntity::class,
         OutboxItemEntity::class,
         DownloadItemEntity::class,
         OfflineFileEntity::class,
         SavedFilterEntity::class,
         SyncStatusEntity::class,
+        QueueEntryEntity::class,
+        QueueStateEntity::class,
     ],
+    views = [PlaybackDayRollup::class],
     version = OmnisonicDatabase.SCHEMA_VERSION,
     exportSchema = true,
 )
@@ -79,16 +86,17 @@ abstract class OmnisonicDatabase : RoomDatabase() {
     abstract fun playlistEntryDao(): PlaylistEntryDao
     abstract fun internetRadioDao(): InternetRadioDao
     abstract fun chapterDao(): ChapterDao
-    abstract fun playbackEventDao(): PlaybackEventDao
+    abstract fun playEventDao(): PlayEventDao
     abstract fun outboxDao(): OutboxDao
     abstract fun downloadDao(): DownloadDao
     abstract fun offlineFileDao(): OfflineFileDao
     abstract fun savedFilterDao(): SavedFilterDao
     abstract fun syncStatusDao(): SyncStatusDao
+    abstract fun queueDao(): QueueDao
     abstract fun aggregateDao(): AggregateDao
 
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         const val DATABASE_FILE = "omnisonic.db"
 
         fun migrationsForSteps(): Array<Migration> = Migrations.ALL.toTypedArray()

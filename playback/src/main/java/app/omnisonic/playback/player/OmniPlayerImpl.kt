@@ -1,5 +1,6 @@
 package app.omnisonic.playback.player
 
+import androidx.media3.common.util.UnstableApi
 import android.net.Uri
 import android.os.Handler
 import androidx.media3.common.C
@@ -62,6 +63,7 @@ import kotlinx.coroutines.launch
  * long pause, on engine swaps, and when a stale prepared item is promoted.
  * One 401/403/410 per stream triggers a single re-resolve and restart.
  */
+@UnstableApi
 class OmniPlayerImpl(
     private val engineFactory: AudioEngineFactory,
     private val chainFactory: SinkProcessorChainFactory,

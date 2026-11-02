@@ -25,6 +25,7 @@ import app.omnisonic.provider.api.ProviderPlaylist
 import app.omnisonic.provider.api.ProviderPlaylistSummary
 import app.omnisonic.provider.api.ProviderRadio
 import app.omnisonic.provider.api.ProviderSong
+import app.omnisonic.provider.api.ProviderTraits
 import java.text.Collator
 
 /**
@@ -432,6 +433,19 @@ private class PagedCursor(
 class LocalMediaProviderFactory(private val contentResolver: ContentResolver) : MediaProviderFactory {
 
     override fun apiType(): String = API_TYPE
+
+    /**
+     * The device library is fully browsable, but there is no server behind it:
+     * downloadUrl() is always null because files are already local, no
+     * transcode can be negotiated, and the user-data methods are local no-ops
+     * that report to nobody.
+     */
+    override fun traits(): ProviderTraits = ProviderTraits(
+        hasLibrarySync = true,
+        supportsDownload = false,
+        supportsServerTranscode = false,
+        reportsUserData = false,
+    )
 
     override fun create(connection: ProviderConnection): MediaProvider = LocalMediaProvider(contentResolver)
 

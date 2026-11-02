@@ -61,6 +61,9 @@ interface PlaylistEntryDao {
     @Query("SELECT COUNT(*) FROM playlists_entries WHERE playlistId = :playlistId")
     suspend fun countByPlaylist(playlistId: Long): Int
 
+    @Query("SELECT MAX(entryOrder) FROM playlists_entries WHERE playlistId = :playlistId")
+    suspend fun selectMaxEntryOrder(playlistId: Long): Int?
+
     @Query("DELETE FROM playlists_entries WHERE playlistId = :playlistId")
     suspend fun deleteByPlaylist(playlistId: Long)
 

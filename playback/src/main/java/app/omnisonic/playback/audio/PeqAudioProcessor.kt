@@ -1,5 +1,6 @@
 package app.omnisonic.playback.audio
 
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import app.omnisonic.playback.api.equalizer.PeqBand
@@ -17,6 +18,7 @@ import kotlin.math.sqrt
  * transform when no bands or preamp are configured, so a runtime config change
  * takes effect on subsequent samples without a sink reconfigure.
  */
+@UnstableApi
 class PeqAudioProcessor : BaseAudioProcessor() {
     private var configuredFormat: AudioProcessor.AudioFormat? = null
     private var config: PeqConfig = PeqConfig()
@@ -91,6 +93,7 @@ class PeqAudioProcessor : BaseAudioProcessor() {
     }
 }
 
+@UnstableApi
 internal class Biquad(val b0: Double, val b1: Double, val b2: Double, val a1: Double, val a2: Double) {
     companion object {
         fun coefficients(band: PeqBand, sampleRate: Int): Biquad {
@@ -173,6 +176,7 @@ internal class Biquad(val b0: Double, val b1: Double, val b2: Double, val a1: Do
     }
 }
 
+@UnstableApi
 internal class BandFilter(coefficients: Biquad, channelCount: Int) {
     private val b0 = coefficients.b0
     private val b1 = coefficients.b1

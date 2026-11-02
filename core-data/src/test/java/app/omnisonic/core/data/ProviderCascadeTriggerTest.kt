@@ -1,6 +1,7 @@
 package app.omnisonic.core.data
 
 import androidx.room.withTransaction
+import app.omnisonic.core.data.db.entity.QueueEntryEntity
 import app.omnisonic.core.data.db.ProviderCascadeTriggers
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -25,8 +26,20 @@ class ProviderCascadeTriggerTest : DatabaseTestBase() {
         seedInternetRadio(providerId = 1)
         seedChildScrollView(providerId = 1, songId = song.id)
         seedPlaybackEvent(providerId = 1)
+        queueDao.insertEntries(
+            listOf(
+                QueueEntryEntity(
+                    queueItemId = 99,
+                    position = 0,
+                    providerId = 1,
+                    externalId = "song-1",
+                    title = "Queue title",
+                ),
+            ),
+        )
         seedOutboxItem(providerId = 1)
         seedOfflineFile(providerId = 1)
+        seedDownloadItem(providerId = 1)
         seedGenre(providerId = 1)
         newArtist(id = 20, providerId = 1)
         seedSyncStatus(providerId = 1)
@@ -42,9 +55,11 @@ class ProviderCascadeTriggerTest : DatabaseTestBase() {
         assertThat(playlistDao.selectAll()).isEmpty()
         assertThat(playlistEntryDao.selectByPlaylist(0)).isEmpty()
         assertThat(internetRadioDao.selectAll()).isEmpty()
-        assertThat(playbackEventDao.selectByProvider(1)).isEmpty()
+        assertThat(playEventDao.selectByProvider(1)).isEmpty()
+        assertThat(queueDao.countEntries()).isEqualTo(0)
         assertThat(outboxDao.selectByProvider(1)).isEmpty()
         assertThat(offlineFileDao.selectByProvider(1)).isEmpty()
+        assertThat(downloadDao.selectByProvider(1)).isEmpty()
         assertThat(genreDao.selectAll()).isEmpty()
         assertThat(artistDao.selectAll()).isEmpty()
         assertThat(syncStatusDao.selectByProvider(1)).isNull()

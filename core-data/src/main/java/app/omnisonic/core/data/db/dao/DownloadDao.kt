@@ -12,6 +12,10 @@ interface DownloadDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: DownloadItemEntity): Long
 
+    /** Insert-or-ignore so re-enqueues never reset an in-progress download. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnoring(item: DownloadItemEntity): Long
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<DownloadItemEntity>)
 
@@ -23,6 +27,9 @@ interface DownloadDao {
 
     @Query("SELECT * FROM download_items WHERE mediaKey = :mediaKey")
     suspend fun selectByMediaKey(mediaKey: String): DownloadItemEntity?
+
+    @Query("SELECT * FROM download_items WHERE providerId = :providerId ORDER BY createdAt")
+    suspend fun selectByProvider(providerId: Long): List<DownloadItemEntity>
 
     @Query("UPDATE download_items SET progressPercent = :progressPercent, updatedAt = :updatedAt WHERE id = :id")
     suspend fun setProgress(id: Long, progressPercent: Int, updatedAt: Long)

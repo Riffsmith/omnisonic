@@ -16,10 +16,12 @@ object ProviderCascadeTriggers {
         "playlists",
         "playlists_entries",
         "internet_radios",
-        "playback_events",
+        "play_events",
         "outbox_items",
         "offline_files",
+        "download_items",
         "sync_status",
+        "queue_entries",
     ).map { table ->
         "CREATE TRIGGER IF NOT EXISTS trg_provider_delete_$table " +
             "AFTER DELETE ON providers " +

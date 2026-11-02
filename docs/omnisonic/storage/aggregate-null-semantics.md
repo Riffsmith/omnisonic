@@ -10,9 +10,9 @@ Confidence:
 - [VERIFIED] All six album recompute queries now produce `playCount = 0` when the album has no songs.
 - [VERIFIED] Empty albums keep `lastPlayed` and `resumeFilePath` as `NULL`.
 
-Date: 2026-10-30
+Date: 2026-11-02
 
-Links: `sqlite-api29-floor.md`, `../00-template.md`
+Links: `schema-v2.md`, `sqlite-api29-floor.md`, `../00-template.md`
 
 ---
 
@@ -30,6 +30,10 @@ COALESCE(MIN(songs.playCount), 0)
 ```
 
 [VERIFIED] The sum variants keep `COALESCE(SUM(songs.playCount), 0)`.
+
+## Schema v2
+
+[VERIFIED] The v1->v2 migration does not change the album aggregate queries or the `albums.playCount` column type; the `COALESCE` guards remain the contract on schema v2.
 
 ## Regression coverage
 

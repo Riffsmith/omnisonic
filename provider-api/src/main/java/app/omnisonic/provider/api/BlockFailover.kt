@@ -28,14 +28,18 @@ class BlockFailover(
     var preferredBlock: Int = connection.lastWorkingBlock ?: ProviderConnection.PRIMARY_BLOCK
         private set
 
+    private val remote = connection.endpoint as? ProviderEndpoint.Remote
     private var primaryFailures = 0
     private var lastPrimaryProbeAtMs = clock()
 
     suspend fun <T> attempt(operation: suspend (ConnectionBlock) -> BlockAttempt<T>): BlockAttempt<T> {
-        val secondary = connection.secondary
+        val remote = this.remote ?: return BlockAttempt.FatalError(
+            IllegalStateException("provider ${connection.providerId} has no remote endpoint"),
+        )
+        val secondary = remote.secondary
         if (secondary != null && preferredBlock == ProviderConnection.SECONDARY_BLOCK) {
             if (clock() - lastPrimaryProbeAtMs >= preferPrimaryRetryIntervalMs) {
-                when (val probe = operation(connection.primary)) {
+                when (val probe = operation(remote.primary)) {
                     is BlockAttempt.Success -> {
                         primaryFailures = 0
                         adopt(ProviderConnection.PRIMARY_BLOCK)
@@ -49,7 +53,7 @@ class BlockFailover(
             return operation(secondary)
         }
 
-        return when (val outcome = operation(connection.primary)) {
+        return when (val outcome = operation(remote.primary)) {
             is BlockAttempt.Success -> {
                 primaryFailures = 0
                 outcome

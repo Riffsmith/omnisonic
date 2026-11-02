@@ -50,6 +50,13 @@ interface MediaProviderFactory {
     /** Registry key, e.g. "subsonic" or "local". */
     fun apiType(): String
 
+    /**
+     * Capability profile consulted before sync, outbox enqueues, download
+     * enqueues and transcode planning. Defaults match the Subsonic family;
+     * narrower providers override it.
+     */
+    fun traits(): ProviderTraits = ProviderTraits()
+
     fun create(connection: ProviderConnection): MediaProvider
 }
 
@@ -57,6 +64,9 @@ class ProviderRegistry(factories: List<MediaProviderFactory>) {
     private val factoriesByType = factories.associateBy { it.apiType() }
 
     fun factoryFor(apiType: String): MediaProviderFactory? = factoriesByType[apiType]
+
+    /** Traits for an api without building a provider; unknown apis use the Subsonic-family defaults. */
+    fun traitsFor(apiType: String): ProviderTraits = factoryFor(apiType)?.traits() ?: ProviderTraits()
 
     fun create(apiType: String, connection: ProviderConnection): MediaProvider? =
         factoryFor(apiType)?.create(connection)

@@ -19,6 +19,32 @@ interface SongDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertOrIgnore(song: SongEntity): Long
 
+    /**
+     * Queue-snapshot materialisation: fills only columns that are still NULL
+     * so a snapshot never downgrades fully-synced metadata; locally-owned
+     * playback state is not in the SET list at all.
+     */
+    @Query(
+        """
+        UPDATE songs SET
+            albumId = COALESCE(albumId, :albumId),
+            title = COALESCE(title, :title),
+            displayArtist = COALESCE(displayArtist, :displayArtist),
+            imagePath = COALESCE(imagePath, :imagePath),
+            durationMs = COALESCE(durationMs, :durationMs)
+        WHERE providerId = :providerId AND externalId = :externalId
+        """,
+    )
+    suspend fun fillSnapshotFields(
+        providerId: Long,
+        externalId: String,
+        albumId: Long?,
+        title: String,
+        displayArtist: String?,
+        imagePath: String?,
+        durationMs: Long?,
+    )
+
     @Query("SELECT id FROM songs WHERE providerId = :providerId AND externalId = :externalId")
     suspend fun selectIdByProviderAndExternal(providerId: Long, externalId: String): Long?
 

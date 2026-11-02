@@ -1,5 +1,6 @@
 package app.omnisonic.playback.audio
 
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
@@ -9,6 +10,7 @@ import java.nio.ByteBuffer
  * non-stereo or disabled input through unchanged, so the toggle takes effect
  * on subsequent samples without a sink reconfigure.
  */
+@UnstableApi
 class MonoAudioProcessor : BaseAudioProcessor() {
     private var configuredFormat: AudioProcessor.AudioFormat? = null
     private var enabled = false

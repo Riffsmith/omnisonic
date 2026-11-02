@@ -11,6 +11,7 @@ import app.omnisonic.core.network.HttpClientFactory
 import app.omnisonic.provider.api.ConnectionBlock
 import app.omnisonic.provider.api.OutboxDrainer
 import app.omnisonic.provider.api.ProviderConnection
+import app.omnisonic.provider.api.ProviderEndpoint
 import app.omnisonic.provider.navidrome.SubsonicClient
 import com.google.common.truth.Truth.assertThat
 import okhttp3.mockwebserver.Dispatcher
@@ -281,7 +282,7 @@ class OutboxDrainEndToEndTest : DatabaseTestBase() {
             providerId = 1,
             username = "admin",
             password = "hunter2",
-            primary = ConnectionBlock("http", server.hostName, server.port),
+            endpoint = ProviderEndpoint.Remote(ConnectionBlock("http", server.hostName, server.port)),
             serverSoftwareHint = serverSoftwareHint,
             backdateScrobbles = decodeBackdateMode(backdateScrobbles),
         ),

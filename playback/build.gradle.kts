@@ -58,6 +58,7 @@ dependencies {
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.okhttp.tls)
     testImplementation(libs.media3.test.utils)
+    testImplementation(libs.room.runtime)
     testImplementation(libs.junit4)
     testRuntimeOnly(libs.junit.vintage.engine)
 }

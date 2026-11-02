@@ -1,10 +1,12 @@
 package app.omnisonic.playback.audio
 
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import java.nio.ByteBuffer
 import kotlin.math.roundToInt
 
+@UnstableApi
 internal object PcmOps {
 
     internal const val PCM32_SCALE = 2147483648f

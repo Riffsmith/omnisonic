@@ -1,5 +1,6 @@
 package app.omnisonic.playback.audio
 
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
@@ -9,6 +10,7 @@ import java.nio.ByteBuffer
  * gain when no fade is armed, so a mid-stream [beginFadeOut]/[beginFadeIn]
  * takes effect on subsequent samples without a sink reconfigure.
  */
+@UnstableApi
 class FadeAudioProcessor : BaseAudioProcessor() {
     private var configuredFormat: AudioProcessor.AudioFormat? = null
     private var fadeDurationMs = 0L

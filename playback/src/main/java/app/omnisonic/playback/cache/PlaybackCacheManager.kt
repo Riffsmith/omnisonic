@@ -1,5 +1,6 @@
 package app.omnisonic.playback.cache
 
+import androidx.media3.common.util.UnstableApi
 import android.content.Context
 import androidx.media3.database.DatabaseProvider
 import androidx.media3.datasource.DataSource
@@ -17,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
  * `content://` and plain reads use the direct factory. Callers pass the provider-stable
  * stream key so rotating auth salts never create new cache entries.
  */
+@UnstableApi
 class PlaybackCacheManager(
     private val context: Context,
     private val cacheDir: File,

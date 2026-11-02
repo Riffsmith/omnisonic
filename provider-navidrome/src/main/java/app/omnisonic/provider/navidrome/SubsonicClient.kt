@@ -13,6 +13,7 @@ import app.omnisonic.provider.api.ProviderArtist
 import app.omnisonic.provider.api.ProviderBookmark
 import app.omnisonic.provider.api.ProviderCapabilities
 import app.omnisonic.provider.api.ProviderConnection
+import app.omnisonic.provider.api.requireRemote
 import app.omnisonic.provider.api.ProviderDirectory
 import app.omnisonic.provider.api.ProviderFatalException
 import app.omnisonic.provider.api.ProviderGenre
@@ -402,12 +403,14 @@ class SubsonicClient(
         return buildUrl(preferredBlock(), path, params)
     }
 
-    private fun preferredBlock(): ConnectionBlock =
-        if (failover.preferredBlock == ProviderConnection.SECONDARY_BLOCK) {
-            connection.secondary ?: connection.primary
+    private fun preferredBlock(): ConnectionBlock {
+        val remote = connection.requireRemote()
+        return if (failover.preferredBlock == ProviderConnection.SECONDARY_BLOCK) {
+            remote.secondary ?: remote.primary
         } else {
-            connection.primary
+            remote.primary
         }
+    }
 
     // ---- transport -----------------------------------------------------------
 

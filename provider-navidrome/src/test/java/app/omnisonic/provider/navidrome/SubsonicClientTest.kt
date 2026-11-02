@@ -14,6 +14,7 @@ import app.omnisonic.provider.api.ProviderFatalException
 import app.omnisonic.provider.api.ProviderHttpError
 import app.omnisonic.provider.api.ProviderMediaType
 import app.omnisonic.provider.api.ProviderTransportException
+import app.omnisonic.provider.api.ProviderEndpoint
 import com.google.common.truth.Truth.assertThat
 import com.squareup.moshi.JsonDataException
 import com.squareup.moshi.JsonEncodingException
@@ -53,8 +54,7 @@ private fun testConnection(
     providerId = 1L,
     username = username,
     password = TEST_PASSWORD,
-    primary = primary,
-    secondary = secondary,
+    endpoint = ProviderEndpoint.Remote(primary, secondary),
     authMethod = authMethod,
     apiKey = apiKey,
     serverSoftwareHint = serverSoftwareHint,

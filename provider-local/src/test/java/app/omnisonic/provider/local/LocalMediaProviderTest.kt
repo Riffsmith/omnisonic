@@ -13,6 +13,8 @@ import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.ProviderAlbumRequest
+import app.omnisonic.provider.api.ProviderConnection
+import app.omnisonic.provider.api.ProviderTraits
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.Before
@@ -309,7 +311,22 @@ class LocalMediaProviderTest {
         val factory = LocalMediaProviderFactory(context.contentResolver)
 
         assertThat(factory.apiType()).isEqualTo("local")
-        assertThat(factory.create(app.omnisonic.provider.api.ProviderConnection(providerId = 1, primary = app.omnisonic.provider.api.ConnectionBlock("local", "localhost", 0)))).isInstanceOf(LocalMediaProvider::class.java)
+        assertThat(factory.create(ProviderConnection(providerId = 1))).isInstanceOf(LocalMediaProvider::class.java)
+    }
+
+    @Test
+    fun `factory traits describe a serverless local library`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val factory = LocalMediaProviderFactory(context.contentResolver)
+
+        assertThat(factory.traits()).isEqualTo(
+            ProviderTraits(
+                hasLibrarySync = true,
+                supportsDownload = false,
+                supportsServerTranscode = false,
+                reportsUserData = false,
+            ),
+        )
     }
 
     @Test

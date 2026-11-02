@@ -7,12 +7,13 @@ How derived: The AOSP `external/sqlite` `README.version` at the Android 10 relea
 Confidence:
 - [VERIFIED] Android 10 (`android-10.0.0_r47`) ships SQLite 3.22.0.
 - [VERIFIED] SQLite 3.24.0 added `UPSERT`; SQLite 3.25.0 added window functions; SQLite 3.35.0 added `RETURNING`.
-- [VERIFIED] `PlaybackEventDao.recordDayEvent` now uses `INSERT OR IGNORE` plus `UPDATE`, wrapped in `@Transaction`.
+- [VERIFIED] `PlayEventDao` writes one row per play or skip with a plain `INSERT`; no UPSERT is needed for playback history.
 - [VERIFIED] `DaoSqlCompatibilityTest` scans DAO source and rejects `ON CONFLICT`, `RETURNING`, and `OVER (`.
+- [VERIFIED] The single v1→v2 migration uses only DDL available in SQLite 3.22 (table rebuild/copy, indexes, view, triggers); it does not use UPSERT, window functions, or `RETURNING`.
 
-Date: 2026-10-30
+Date: 2026-11-02
 
-Links: `../00-template.md`
+Links: `schema-v2.md`, `../00-template.md`
 
 ---
 
@@ -49,11 +50,15 @@ Add support for the RETURNING clause on DELETE, INSERT, and UPDATE.
 
 [VERIFIED] `ON CONFLICT ... DO UPDATE` needs 3.24.0, window functions need 3.25.0, and `RETURNING` needs 3.35.0. None is available on API 29.
 
-## Playback event merge
+## Per-play history (v2)
 
-[VERIFIED] The first insert writes zero flags and zero duration. The following update ORs the flags and adds the duration, so inserting and merging the same event produces the caller's values exactly once.
+[VERIFIED] T22 option (b) replaces the merged-day `playback_events` table with
+`play_events` (one row per play or skip) plus the `play_events_daily` view. The
+DAO no longer needs an insert-or-ignore/update merge: every event is an insert.
 
-[VERIFIED] `PlaybackEventDaoTest` still covers same-day merge, separate days, and independent tracks unchanged.
+[VERIFIED] `PlayEventDaoTest` covers per-play timestamps, per-day rollups, and the
+skip/play split. The v1→v2 migration copies each old merged day row to one
+`play_events` row, as documented in `schema-v2.md`.
 
 ## Guardrail
 

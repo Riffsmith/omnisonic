@@ -6,15 +6,25 @@ import app.omnisonic.core.data.security.AesGcmCredentialCodec
 import app.omnisonic.core.data.security.SecretKeySource
 import app.omnisonic.core.data.security.SecretPayload
 import app.omnisonic.provider.api.ProviderAuthMethod
+import app.omnisonic.provider.api.ProviderEndpoint
+import app.omnisonic.provider.api.requireRemote
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.google.common.truth.Truth.assertThat
+import java.io.ByteArrayOutputStream
+import java.security.KeyStore
+import java.security.cert.X509Certificate
+import java.util.Base64
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import okhttp3.tls.HeldCertificate
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+
+private const val CLIENT_KEY_PASSWORD = "mapper-test"
 
 private val testKey: SecretKey by lazy {
     KeyGenerator.getInstance("AES").apply { init(128) }.generateKey()
@@ -34,6 +44,7 @@ class ProviderConfigMapperTest {
     private fun encode(value: Any): String = json.adapter<Any>(value.javaClass).toJson(value)
 
     private fun row(
+        kind: String = "REMOTE_SERVER",
         scheme: String = "https",
         host: String = "navidrome.local",
         port: Int = 4_433,
@@ -47,10 +58,16 @@ class ProviderConfigMapperTest {
         optionsJson: String? = null,
         customHeadersJson: String? = null,
         api: String = "subsonic",
+        wifiOnly: Boolean = false,
+        mtlsEnabled: Boolean = false,
+        mtlsKeystoreBlob: String? = null,
+        mtlsAlias: String? = null,
+        trustedCertsBlob: String? = null,
     ): ProviderEntity = ProviderEntity(
         id = 42L,
         name = "home",
         api = api,
+        kind = kind,
         primaryScheme = scheme,
         primaryHost = host,
         primaryPort = port,
@@ -61,6 +78,11 @@ class ProviderConfigMapperTest {
         secondaryPath = null,
         useSecondary = useSecondary,
         lastWorkingBlock = lastWorkingBlock,
+        wifiOnly = wifiOnly,
+        mtlsEnabled = mtlsEnabled,
+        mtlsKeystoreBlob = mtlsKeystoreBlob,
+        mtlsAlias = mtlsAlias,
+        trustedCertsBlob = trustedCertsBlob,
         username = username,
         secretBlob = codec.seal(secret),
         authParametersJson = authParametersJson,
@@ -76,14 +98,15 @@ class ProviderConfigMapperTest {
 
         assertEquals(42L, connection.providerId)
         assertEquals("home", connection.displayName)
-        assertEquals("https", connection.primary.scheme)
-        assertEquals("navidrome.local", connection.primary.host)
-        assertEquals(4_433, connection.primary.port)
-        assertEquals("https://navidrome.local:4433", connection.primary.baseUrl())
+        val remote = connection.requireRemote()
+        assertEquals("https", remote.primary.scheme)
+        assertEquals("navidrome.local", remote.primary.host)
+        assertEquals(4_433, remote.primary.port)
+        assertEquals("https://navidrome.local:4433", remote.primary.baseUrl())
         assertEquals(ProviderAuthMethod.TOKEN, connection.authMethod)
         assertEquals("admin", connection.username)
         assertEquals("hunter2", connection.password)
-        assertNull(connection.secondary)
+        assertNull(remote.secondary)
         assertNull(connection.lastWorkingBlock)
     }
 
@@ -91,17 +114,18 @@ class ProviderConfigMapperTest {
     fun `origin path is kept under the base url`() {
         val connection = mapper.from(row(path = "music"))!!
 
-        assertEquals("https://navidrome.local:4433/music", connection.primary.baseUrl())
+        assertEquals("https://navidrome.local:4433/music", connection.requireRemote().primary.baseUrl())
     }
 
     @Test
     fun `secondary block only enters when enabled`() {
         val skipped = mapper.from(row(secondary = "https://backup.web:8443", useSecondary = false))!!
-        assertThat(skipped.secondary).isNull()
+        assertThat(skipped.requireRemote().secondary).isNull()
 
         val enabled = mapper.from(row(secondary = "https://backup.web:8443", useSecondary = true))!!
-        assertThat(enabled.secondary).isNotNull()
-        assertThat(enabled.secondary!!.baseUrl()).isEqualTo("https://backup.web:8443")
+        val remote = enabled.requireRemote()
+        assertThat(remote.secondary).isNotNull()
+        assertThat(remote.secondary!!.baseUrl()).isEqualTo("https://backup.web:8443")
     }
 
     @Test
@@ -157,4 +181,142 @@ class ProviderConfigMapperTest {
         assertNull(mapper.from(row(port = 70_000)))
         assertNull(mapper.from(row(scheme = "gopher")))
     }
+
+    @Test
+    fun `device kind rows load with a serverless endpoint`() {
+        val connection = mapper.from(row(kind = "DEVICE", scheme = "local", host = "", port = 0))!!
+
+        assertEquals(ProviderEndpoint.None, connection.endpoint)
+    }
+
+    @Test
+    fun `virtual kind rows load with a serverless endpoint`() {
+        val connection = mapper.from(row(kind = "VIRTUAL", scheme = "", host = "", port = 0))!!
+
+        assertEquals(ProviderEndpoint.None, connection.endpoint)
+    }
+
+    @Test
+    fun `device kind maps to none even when primary columns hold a server`() {
+        val connection = mapper.from(row(kind = "DEVICE"))!!
+
+        assertEquals(ProviderEndpoint.None, connection.endpoint)
+    }
+
+    @Test
+    fun `disabled mtls ignores stored keystore and alias data`() {
+        val connection = mapper.from(
+            row(
+                mtlsKeystoreBlob = codec.sealBytes(clientKeystoreBytes()),
+                mtlsAlias = "omnisonic-client",
+            ),
+        )!!
+
+        assertNull(connection.clientCertificate)
+        assertEquals(emptyList<X509Certificate>(), connection.trustedServerCertificates)
+    }
+
+    @Test
+    fun `enabled mtls builds the client certificate with unsealed keystore`() {
+        val keystoreBytes = clientKeystoreBytes()
+        val connection = mapper.from(
+            row(
+                mtlsEnabled = true,
+                mtlsKeystoreBlob = codec.sealBytes(keystoreBytes),
+                mtlsAlias = "omnisonic-client",
+                secret = SecretPayload(
+                    secretValues = mapOf(
+                        "password" to "hunter2",
+                        "mtlsKeystorePassword" to CLIENT_KEY_PASSWORD,
+                    ),
+                ),
+            ),
+        )!!
+
+        val certificate = connection.clientCertificate!!
+        assertTrue(certificate.keystorePkcs12.contentEquals(keystoreBytes))
+        assertEquals(CLIENT_KEY_PASSWORD, certificate.keystorePassword)
+        assertEquals("omnisonic-client", certificate.alias)
+    }
+
+    @Test
+    fun `enabled mtls without a keystore blob leaves the row unloadable`() {
+        assertNull(mapper.from(row(mtlsEnabled = true)))
+    }
+
+    @Test
+    fun `enabled mtls with an unsealable blob leaves the row unloadable`() {
+        val otherCodec = AesGcmCredentialCodec(
+            keySource = SecretKeySource { KeyGenerator.getInstance("AES").apply { init(128) }.generateKey() },
+        )
+
+        assertNull(
+            mapper.from(
+                row(
+                    mtlsEnabled = true,
+                    mtlsKeystoreBlob = otherCodec.sealBytes(clientKeystoreBytes()),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `blank alias stays null in the client certificate`() {
+        val connection = mapper.from(
+            row(
+                mtlsEnabled = true,
+                mtlsKeystoreBlob = codec.sealBytes(clientKeystoreBytes()),
+                mtlsAlias = "  ",
+            ),
+        )!!
+
+        assertNull(connection.clientCertificate!!.alias)
+    }
+
+    @Test
+    fun `sealed trust anchors decode into server certificates`() {
+        val serverCertificate = HeldCertificate.Builder().build()
+        val blob = codec.sealBytes("""["${base64Der(serverCertificate)}"]""".toByteArray())
+        val connection = mapper.from(row(trustedCertsBlob = blob))!!
+
+        assertThat(connection.trustedServerCertificates)
+            .containsExactly(serverCertificate.certificate)
+        assertNull(connection.clientCertificate)
+    }
+
+    @Test
+    fun `unparseable trust anchors leave the row unloadable`() {
+        assertNull(
+            mapper.from(
+                row(trustedCertsBlob = codec.sealBytes("not a cert list".toByteArray())),
+            ),
+        )
+    }
+
+    @Test
+    fun `missing trust anchors keep ordinary server verification`() {
+        val connection = mapper.from(row())!!
+
+        assertThat(connection.trustedServerCertificates).isEmpty()
+    }
+
+    private fun clientKeystoreBytes(): ByteArray {
+        val certificate = HeldCertificate.Builder()
+            .addSubjectAlternativeName("omnisonic-client")
+            .build()
+        val keystore = KeyStore.getInstance("PKCS12").apply { load(null, null) }
+        keystore.setKeyEntry(
+            "omnisonic-client",
+            certificate.keyPair.private,
+            CLIENT_KEY_PASSWORD.toCharArray(),
+            arrayOf(certificate.certificate),
+        )
+        return ByteArrayOutputStream().use { output ->
+            keystore.store(output, CLIENT_KEY_PASSWORD.toCharArray())
+            output.toByteArray()
+        }
+    }
+
+    private fun base64Der(certificate: HeldCertificate): String =
+        Base64.getEncoder().encodeToString(certificate.certificate.encoded)
 }

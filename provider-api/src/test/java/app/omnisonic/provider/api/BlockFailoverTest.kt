@@ -8,10 +8,11 @@ import org.junit.jupiter.api.assertThrows
 
 class BlockFailoverTest {
 
+    private val primary = ConnectionBlock("https", "primary.test", 443)
+    private val secondary = ConnectionBlock("https", "secondary.test", 8443)
     private val connection = ProviderConnection(
         providerId = 1L,
-        primary = ConnectionBlock("https", "primary.test", 443),
-        secondary = ConnectionBlock("https", "secondary.test", 8443),
+        endpoint = ProviderEndpoint.Remote(primary, secondary),
     )
 
     @Test
@@ -243,7 +244,7 @@ class BlockFailoverTest {
     @Test
     fun `single block never flips`() = runTest {
         var reported = false
-        val failover = BlockFailover(connection.copy(secondary = null), onPreferredBlockChange = { reported = true })
+        val failover = BlockFailover(connection.copy(endpoint = ProviderEndpoint.Remote(primary)), onPreferredBlockChange = { reported = true })
 
         val outcome = failover.attempt { BlockAttempt.TransportError(IllegalStateException("down")) }
         val second = failover.attempt { BlockAttempt.TransportError(IllegalStateException("down")) }
@@ -252,6 +253,15 @@ class BlockFailoverTest {
         assertTrue(second is BlockAttempt.TransportError)
         assertEquals(ProviderConnection.PRIMARY_BLOCK, failover.preferredBlock)
         assertEquals(false, reported)
+    }
+
+    @Test
+    fun `serverless endpoint is a fatal error before any block is contacted`() = runTest {
+        val failover = BlockFailover(ProviderConnection(providerId = 2L))
+
+        val outcome = failover.attempt { BlockAttempt.Success("never reached") }
+
+        assertTrue(outcome is BlockAttempt.FatalError)
     }
 
     @Test

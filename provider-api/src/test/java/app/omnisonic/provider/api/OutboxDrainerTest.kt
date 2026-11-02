@@ -7,6 +7,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -73,12 +74,51 @@ class OutboxDrainerTest {
     private val provider = RecordingProvider()
     private val sink = CollectingSink()
 
-    private fun drainer(clock: () -> Long = { 1_000L }): OutboxDrainer = OutboxDrainer(
+    private fun drainer(clock: () -> Long = { 1_000L }, runGate: ProviderRunGate = AllowAllRunGate): OutboxDrainer = OutboxDrainer(
         store = store,
         providerLocator = { provider },
         clock = clock,
+        runGate = runGate,
         logger = OmnisonicLogger(sink),
     )
+
+    @Test
+    fun `blocked run gate defers the whole drain without touching tasks`() = runTest {
+        val drain = drainer(runGate = ProviderRunGate { ProviderStatus.NEEDS_WIFI })
+        store.add("play_count", OutboxActionPayload(playCountDelta = 1, playTimestamps = listOf(1_000L)))
+
+        val report = drain.drain(providerId = 7)
+
+        assertEquals(0, report.completed)
+        assertEquals(0, report.deferred)
+        assertEquals(ProviderStatus.NEEDS_WIFI, report.blockedBy)
+        assertEquals(1, store.tasks.size)
+        assertTrue(provider.submittedPlays.isEmpty())
+    }
+
+    @Test
+    fun `offline run gate reports the offline status`() = runTest {
+        val drain = drainer(runGate = ProviderRunGate { ProviderStatus.OFFLINE })
+        store.add("favorite", OutboxActionPayload(isFavorite = true))
+
+        val report = drain.drain(providerId = 7)
+
+        assertEquals(ProviderStatus.OFFLINE, report.blockedBy)
+        assertEquals(1, store.tasks.size)
+    }
+
+    @Test
+    fun `global drain skips blocked providers and leaves their tasks due`() = runTest {
+        val drain = drainer(runGate = ProviderRunGate { if (it == 7L) ProviderStatus.NEEDS_WIFI else ProviderStatus.OK })
+        store.add("play_count", OutboxActionPayload(playCountDelta = 1, playTimestamps = listOf(1_000L)))
+
+        val report = drain.drain()
+
+        assertEquals(0, report.completed)
+        assertEquals(0, report.deferred)
+        assertNull(report.blockedBy)
+        assertEquals(1, store.tasks.size)
+    }
 
     @Test
     fun `play count delta fully submitted completes the task`() = runTest {

@@ -16,8 +16,12 @@ import app.omnisonic.core.data.db.queue.OutboxQueue
 import app.omnisonic.core.data.json.JsonText
 import app.omnisonic.core.model.text.TextNormalizer
 import app.omnisonic.provider.api.AlbumListType
+import app.omnisonic.provider.api.AllowAllRunGate
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.ProviderAlbumRequest
+import app.omnisonic.provider.api.ProviderRunGate
+import app.omnisonic.provider.api.ProviderStatus
+import app.omnisonic.provider.api.ProviderTraits
 
 /**
  * Server-to-device library walk for Subsonic-compatible providers. Writes are
@@ -38,6 +42,8 @@ class SubsonicLibrarySyncer(
     private val database: OmnisonicDatabase,
     private val provider: MediaProvider,
     private val providerId: Long,
+    private val traits: ProviderTraits = ProviderTraits(),
+    private val runGate: ProviderRunGate = AllowAllRunGate,
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -45,6 +51,10 @@ class SubsonicLibrarySyncer(
         val albumsProcessed: Int,
         val durationMs: Long,
         val message: String,
+        /** Run-gate status that blocked the sync (offline, not on required Wi-Fi). */
+        val blockedBy: ProviderStatus? = null,
+        /** Provider traits report no library sync; nothing was read or written. */
+        val skippedNoLibrarySync: Boolean = false,
     )
 
     suspend fun runFullSync(): Outcome = runSync(full = true)
@@ -53,6 +63,13 @@ class SubsonicLibrarySyncer(
 
     private suspend fun runSync(full: Boolean): Outcome {
         val started = nowMs()
+        if (!traits.hasLibrarySync) {
+            return Outcome(0, nowMs() - started, "skipped: provider does not report library sync", skippedNoLibrarySync = true)
+        }
+        val gate = runGate.check(providerId)
+        if (gate != ProviderStatus.OK) {
+            return Outcome(0, nowMs() - started, "blocked: $gate", blockedBy = gate)
+        }
         return try {
             var albumsProcessed = 0
             val seenSongExternalIds = mutableSetOf<String>()

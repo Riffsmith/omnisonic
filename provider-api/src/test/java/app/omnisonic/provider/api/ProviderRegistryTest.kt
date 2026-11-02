@@ -43,11 +43,38 @@ class ProviderRegistryTest {
         val connection = ProviderConnection(
             providerId = 3L,
             displayName = "home",
-            primary = ConnectionBlock("https", "example.test", 443),
+            endpoint = ProviderEndpoint.Remote(ConnectionBlock("https", "example.test", 443)),
         )
 
         val provider = registry.create("subsonic", connection)
 
         assertTrue(provider is MediaProvider)
+    }
+
+    @Test
+    fun `traits resolve from the matched factory`() {
+        val narrow = object : MediaProviderFactory {
+            override fun apiType(): String = "narrow"
+
+            override fun traits(): ProviderTraits = ProviderTraits(
+                hasLibrarySync = true,
+                supportsDownload = false,
+                supportsServerTranscode = false,
+                reportsUserData = false,
+            )
+
+            override fun create(connection: ProviderConnection): MediaProvider = RecordingProvider()
+        }
+        val registry = ProviderRegistry(listOf(TagProviderFactory("subsonic"), narrow))
+
+        assertEquals(ProviderTraits(), registry.traitsFor("subsonic"))
+        assertEquals(narrow.traits(), registry.traitsFor("narrow"))
+    }
+
+    @Test
+    fun `unknown api falls back to subsonic-family trait defaults`() {
+        val registry = ProviderRegistry(listOf(TagProviderFactory("subsonic")))
+
+        assertEquals(ProviderTraits(), registry.traitsFor("unregistered"))
     }
 }

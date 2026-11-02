@@ -3,18 +3,25 @@ package app.omnisonic.core.data.providers
 import app.omnisonic.core.data.DatabaseTestBase
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.dao.ProviderDao
+import app.omnisonic.core.network.ClientProfile
+import app.omnisonic.core.network.ConnectionSpec
 import app.omnisonic.provider.api.ConnectionBlock
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.MediaProviderFactory
 import app.omnisonic.provider.api.ProviderConnection
 import app.omnisonic.provider.api.ProviderRegistry
 import com.google.common.truth.Truth.assertThat
+import java.io.ByteArrayOutputStream
+import java.security.KeyStore
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
+import okhttp3.tls.HeldCertificate
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+
+private const val CLIENT_KEY_PASSWORD = "registry-test"
 
 private class CountingProviderFactory(
     private val onPreferredBlockChange: suspend (Long, Int) -> Unit,
@@ -126,6 +133,15 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
         return clientRegistry to factory
     }
 
+    private class RecordingClientFactory {
+        val specs = mutableListOf<ConnectionSpec>()
+
+        fun build(spec: ConnectionSpec): OkHttpClient {
+            specs += spec
+            return OkHttpClient()
+        }
+    }
+
     @Test
     fun `one provider and one http client per provider id across calls`() = runDbTest {
         newProvider(id = 1, name = "a").let { row -> providerDao.upsert(row.copy(api = "counting")); providerDao.selectById(1)!! }
@@ -199,5 +215,118 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
         assertThat(registry.providerFor(1)).isNull()
         assertThat(registry.httpClientFor(1)).isNull()
         assertThat(factory.createdProviders).isEmpty()
+    }
+
+    @Test
+    fun `mtls disabled builds both profiles without client identities`() = runDbTest {
+        newProvider(id = 1, name = "a").let { row -> providerDao.upsert(row.copy(api = "counting")); providerDao.selectById(1)!! }
+        val media = RecordingClientFactory()
+        val api = RecordingClientFactory()
+        val registry = ProviderClientRegistry(
+            database = db,
+            providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
+            mapper = ProviderConfigMapper(codec),
+            mediaClientFactory = media::build,
+            apiClientFactory = api::build,
+        )
+
+        registry.providerFor(1)
+        registry.httpClientFor(1)
+        registry.apiClientFor(1)
+
+        assertThat(media.specs).hasSize(1)
+        assertThat(api.specs).hasSize(1)
+        listOf(media.specs.single(), api.specs.single()).forEach { spec ->
+            assertThat(spec.clientKeyStore).isNull()
+            assertThat(spec.clientKeyStorePassword).isNull()
+            assertThat(spec.trustedCertificates).isEmpty()
+        }
+        assertThat(media.specs.single().profile).isEqualTo(ClientProfile.MEDIA)
+        assertThat(api.specs.single().profile).isEqualTo(ClientProfile.API)
+    }
+
+    @Test
+    fun `mtls enabled propagates the client identity into both profiles`() = runDbTest {
+        val keystoreBytes = pkcs12Bytes()
+        newProvider(id = 1, name = "a").let { seeded ->
+            providerDao.upsert(
+                seeded.copy(
+                    api = "counting",
+                    mtlsEnabled = true,
+                    mtlsKeystoreBlob = codec.sealBytes(keystoreBytes),
+                    mtlsAlias = "omnisonic-client",
+                    secretBlob = codec.seal(
+                        app.omnisonic.core.data.security.SecretPayload(
+                            secretValues = mapOf("mtlsKeystorePassword" to CLIENT_KEY_PASSWORD),
+                        ),
+                    ),
+                    trustedCertsBlob = codec.sealBytes("""["${base64Der()}"]""".toByteArray()),
+                ),
+            )
+        }
+        val media = RecordingClientFactory()
+        val api = RecordingClientFactory()
+        val registry = ProviderClientRegistry(
+            database = db,
+            providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
+            mapper = ProviderConfigMapper(codec),
+            mediaClientFactory = media::build,
+            apiClientFactory = api::build,
+        )
+
+        registry.providerFor(1)
+        registry.httpClientFor(1)
+        registry.apiClientFor(1)
+
+        listOf(media.specs.single(), api.specs.single()).forEach { spec ->
+            assertThat(spec.clientKeyStore).isNotNull()
+            assertThat(spec.clientKeyStorePassword).isEqualTo(CLIENT_KEY_PASSWORD)
+            assertThat(spec.trustedCertificates).hasSize(1)
+        }
+    }
+
+    @Test
+    fun `corrupt mtls keystore leaves the provider unloadable`() = runDbTest {
+        newProvider(id = 1, name = "a").let { seeded ->
+            providerDao.upsert(
+                seeded.copy(
+                    api = "counting",
+                    mtlsEnabled = true,
+                    mtlsKeystoreBlob = codec.sealBytes("not a keystore".toByteArray()),
+                ),
+            )
+        }
+        val registry = ProviderClientRegistry(
+            database = db,
+            providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
+            mapper = ProviderConfigMapper(codec),
+            mediaClientFactory = { OkHttpClient() },
+            apiClientFactory = { OkHttpClient() },
+        )
+
+        assertThat(registry.providerFor(1)).isNull()
+        assertThat(registry.httpClientFor(1)).isNull()
+    }
+
+    private fun pkcs12Bytes(): ByteArray {
+        val certificate = HeldCertificate.Builder()
+            .addSubjectAlternativeName("omnisonic-client")
+            .build()
+        val keystore = KeyStore.getInstance("PKCS12").apply { load(null, null) }
+        keystore.setKeyEntry(
+            "omnisonic-client",
+            certificate.keyPair.private,
+            CLIENT_KEY_PASSWORD.toCharArray(),
+            arrayOf(certificate.certificate),
+        )
+        return ByteArrayOutputStream().use { output ->
+            keystore.store(output, CLIENT_KEY_PASSWORD.toCharArray())
+            output.toByteArray()
+        }
+    }
+
+    private fun base64Der(): String {
+        val certificate = HeldCertificate.Builder().build()
+        return java.util.Base64.getEncoder().encodeToString(certificate.certificate.encoded)
     }
 }

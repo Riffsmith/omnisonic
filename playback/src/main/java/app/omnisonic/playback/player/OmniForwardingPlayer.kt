@@ -1,5 +1,6 @@
 package app.omnisonic.playback.player
 
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.ForwardingPlayer
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
  * repeat/shuffle state is queue-owned. Media-list mutation and engine
  * repeat/shuffle setters are never forwarded to the engine.
  */
+@UnstableApi
 internal class OmniForwardingPlayer(
     private val queueState: StateFlow<QueueState>,
     private val port: QueueCommandPort,

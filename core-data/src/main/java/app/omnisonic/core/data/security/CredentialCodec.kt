@@ -16,6 +16,12 @@ data class SecretPayload(val secretValues: Map<String, String> = emptyMap())
 interface CredentialCodec {
     fun seal(payload: SecretPayload): String
     fun unseal(blob: String?): SecretPayload?
+
+    /** Seals raw bytes (e.g. a PKCS#12 keystore) with the same key and framing as [seal]. */
+    fun sealBytes(bytes: ByteArray): String
+
+    /** Inverse of [sealBytes]; null when the blob is absent or unreadable. */
+    fun unsealBytes(blob: String?): ByteArray?
 }
 
 fun interface SecretKeySource {
@@ -29,8 +35,18 @@ class AesGcmCredentialCodec(
 
     private val payloadAdapter = moshi.adapter(SecretPayload::class.java)
 
-    override fun seal(payload: SecretPayload): String {
-        val clearText = payloadAdapter.toJson(payload).toByteArray(Charsets.UTF_8)
+    override fun seal(payload: SecretPayload): String = sealRaw(payloadAdapter.toJson(payload).toByteArray(Charsets.UTF_8))
+
+    override fun unseal(blob: String?): SecretPayload? =
+        unsealRaw(blob)?.let { sealed ->
+            runCatching { payloadAdapter.fromJson(String(sealed, Charsets.UTF_8)) }.getOrNull()
+        }
+
+    override fun sealBytes(bytes: ByteArray): String = sealRaw(bytes)
+
+    override fun unsealBytes(blob: String?): ByteArray? = unsealRaw(blob)
+
+    private fun sealRaw(clearText: ByteArray): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, keySource.active())
         val iv = cipher.iv ?: error("AES-GCM cipher produced no IV")
@@ -43,7 +59,7 @@ class AesGcmCredentialCodec(
         return Base64.getEncoder().encodeToString(sealed)
     }
 
-    override fun unseal(blob: String?): SecretPayload? {
+    private fun unsealRaw(blob: String?): ByteArray? {
         val sealed = blob
             ?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
             ?: return null
@@ -53,8 +69,7 @@ class AesGcmCredentialCodec(
             val cipherText = sealed.copyOfRange(1 + IV_LENGTH_BYTES, sealed.size)
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, keySource.active(), GCMParameterSpec(TAG_LENGTH_BITS, iv))
-            val clearText = cipher.doFinal(cipherText)
-            payloadAdapter.fromJson(String(clearText, Charsets.UTF_8))
+            cipher.doFinal(cipherText)
         }.getOrNull()
     }
 

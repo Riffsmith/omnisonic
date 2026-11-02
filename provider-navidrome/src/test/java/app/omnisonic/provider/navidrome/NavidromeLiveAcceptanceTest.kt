@@ -10,6 +10,7 @@ import app.omnisonic.provider.api.ProviderAlbum
 import app.omnisonic.provider.api.ProviderAlbumRequest
 import app.omnisonic.provider.api.ProviderAuthMethod
 import app.omnisonic.provider.api.ProviderConnection
+import app.omnisonic.provider.api.ProviderEndpoint
 import app.omnisonic.provider.api.ProviderMediaType
 import com.google.common.truth.Truth.assertThat
 import java.net.ServerSocket
@@ -45,8 +46,7 @@ private fun liveNavidromeOrSkip(): NavidromeLiveConfig {
             providerId = 1L,
             username = username!!,
             password = password!!,
-            primary = block,
-            secondary = null,
+            endpoint = ProviderEndpoint.Remote(block),
             authMethod = ProviderAuthMethod.TOKEN,
         ),
         block,
@@ -120,7 +120,7 @@ class NavidromeLiveAcceptanceTest {
     fun `live failover completes through secondary when primary is refused`() = runBlocking {
         val config = liveNavidromeOrSkip()
         val dead = ConnectionBlock("http", "127.0.0.1", pendingPort())
-        val connection = config.connection.copy(primary = dead, secondary = config.block)
+        val connection = config.connection.copy(endpoint = ProviderEndpoint.Remote(dead, config.block))
         val preferredBlocks = mutableListOf<Int>()
         val client = testClient(connection) { block -> preferredBlocks += block }
 

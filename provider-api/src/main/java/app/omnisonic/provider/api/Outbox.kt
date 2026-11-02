@@ -39,17 +39,35 @@ class OutboxDrainer(
     private val store: OutboxStore,
     private val providerLocator: (Long) -> MediaProvider?,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val runGate: ProviderRunGate = AllowAllRunGate,
     private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),
 ) {
-    data class DrainReport(val completed: Int, val progressed: Int, val deferred: Int)
+    data class DrainReport(
+        val completed: Int,
+        val progressed: Int,
+        val deferred: Int,
+        /** Non-null when the run gate blocked the whole drain (status != OK). */
+        val blockedBy: ProviderStatus? = null,
+    )
 
     private val probedProviders = mutableSetOf<Long>()
 
     suspend fun drain(providerId: Long? = null): DrainReport {
+        if (providerId != null) {
+            val status = runGate.check(providerId)
+            if (status != ProviderStatus.OK) {
+                logger.debug(TAG, "drain for provider $providerId blocked: $status")
+                return DrainReport(completed = 0, progressed = 0, deferred = 0, blockedBy = status)
+            }
+        }
         var completed = 0
         var progressed = 0
         var deferred = 0
         for (task in store.dueTasks(clock(), providerId)) {
+            if (providerId == null && runGate.check(task.providerId) != ProviderStatus.OK) {
+                logger.debug(TAG, "outbox task ${task.id} stays due; provider ${task.providerId} is blocked by the run gate")
+                continue
+            }
             val provider = providerLocator(task.providerId)
             if (provider == null) {
                 logger.warn(TAG, "outbox task ${task.id} has no registered provider for id ${task.providerId}")

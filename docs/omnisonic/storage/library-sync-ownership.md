@@ -13,12 +13,13 @@ Confidence:
 - [VERIFIED] `MediaProvider.getAlbum(externalId): ProviderAlbumDetails` returns album + songs in one fetch; the syncer makes N album requests for N albums plus one album-list page request (asserted in tests). `browseDirectory` remains for directory browsing and the local provider.
 - [VERIFIED] titleRoman/sortTitle are computed at sync for songs, albums, and artists via `core-model` TextNormalizer (ICU Any-Latin transliteration when available on Android, otherwise NFD + strip marks on the JVM), with `sortKey` lowercased.
 - [VERIFIED] O(n^2) genre/radio/playlist lookups replaced with `(providerId, externalId)` DAO queries.
-- [VERIFIED] `songs.resumeUpdatedAt` and `songs.missingOnServer` exist from schema v1 (pre-release); the standalone v1->v2 migration including them is T16's single migration per Gate D. Existing dev databases are recreated; nothing is released.
+- [VERIFIED] `songs.resumeUpdatedAt` and `songs.missingOnServer` exist from schema v1 (pre-release). The single T16 v1->v2 migration preserves them and adds provider kinds/endpoints, Wi-Fi/mTLS columns, download ownership, queue snapshots, and per-play history; see `schema-v2.md`. No released database exists, and the migration is explicit (no destructive fallback).
+- [VERIFIED] Provider rows now carry `kind` (`REMOTE_SERVER`/`DEVICE`/`VIRTUAL`); `DEVICE` and `VIRTUAL` load through `ProviderEndpoint.None`, while `REMOTE_SERVER` keeps the primary-block validation. `SongRepository.ensureSong` lets playback/favorites/playlists materialise a minimal song row without overwriting SERVER- or LOCAL-owned columns.
 - [UNKNOWN] Behavior against a live server (real Navidrome) — needs a server; not run.
 
-Date: 2026-10-31
+Date: 2026-11-02
 
-Links: `../protocol/subsonic-auth.md`, `../../.agents` decision brief section 2 (tombstone rules), Prompt.md T10
+Links: `schema-v2.md`, `../protocol/subsonic-auth.md`, `../../.agents` decision brief section 2 (tombstone rules), Prompt.md T10
 
 ---
 
