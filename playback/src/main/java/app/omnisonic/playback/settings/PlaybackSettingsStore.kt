@@ -40,6 +40,10 @@ object PlaybackPrefs {
     val CACHE_FIRST = booleanPreferencesKey("engine.cache_first")
     val CACHE_SIZE_BYTES = longPreferencesKey("engine.cache_size_bytes")
     val TRANSIENT_LOSS = intPreferencesKey("engine.transient_loss_action")
+    val OFFLOAD_NAME = stringPreferencesKey("engine.offload_mode_name")
+    val RG_MODE_NAME = stringPreferencesKey("engine.replay_gain_mode_name")
+    val RG_NORM_NAME = stringPreferencesKey("engine.replay_gain_normalisation_name")
+    val TRANSIENT_LOSS_NAME = stringPreferencesKey("engine.transient_loss_action_name")
     val NOTIF_SLOT_1 = stringPreferencesKey("engine.notification_action_1")
     val NOTIF_SLOT_2 = stringPreferencesKey("engine.notification_action_2")
     val NOTIF_SLOT_3 = stringPreferencesKey("engine.notification_action_3")
@@ -54,22 +58,19 @@ class PlaybackSettingsStore(
     override val offloadMode: Flow<OffloadMode> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { prefs ->
-            OffloadMode.entries.firstOrNull { it.ordinal == prefs[PlaybackPrefs.OFFLOAD] }
-                ?: OffloadMode.DISABLED
+            readEnum(prefs, PlaybackPrefs.OFFLOAD_NAME, PlaybackPrefs.OFFLOAD, OffloadMode.DISABLED)
         }
 
     override val replayGainMode: Flow<ReplayGainMode> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { prefs ->
-            ReplayGainMode.entries.firstOrNull { it.ordinal == prefs[PlaybackPrefs.RG_MODE] }
-                ?: ReplayGainMode.OFF
+            readEnum(prefs, PlaybackPrefs.RG_MODE_NAME, PlaybackPrefs.RG_MODE, ReplayGainMode.OFF)
         }
 
     override val replayGainNormalisation: Flow<RgNormalisation> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { prefs ->
-            RgNormalisation.entries.firstOrNull { it.ordinal == prefs[PlaybackPrefs.RG_NORM] }
-                ?: RgNormalisation.RG2
+            readEnum(prefs, PlaybackPrefs.RG_NORM_NAME, PlaybackPrefs.RG_NORM, RgNormalisation.RG2)
         }
 
     override val replayGainTargetLoudnessLufs: Flow<Double> = dataStore.data
@@ -95,8 +96,7 @@ class PlaybackSettingsStore(
     override val transientLossAction: Flow<TransientLossAction> = dataStore.data
         .catch { emit(emptyPreferences()) }
         .map { prefs ->
-            TransientLossAction.entries.firstOrNull { it.ordinal == prefs[PlaybackPrefs.TRANSIENT_LOSS] }
-                ?: TransientLossAction.DUCK
+            readEnum(prefs, PlaybackPrefs.TRANSIENT_LOSS_NAME, PlaybackPrefs.TRANSIENT_LOSS, TransientLossAction.DUCK)
         }
 
     override val notificationActions: Flow<List<NotificationAction>> = dataStore.data
@@ -118,15 +118,15 @@ class PlaybackSettingsStore(
         .catch { emit(emptyPreferences()) }
         .map { prefs -> prefs[PlaybackPrefs.SHORT_FADE_MS] ?: DEFAULT_SHORT_FADE_MS }
 
-    suspend fun setOffloadMode(value: OffloadMode) = edit { it[PlaybackPrefs.OFFLOAD] = value.ordinal }
-    suspend fun setReplayGainMode(value: ReplayGainMode) = edit { it[PlaybackPrefs.RG_MODE] = value.ordinal }
-    suspend fun setReplayGainNormalisation(value: RgNormalisation) = edit { it[PlaybackPrefs.RG_NORM] = value.ordinal }
+    suspend fun setOffloadMode(value: OffloadMode) = writeEnum(PlaybackPrefs.OFFLOAD_NAME, PlaybackPrefs.OFFLOAD, value)
+    suspend fun setReplayGainMode(value: ReplayGainMode) = writeEnum(PlaybackPrefs.RG_MODE_NAME, PlaybackPrefs.RG_MODE, value)
+    suspend fun setReplayGainNormalisation(value: RgNormalisation) = writeEnum(PlaybackPrefs.RG_NORM_NAME, PlaybackPrefs.RG_NORM, value)
     suspend fun setReplayGainTargetLoudnessLufs(value: Double) = edit { it[PlaybackPrefs.RG_TARGET_LUFS] = value }
     suspend fun setPreampDb(value: Float) = edit { it[PlaybackPrefs.PREAMP_DB] = value }
     suspend fun setMono(value: Boolean) = edit { it[PlaybackPrefs.MONO] = value }
     suspend fun setCacheFirst(value: Boolean) = edit { it[PlaybackPrefs.CACHE_FIRST] = value }
     suspend fun setCacheSizeBytes(value: Long) = edit { it[PlaybackPrefs.CACHE_SIZE_BYTES] = value }
-    suspend fun setTransientLossAction(value: TransientLossAction) = edit { it[PlaybackPrefs.TRANSIENT_LOSS] = value.ordinal }
+    suspend fun setTransientLossAction(value: TransientLossAction) = writeEnum(PlaybackPrefs.TRANSIENT_LOSS_NAME, PlaybackPrefs.TRANSIENT_LOSS, value)
     suspend fun setNotificationActions(slots: List<NotificationAction>) {
         require(slots.size == 5)
         edit { prefs ->
@@ -147,6 +147,37 @@ class PlaybackSettingsStore(
 
     private suspend fun edit(block: (MutablePreferences) -> Unit) {
         dataStore.edit(block)
+    }
+
+    /**
+     * Enums persist by stable NAME so reordering or inserting constants never
+     * remaps a saved setting. The legacy `*_mode` int keys (ordinal storage)
+     * are read for one release: an in-range ordinal maps back to its entry and
+     * the next write clears the key; an out-of-range or unknown value falls
+     * back to the default.
+     */
+    private inline fun <reified E : Enum<E>> readEnum(
+        prefs: Preferences,
+        nameKey: Preferences.Key<String>,
+        legacyOrdinalKey: Preferences.Key<Int>,
+        default: E,
+    ): E {
+        prefs[nameKey]?.let { name ->
+            return enumValues<E>().firstOrNull { it.name == name } ?: default
+        }
+        val legacyOrdinal = prefs[legacyOrdinalKey] ?: return default
+        return enumValues<E>().getOrNull(legacyOrdinal) ?: default
+    }
+
+    private suspend fun <E : Enum<E>> writeEnum(
+        nameKey: Preferences.Key<String>,
+        legacyOrdinalKey: Preferences.Key<Int>,
+        value: E,
+    ) {
+        edit { prefs ->
+            prefs[nameKey] = value.name
+            prefs.remove(legacyOrdinalKey)
+        }
     }
 
     companion object {
