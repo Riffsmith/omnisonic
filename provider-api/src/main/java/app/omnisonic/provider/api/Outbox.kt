@@ -2,6 +2,7 @@ package app.omnisonic.provider.api
 
 import app.omnisonic.core.model.log.ConsoleLogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
+import app.omnisonic.core.model.runCatchingCancellable
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
@@ -75,7 +76,7 @@ class OutboxDrainer(
                 continue
             }
             if (task.action == ACTION_PLAY_COUNT) probeOnce(task.providerId, provider)
-            val outcome = runCatching { execute(task, provider) }
+            val outcome = runCatchingCancellable { execute(task, provider) }
                 .getOrElse { error ->
                     logger.error(TAG, "outbox task ${task.id} failed", error)
                     store.fail(task.id, task.attempts + 1, clock() + backoffMs(task.attempts + 1), error.message ?: error.javaClass.simpleName)
@@ -97,11 +98,10 @@ class OutboxDrainer(
     private suspend fun probeOnce(providerId: Long, provider: MediaProvider) {
         if (providerId in probedProviders) return
         probedProviders += providerId
-        try {
-            provider.probe()
-        } catch (failure: Exception) {
-            logger.warn(TAG, "capability probe failed for provider $providerId: ${failure.message}")
-        }
+        runCatchingCancellable { provider.probe() }
+            .onFailure { failure ->
+                logger.warn(TAG, "capability probe failed for provider $providerId: ${failure.message}")
+            }
     }
 
     private suspend fun execute(task: OutboxTask, provider: MediaProvider): TaskOutcome {

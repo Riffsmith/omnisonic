@@ -1,5 +1,6 @@
 package app.omnisonic.provider.navidrome
 
+import app.omnisonic.core.model.runCatchingCancellable
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.ProviderAuthMethod
 import app.omnisonic.provider.api.BlockAttempt
@@ -59,7 +60,7 @@ class SubsonicClient(
         call(Endpoint.PING) { it }
         // getOpenSubsonicExtensions is OpenSubsonic-only; older servers reject
         // the endpoint, which is terminal for the call but not for the protocol.
-        val extensions = runCatching {
+        val extensions = runCatchingCancellable {
             call(Endpoint.OPEN_SUBSONIC_EXTENSIONS) { it }.openSubsonicExtensions
         }.getOrDefault(emptyList())
         val caps = ProviderCapabilities(
@@ -317,7 +318,7 @@ class SubsonicClient(
             previous = effective
             // A rejected submission counts as not-accepted rather than aborting
             // the batch: the drainer reports partial acceptance as progress.
-            val envelope = runCatching {
+            val envelope = runCatchingCancellable {
                 call(Endpoint.SCROBBLE, scrobbleParams(externalId, submission = true, timeMs = effective)) { it }
             }.getOrNull()
             if (envelope?.status == STATUS_OK) accepted++
@@ -473,7 +474,7 @@ class SubsonicClient(
         decode: (SubsonicEnvelope) -> T,
     ): BlockAttempt<T> {
         val request = Request.Builder().url(buildUrl(block, endpoint, params)).build()
-        val response = runCatching { http.newCall(request).awaitResponse() }
+        val response = runCatchingCancellable { http.newCall(request).awaitResponse() }
             .getOrElse { failure -> return BlockAttempt.TransportError(failure) }
         return response.use { handled ->
             if (handled.code >= 300 || handled.code < 200) {

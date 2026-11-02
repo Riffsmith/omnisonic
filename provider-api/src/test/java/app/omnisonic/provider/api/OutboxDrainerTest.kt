@@ -5,6 +5,12 @@ import app.omnisonic.core.model.log.LogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -332,5 +338,59 @@ class OutboxDrainerTest {
 
         assertEquals(1, report.completed)
         assertTrue(provider.favorites.isEmpty())
+    }
+
+    @Test
+    fun `cancelling the drain mid-task records no failure and cancels the caller`() = runTest {
+        val blockingStore = FakeOutboxStore()
+        blockingStore.add("favorite", OutboxActionPayload(isFavorite = true))
+        val blockedProvider = object : MediaProvider {
+            override suspend fun probe(): ProviderCapabilities = ProviderCapabilities()
+            override suspend fun listArtists(): List<ProviderArtist> = emptyList()
+            override suspend fun browseDirectory(externalId: String): ProviderDirectory = ProviderDirectory(externalId)
+            override suspend fun getAlbum(albumExternalId: String): ProviderAlbumDetails? = null
+            override suspend fun songDetails(externalId: String): ProviderSong? = null
+            override suspend fun listAlbums(request: ProviderAlbumRequest): List<ProviderAlbum> = emptyList()
+            override suspend fun listGenres(): List<ProviderGenre> = emptyList()
+            override suspend fun listRadios(): List<ProviderRadio> = emptyList()
+            override suspend fun listPlaylists(): List<ProviderPlaylistSummary> = emptyList()
+            override suspend fun getPlaylist(playlistExternalId: String): ProviderPlaylist? = null
+            override suspend fun listBookmarks(): List<ProviderBookmark> = emptyList()
+            override suspend fun searchArtists(query: String, offset: Int, count: Int): List<ProviderArtist> = emptyList()
+            override suspend fun searchAlbums(query: String, offset: Int, count: Int): List<ProviderAlbum> = emptyList()
+            override suspend fun searchSongs(query: String, offset: Int, count: Int): List<ProviderSong> = emptyList()
+            override fun streamUrl(externalId: String, maxBitRateKbps: Int?, format: String?): String? = null
+            override fun coverArtUrl(imageId: String?, sizePx: Int?): String? = null
+            override fun downloadUrl(externalId: String, maxBitRateKbps: Int?, format: String?): String? = null
+            override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int = timestamps.size
+            override suspend fun sendNowPlaying(externalId: String, playedMs: Long): Boolean = true
+            override suspend fun setFavorite(mediaType: ProviderMediaType, externalId: String, favorite: Boolean): Boolean {
+                awaitCancellation()
+            }
+
+            override suspend fun setUserRating(mediaType: ProviderMediaType, externalId: String, rating: Int): Boolean = true
+            override suspend fun saveBookmark(externalId: String, positionMs: Long): Boolean = true
+            override suspend fun deleteBookmark(externalId: String): Boolean = true
+            override suspend fun similarSongs(externalId: String, count: Int): List<ProviderSong> = emptyList()
+        }
+        val drain = OutboxDrainer(
+            store = blockingStore,
+            providerLocator = { blockedProvider },
+            clock = { 1_000L },
+            logger = OmnisonicLogger(sink),
+        )
+        var drainReturned = false
+        val job = launch {
+            drain.drain()
+            drainReturned = true
+        }
+        runCurrent()
+        assertTrue(provider.favorites.isEmpty())
+
+        job.cancelAndJoin()
+
+        assertTrue(blockingStore.failures.isEmpty())
+        assertTrue(!drainReturned)
+        assertTrue(job.isCancelled)
     }
 }

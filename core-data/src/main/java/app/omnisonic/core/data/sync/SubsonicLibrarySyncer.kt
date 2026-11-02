@@ -2,6 +2,7 @@ package app.omnisonic.core.data.sync
 
 import androidx.room.withTransaction
 import app.omnisonic.core.data.db.OmnisonicDatabase
+import kotlin.coroutines.cancellation.CancellationException
 import app.omnisonic.core.data.db.entity.AlbumArtistEntity
 import app.omnisonic.core.data.db.entity.AlbumEntity
 import app.omnisonic.core.data.db.entity.ArtistEntity
@@ -96,6 +97,9 @@ class SubsonicLibrarySyncer(
                 recordStatus(full, started, albumsProcessed, resultOk = true, message = null)
             }
             Outcome(albumsProcessed, nowMs() - started, "ok")
+        } catch (cancellation: CancellationException) {
+            // Cancellation is not a sync failure: no status row is recorded.
+            throw cancellation
         } catch (failure: Exception) {
             database.withTransaction {
                 recordStatus(

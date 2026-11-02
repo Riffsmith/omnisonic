@@ -21,12 +21,17 @@ import com.squareup.moshi.JsonEncodingException
 import java.net.ServerSocket
 import java.security.MessageDigest
 import java.time.Instant
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
@@ -87,6 +92,66 @@ class SubsonicClientTest {
     private fun md5hex(value: String): String =
         MessageDigest.getInstance("MD5").digest(value.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
+
+    @Test
+    fun `cancelling during the extensions probe propagates cancellation`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    if (request.path.orEmpty().contains("getOpenSubsonicExtensions")) {
+                        MockResponse().apply { socketPolicy = SocketPolicy.NO_RESPONSE }
+                    } else {
+                        MockResponse().setBody("{\"status\":\"ok\"}")
+                    }
+            }
+            server.start()
+            val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+            var probeReturned = false
+            val job = launch {
+                client.probe()
+                probeReturned = true
+            }
+            withContext(Dispatchers.IO) {
+                server.takeRequest()
+                server.takeRequest()
+            }
+
+            job.cancelAndJoin()
+
+            assertThat(probeReturned).isFalse()
+        }
+    }
+
+    @Test
+    fun `cancelling mid-batch propagates out of submitPlays`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    if (request.path.orEmpty().contains("scrobble")) {
+                        MockResponse().apply { socketPolicy = SocketPolicy.NO_RESPONSE }
+                    } else {
+                        MockResponse().setBody("{\"status\":\"ok\",\"openSubsonicExtensions\":[]}")
+                    }
+            }
+            server.start()
+            val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+            client.probe()
+            withContext(Dispatchers.IO) {
+                server.takeRequest()
+                server.takeRequest()
+            }
+            var submitReturned = false
+            val job = launch {
+                client.submitPlays("song-1", listOf(1_000L, 2_000L))
+                submitReturned = true
+            }
+            withContext(Dispatchers.IO) { server.takeRequest() }
+
+            job.cancelAndJoin()
+
+            assertThat(submitReturned).isFalse()
+        }
+    }
 
     @Test
     fun `token auth query carries the digest and protocol line`() = runBlocking {

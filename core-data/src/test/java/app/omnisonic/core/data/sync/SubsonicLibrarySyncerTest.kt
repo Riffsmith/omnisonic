@@ -27,6 +27,10 @@ import app.omnisonic.provider.api.ProviderPlaylistSummary
 import app.omnisonic.provider.api.ProviderRadio
 import app.omnisonic.provider.api.ProviderSong
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -120,6 +124,21 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         runGate = runGate,
         nowMs = nowMs,
     )
+
+    @Test
+    fun `cancelling the sync records no failed sync status`() = runDbTest {
+        newProvider(id = 1)
+        val hangingProvider = object : MediaProvider by FakeMediaProvider() {
+            override suspend fun listArtists(): List<ProviderArtist> = awaitCancellation()
+        }
+        coroutineScope {
+            val job = launch { syncer(hangingProvider).runFullSync() }
+
+            job.cancelAndJoin()
+
+            assertThat(syncStatusDao.selectByProvider(1)).isNull()
+        }
+    }
 
     @Test
     fun `offline run gate blocks the sync before any read or write`() = runDbTest {
