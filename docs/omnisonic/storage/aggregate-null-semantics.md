@@ -2,7 +2,7 @@
 
 Purpose: Pin the empty-album behavior of album aggregate recomputation so a SQL `NULL` never violates the non-null `albums.playCount` column.
 
-How derived: Code reading of `AggregateDao.kt`, the `AlbumEntity` schema, and the T6 empty-album regression tests. The studied app is not a source.
+How derived: Code reading of `AggregateDao.kt`, the `AlbumEntity` schema, and the empty-album regression tests. The studied app is not a source.
 
 Confidence:
 - [VERIFIED] `SUM` over no rows is `NULL`, so the two sum queries already wrapped it in `COALESCE(..., 0)`.

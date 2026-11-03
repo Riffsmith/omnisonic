@@ -2,7 +2,7 @@
 
 Purpose: Pin down how streamed audio reaches the provider's MEDIA-profile OkHttp client so custom headers, mTLS identity and media timeouts apply to Media3 data-source reads.
 
-How derived: Code reading of `MediaDataSourceFactoryProvider.kt`, `PlaybackCacheManager.kt`, `OmniPlayerImpl.kt`, `HttpClientFactory.kt`, plus the T4 MockWebServer and mTLS playback tests. The studied app is not a source.
+How derived: Code reading of `MediaDataSourceFactoryProvider.kt`, `PlaybackCacheManager.kt`, `OmniPlayerImpl.kt`, `HttpClientFactory.kt`, plus the MockWebServer and mTLS playback tests. The studied app is not a source.
 
 Confidence:
 - [VERIFIED] `MediaDataSourceFactoryProvider.factoryFor(providerId)` returns a cached `OkHttpDataSource.Factory` backed by the resolver's client for that provider.

@@ -2,7 +2,7 @@
 
 Purpose: Pin how engine construction chooses the Media3 wake mode: NETWORK by default (wake lock plus Wi-Fi lock during playback, for streaming with the screen off), with a LOCAL opt-out for local-only engines.
 
-How derived: Prompt.md T9; direct reading of the Media3 1.3.1 `ExoPlayerImpl`/`WakeLockManager`/`WifiLockManager` bytecode in the local Gradle cache; empirical Robolectric probes in this repository (WakeModeTest). The studied app is not a source.
+How derived: a pre-release audit finding; direct reading of the Media3 1.3.1 `ExoPlayerImpl`/`WakeLockManager`/`WifiLockManager` bytecode in the local Gradle cache; empirical Robolectric probes in this repository (WakeModeTest). The studied app is not a source.
 
 Confidence:
 - [VERIFIED] `EngineConfig` gained `wakeMode: WakeMode = NETWORK` (`LOCAL | NETWORK`), mapped in `ExoEngineFactory` to `C.WAKE_MODE_NETWORK` / `C.WAKE_MODE_LOCAL`.
@@ -13,7 +13,7 @@ Confidence:
 
 Date: 2026-10-31
 
-Links: `per-provider-media-clients.md`, Prompt.md T9
+Links: `per-provider-media-clients.md`, `../decisions.md`
 
 ---
 

@@ -2,7 +2,8 @@
 
 Purpose: pins the verified build toolchain combination (Gradle, AGP, Kotlin/KSP,
 Hilt, media3, Coil) and the release-build hygiene contract (minification, Moshi
-codegen, packaging) after the T23 build-hygiene pass.
+codegen, packaging) established in the build-hygiene pass. Version choices and
+their rationale are recorded in `../decisions.md`.
 
 How derived: official AGP compatibility table (developer.android.com/build/releases/about-agp,
 2026-10-28 revision), Maven metadata for media3/Hilt/KSP, and green build runs of
@@ -33,8 +34,7 @@ Confidence:
 
 Date: 2026-11-03
 
-Links: `docs/omnisonic/playback/offload-and-extensions.md`, ROADMAP Phase 1/12,
-Prompt.md T23.
+Links: `../playback/offload-and-extensions.md`, `../decisions.md` (toolchain table).
 
 ---
 

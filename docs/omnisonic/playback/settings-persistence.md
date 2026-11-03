@@ -4,10 +4,11 @@ Purpose: pins down how engine preference enums (offload mode, replay-gain mode,
 replay-gain normalisation, transient-loss action) are stored by
 `PlaybackSettingsStore` and how legacy data is treated.
 
-How derived: audit defect T18 in the pre-release review prompt (ordinal storage
+How derived: audit finding in the pre-release review (ordinal storage
 remaps saved settings when enum constants are reordered or inserted), plus the
 DataStore file format observation (typed preference keys; an int value stored
-under a key later read as a string fails the whole file read).
+under a key later read as a string fails the whole file read). The
+name-storage rule is a recorded decision: see `../decisions.md`.
 
 Confidence: name-based storage and the legacy mapping are [VERIFIED] by
 `PlaybackSettingsStoreTest`. The "one release" legacy window is a policy choice
@@ -17,7 +18,7 @@ ordinal data.
 Date: 2026-11-02
 
 Links: `playback-api` `PlaybackSettings`/`OffloadMode`/`ReplayGainMode`/
-`RgNormalisation`/`TransientLossAction`; review prompt T18.
+`RgNormalisation`/`TransientLossAction`; `../decisions.md` (enum-by-name rule).
 
 ---
 

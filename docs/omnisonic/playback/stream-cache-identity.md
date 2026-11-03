@@ -2,7 +2,7 @@
 
 Purpose: Pin down the stable cache identity used for streamed audio and cover images so rotating per-request authentication parameters cannot create duplicate cache entries.
 
-How derived: Code reading of `StreamResolver.kt`, `PlaybackCacheManager.kt`, `OmniPlayerImpl.kt`, and the Media3 `CacheDataSource` cache-key path, plus the T2 cache tests. The studied app is not a source.
+How derived: Code reading of `StreamResolver.kt`, `PlaybackCacheManager.kt`, `OmniPlayerImpl.kt`, and the Media3 `CacheDataSource` cache-key path, plus the stream-cache tests in this repository. The studied app is not a source.
 
 Confidence:
 - [VERIFIED] Media3 `CacheDataSource` resolves its cache key through `CacheKeyFactory`; the default factory uses `DataSpec.key` when present and otherwise the URI string.

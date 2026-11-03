@@ -4,9 +4,8 @@ Purpose: pins the rule that structured-coroutine cancellation is never
 swallowed, logged as a task failure, or converted into a retry/backoff anywhere
 in Omnisonic's suspend call graph.
 
-How derived: audit defect T19 in the pre-release review prompt (suspend calls
-wrapped in `runCatching`/`catch (Exception)`), confirmed by the failing tests
-listed below.
+How derived: pre-release correctness audit finding (suspend calls wrapped in
+`runCatching`/`catch (Exception)`), confirmed by the failing tests listed below.
 
 Confidence: the drainer and client swallowing behaviour was [VERIFIED] red
 before the fix; the syncer-site claim was only [PARTIALLY] reproducible (see
@@ -16,7 +15,7 @@ Date: 2026-11-03
 
 Links: `core-model` `runCatchingCancellable`; `provider-api` `OutboxDrainer`;
 `provider-navidrome` `SubsonicClient`; `core-data` `SubsonicLibrarySyncer`;
-review prompt T19.
+`../decisions.md` (cancellation contract).
 
 ---
 

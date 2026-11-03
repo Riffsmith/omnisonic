@@ -4,7 +4,7 @@ Purpose: pins how sealed credentials behave when they cannot be unsealed, how
 throwables are handed to log sinks, and which columns never leave the device
 through backup/export.
 
-How derived: audit defect T21 in the pre-release review prompt (raw throwable
+How derived: audit finding in the pre-release review (raw throwable
 passed to sinks; mapper substituting empty credentials for unreadable blobs).
 
 Confidence: all behaviours [VERIFIED] by the tests listed below.
@@ -13,7 +13,7 @@ Date: 2026-11-03
 
 Links: `core-model` `OmnisonicLogger`/`CredentialRedactor`; `core-data`
 `ProviderConfigMapper` (`ProviderLoadResult`), `ProviderClientRegistry`,
-`ProviderStatusTracker`, `BackupExcludes`; review prompt T21.
+`ProviderStatusTracker`, `BackupExcludes`; `../decisions.md`; `provider-connections.md`.
 
 ---
 

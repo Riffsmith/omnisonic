@@ -2,7 +2,7 @@
 
 Purpose: Separate API traffic, which may negotiate compressed response bodies, from media traffic, which must preserve raw bytes, Range semantics, and real Content-Length values.
 
-How derived: Code reading of `ConnectionSpec.kt`, `HttpClientFactory.kt`, and `HttpClientFactoryTest.kt`; inspection of the published `zstd-jni` Android AAR metadata and packaged native libraries; and the T3 unit-test runs. The studied app is not a source.
+How derived: Code reading of `ConnectionSpec.kt`, `HttpClientFactory.kt`, and `HttpClientFactoryTest.kt`; inspection of the published `zstd-jni` Android AAR metadata and packaged native libraries; and the client-profile unit tests in this repository. The studied app is not a source.
 
 Confidence:
 - [VERIFIED] `ClientProfile.API` advertises `zstd, gzip`, decodes `zstd`/`gzip`, and preserves the previous API timeout defaults.

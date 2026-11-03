@@ -1,8 +1,9 @@
 # Schema v2 — `schema-v2.md`
 
-Purpose: Record the single pre-release v1→v2 Room migration shipped in T16 and
-amended in T24 (clean-room table renames), the column and table deltas it
-carries, and the ownership/materialisation rules that depend on it.
+Purpose: Record the single pre-release v1→v2 Room migration (including the
+clean-room table renames), the column and table deltas it carries, the queue
+snapshot and per-play history models, and the ownership/materialisation rules
+that depend on it.
 
 How derived: `core-data/schemas/app.omnisonic.core.data.db.OmnisonicDatabase/1.json`
 and `2.json`, `Migration1To2.kt`, `ProviderCascadeTriggers.kt`, and the migration
@@ -11,8 +12,8 @@ harness test. The studied app is not a source.
 Confidence:
 - [VERIFIED] `OmnisonicDatabase.SCHEMA_VERSION = 2`; `Migrations.ALL` contains exactly
   one `Migration(1, 2)`; no destructive fallback exists in either database builder.
-- [VERIFIED] `1.json` is unchanged from the pre-T16 baseline; `2.json` is the KSP
-  export for version 2 (regenerated with the T24 table names).
+- [VERIFIED] `1.json` is unchanged from the pre-migration baseline; `2.json` is the KSP
+  export for version 2 (regenerated with the renamed v2 table names).
 - [VERIFIED] `MigrationHarnessTest` seeds a real v1 database from `1.json`, runs the
   migration, validates against `2.json`, and checks data, defaults, history, queue
   restore, the renamed tables' data survival, trigger names, index names, and
@@ -23,7 +24,7 @@ Confidence:
 Date: 2026-11-03
 
 Links: `sqlite-api29-floor.md`, `library-sync-ownership.md`,
-`aggregate-null-semantics.md`, `../session-reports/SESSION-T16-FINAL.md`
+`aggregate-null-semantics.md`, `../providers/provider-connections.md`, `../decisions.md`
 
 ---
 
@@ -46,9 +47,9 @@ It tears down the v1 cascade triggers, rebuilds `providers`, rebuilds
 the provider cascade triggers under the v2 names. `PRAGMA recursive_triggers` is
 never enabled.
 
-## Clean-room table renames (T24)
+## Clean-room table renames
 
-Approved by the user in the T23/T24 session (option C: folded into the v2
+Approved by the user (option C: folded into the v2
 migration; precondition verified — no v2 database was ever installed on any
 device, `adb devices` empty and no install recorded in the project history).
 
@@ -71,11 +72,37 @@ asserts the new index names exist and the old ones are gone.
 |---|---|
 | `queue_entries` | Queue metadata snapshot; restores without a `songs` row |
 | `queue_state` | Single-row play index, shuffle order/seed, repeat/speed/pitch, source |
-| `play_events` | One row per play or skip (T22 option b) |
+| `play_events` | One row per play or skip (per-play history decision — see `../decisions.md`) |
 
 `play_events_daily` is a view grouped by `(providerId, externalId, dayStartMs)`
 exposing `date`, `MAX(played)`, `MAX(skipped)`, `SUM(durationMs)`, and
 `COUNT(*) AS playCount`.
+
+[VERIFIED] `PlayCounter` writes one event per play and one per skip: a skip is
+`played = false, skipped = true` and does NOT increment `songs.playCount`.
+`PlayEventDao` serves per-play reads plus both rollup reads.
+
+## Queue snapshot model
+
+[VERIFIED] `queue_entries` stores the full metadata snapshot for every entry
+(`providerId`, `externalId`, optional `songRowId`, `title`, `artistName`,
+`albumExternalId`, `coverImageId`, `durationMs`, `isRadioStation`). Restoration
+reads `queue_entries` directly and never joins `songs`, so an entry whose song
+was never synced still restores with its title, artist, album id, cover id,
+duration, and radio flag. Materialised rows cascade on provider delete via the
+existing triggers.
+
+[VERIFIED] `queue_state` is the single-row transport state (`playIndex`,
+repeat mode stored by name, `speed`, `pitch`, `sourceType`, `sourceData`) plus
+the shuffle order as an entry-index permutation (`shuffleOrderJson`) alongside
+the original `shuffleSeed`. The order is STORED rather than regenerated from the
+seed because the anchor index depends on the original entry order; a persisted
+permutation is validated on restore and dropped when invalid.
+
+[VERIFIED] `core-data` `QueueSnapshotRepository` owns save/restore/clear;
+`:playback` `QueuePersistence` maps `QueueState` to and from the snapshots and
+validates the permutation. No lifecycle owner calls `QueuePersistence.save` yet —
+automatic save/restore wiring belongs to the playback/controller work in phase 4.
 
 ## Tables removed
 
@@ -128,8 +155,9 @@ provider, is deleted. The migration never invents an owner.
 
 [VERIFIED] `kind` is stored by name: `REMOTE_SERVER`, `DEVICE`, `VIRTUAL`.
 `REMOTE_SERVER` requires a valid primary block in code; `DEVICE` and `VIRTUAL`
-load through `ProviderEndpoint.None`. See `library-sync-ownership.md` for the
-column-ownership model.
+load through `ProviderEndpoint.None`. See `../providers/provider-connections.md`
+for the endpoint model, capability traits, and availability gate, and
+`library-sync-ownership.md` for the column-ownership model.
 
 [VERIFIED] `SongRepository.ensureSong` inserts a minimal song row for an unsynced
 `(providerId, externalId)` and never overwrites locally-owned columns. It is used

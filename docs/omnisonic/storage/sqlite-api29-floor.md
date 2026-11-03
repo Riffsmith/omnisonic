@@ -52,7 +52,7 @@ Add support for the RETURNING clause on DELETE, INSERT, and UPDATE.
 
 ## Per-play history (v2)
 
-[VERIFIED] T22 option (b) replaces the merged-day `playback_events` table with
+[VERIFIED] The per-play history decision replaces the merged-day `playback_events` table with
 `play_events` (one row per play or skip) plus the `play_events_daily` view. The
 DAO no longer needs an insert-or-ignore/update merge: every event is an insert.
 

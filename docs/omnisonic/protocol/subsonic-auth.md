@@ -2,13 +2,13 @@
 
 Purpose: Pins down how the Subsonic client builds authentication query parameters and encodes HTTP URLs.
 
-How derived: OpenSubsonic authentication-extension rules, Subsonic API parameter semantics, and failing unit tests against MockWebServer observed during T1.
+How derived: OpenSubsonic authentication-extension rules, Subsonic API parameter semantics, and failing unit tests against MockWebServer in this repository.
 
 Confidence: [VERIFIED] raw values are encoded exactly once by `HttpUrl.Builder`; [VERIFIED] API-key mode sends only `apiKey`, `v`, `c`, and `f`; [VERIFIED] legacy password mode sends `p=enc:<hex>`.
 
 Date: 2026-10-30
 
-Links: `../../Prompt.md` T1; `provider-navidrome/src/main/java/app/omnisonic/provider/navidrome/SubsonicClient.kt`.
+Links: `../decisions.md`; `provider-navidrome/src/main/java/app/omnisonic/provider/navidrome/SubsonicClient.kt`; `../network/client-profiles.md`.
 
 ---
 

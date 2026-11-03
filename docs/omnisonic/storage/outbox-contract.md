@@ -4,17 +4,18 @@ Purpose: pins the outbox wire contract (payload JSON shape), the media-type and
 action vocabularies, the due-ordering rule, and the failure semantics for
 structurally broken rows.
 
-How derived: audit defect T20 in the pre-release review prompt (duplicate
+How derived: audit finding in the pre-release review (duplicate
 payload classes with Moshi-ignored drift, mixed media-type vocabulary, missing
-ordering guarantees, silent completion of empty payloads).
+ordering guarantees, silent completion of empty payloads); the per-item action
+order is a recorded design decision. See `../decisions.md`.
 
 Confidence: all behaviours [VERIFIED] by the listed tests; the per-item action
-order is a design decision implemented as specified by the prompt.
+order is a design decision recorded in `../decisions.md`.
 
 Date: 2026-11-03
 
 Links: `provider-api` `Outbox.kt` (`OutboxActionPayload`, `OutboxActions`,
-`OutboxDrainer`), `core-data` `OutboxQueue`, `OutboxDao`, review prompt T20.
+`OutboxDrainer`), `core-data` `OutboxQueue`, `OutboxDao`, `../decisions.md`.
 
 ---
 

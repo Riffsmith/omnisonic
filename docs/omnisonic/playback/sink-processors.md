@@ -2,7 +2,7 @@
 
 Purpose: Pin how the sink processor chain is built and updated: every processor stays active after its first configure and applies a neutral transform when its feature is off, each engine receives its own chain from a factory that re-applies the latest `ProcessorConfig`, and runtime changes are audible on subsequent samples without a sink reconfigure.
 
-How derived: Prompt.md T14; a measured experiment feeding PCM through the real Media3 1.3.1 `AudioProcessingPipeline` (the exact wrapper `DefaultAudioSink` constructs internally, verified from bytecode) before and after the fix (`AudioPipelineMidStreamTest`); bytecode reading of `AudioProcessingPipeline.configure/flush/processData` and `BaseAudioProcessor.replaceOutputBuffer`; behavioral Robolectric tests.
+How derived: a measured experiment feeding PCM through the real Media3 1.3.1 `AudioProcessingPipeline` (the exact wrapper `DefaultAudioSink` constructs internally, verified from bytecode) before and after the fix (`AudioPipelineMidStreamTest`); bytecode reading of `AudioProcessingPipeline.configure/flush/processData` and `BaseAudioProcessor.replaceOutputBuffer`; behavioral Robolectric tests. The always-active contract is a recorded decision: see `../decisions.md`.
 
 Confidence:
 - [VERIFIED] Media3 1.3.1 `AudioProcessingPipeline.configure()` snapshots `isActive()` after calling `processor.configure()`, and `flush()` (re)builds `activeAudioProcessors`; `queueInput` never re-evaluates `isActive()`. A processor that becomes active mid-stream is invisible to the pipeline until the next configure/flush.
@@ -15,4 +15,4 @@ Confidence:
 
 Date: 2026-11-01
 
-Links: docs/omnisonic/playback/exposed-player.md, docs/omnisonic/playback/stream-cache-identity.md, Prompt.md T14.
+Links: docs/omnisonic/playback/exposed-player.md, docs/omnisonic/playback/stream-cache-identity.md, ../decisions.md.

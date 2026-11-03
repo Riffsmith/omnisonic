@@ -2,7 +2,7 @@
 
 Purpose: Pin the player architecture that the session and UI bind to: one stable exposed `Player` per `OmniPlayer`, a full effective-order queue timeline, queue-aware next/previous commands routed to the queue-command port, and gapless handoff through `prepareNext` plus an explicit auto-advance adoption step.
 
-How derived: Prompt.md T13; the approved T13 decision (Session 4 decision brief, approved as "Option A, full effective-order queue timeline, `prepareNext` + auto-advance handoff, roadmap table edit deferred to T24"); direct reading of Media3 1.3.1 `SimpleBasePlayer`/`ForwardingPlayer`/`BasePlayer`/`Timeline` bytecode in the local Gradle cache; behavioral Robolectric tests in this repository (`OmniForwardingPlayerTest`, `OmniPlayerImplTest`, `QueuePlayerImplTest`).
+How derived: the approved player-architecture decision (stable `ForwardingPlayer` exterior + stable inner bridge, full effective-order queue timeline, `prepareNext` + auto-advance handoff — recorded in `../decisions.md`); direct reading of Media3 1.3.1 `SimpleBasePlayer`/`ForwardingPlayer`/`BasePlayer`/`Timeline` bytecode in the local Gradle cache; behavioral Robolectric tests in this repository (`OmniForwardingPlayerTest`, `OmniPlayerImplTest`, `QueuePlayerImplTest`).
 
 Confidence:
 - [VERIFIED] `exposedPlayer()` returns the same `OmniForwardingPlayer` instance for the lifetime of an `OmniPlayerImpl` (until `release()`); `applyEngineConfig()` swaps only the engine behind the stable `QueueAwareBridge`, and a MediaSession bound before a swap still receives events and keeps working (Robolectric `MediaSession` + in-process `MediaController` test).
@@ -20,4 +20,4 @@ Confidence:
 
 Date: 2026-11-01
 
-Links: docs/omnisonic/playback/stream-cache-identity.md, docs/omnisonic/playback/per-provider-media-clients.md, docs/omnisonic/playback/wake-mode.md, ROADMAP 0.3/4 (table wording update deferred to T24), Prompt.md T13.
+Links: docs/omnisonic/playback/stream-cache-identity.md, docs/omnisonic/playback/per-provider-media-clients.md, docs/omnisonic/playback/wake-mode.md, ../decisions.md (stable exposed player).

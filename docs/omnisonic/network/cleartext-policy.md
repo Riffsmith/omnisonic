@@ -2,7 +2,7 @@
 
 Purpose: Pin the app-wide cleartext HTTP policy (global allow via Network Security Config) and the private-host classifier that drives the "traffic will not be encrypted" warning for http providers on non-private hosts.
 
-How derived: Decision (c) from the T8 decision brief (global allow + in-app warning), confirmed by the user on 2026-10-30. Platform behavior from the Android Network Security Config documentation and AOSP `ManifestConfigSource`/`NetworkSecurityConfigProvider` sources. Robolectric limitation established empirically with a probe test in this repository.
+How derived: Decision (global cleartext allow + in-app warning), confirmed by the user on 2026-10-30 — see `../decisions.md`. Platform behavior from the Android Network Security Config documentation and AOSP `ManifestConfigSource`/`NetworkSecurityConfigProvider` sources. Robolectric limitation established empirically with a probe test in this repository.
 
 Confidence:
 - [VERIFIED] `app/src/main/res/xml/network_security_config.xml` sets `<base-config cleartextTrafficPermitted="true" />` and `AndroidManifest.xml` references it via `android:networkSecurityConfig="@xml/network_security_config"`.
@@ -14,7 +14,7 @@ Confidence:
 
 Date: 2026-10-31
 
-Links: `client-profiles.md`, Prompt.md T8, decision brief section 1 (cleartext policy (c))
+Links: `client-profiles.md`, `../decisions.md` (cleartext policy)
 
 ---
 
