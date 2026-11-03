@@ -4,7 +4,6 @@ import app.omnisonic.core.model.log.LogLevel
 import app.omnisonic.core.model.log.LogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.currentCoroutineContext
@@ -79,7 +78,7 @@ private class FakeOutboxStore : OutboxStore {
         payload == OutboxActionPayload()
 }
 
-private val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+private val moshi: Moshi = Moshi.Builder().build()
 
 private val payloadAdapter = moshi.adapter(OutboxActionPayload::class.java)
 

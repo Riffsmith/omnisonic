@@ -11,7 +11,6 @@ import app.omnisonic.provider.api.ProviderEndpoint
 import app.omnisonic.provider.api.requireRemote
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.google.common.truth.Truth.assertThat
 import java.io.ByteArrayOutputStream
 import java.security.KeyStore
@@ -43,7 +42,7 @@ class ProviderConfigMapperTest {
 
     private val mapper = ProviderConfigMapper(codec)
 
-    private val json = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val json = Moshi.Builder().build()
 
     private fun encode(value: Any): String = json.adapter<Any>(value.javaClass).toJson(value)
 

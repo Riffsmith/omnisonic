@@ -9,7 +9,6 @@ import app.omnisonic.provider.api.OutboxEnqueueResult
 import app.omnisonic.provider.api.ProviderTraits
 import com.google.common.truth.Truth.assertThat
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -19,7 +18,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class OutboxQueueTest : DatabaseTestBase() {
 
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi = Moshi.Builder().build()
 
     @Test
     fun playCountDeltaMergeAccumulatesIntoSingleRow() = runDbTest {

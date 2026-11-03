@@ -11,6 +11,7 @@ import app.omnisonic.provider.api.ConnectionBlock
 import app.omnisonic.provider.api.ProviderAuthMethod
 import app.omnisonic.provider.api.ProviderConnection
 import app.omnisonic.provider.api.ProviderEndpoint
+import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import java.io.ByteArrayInputStream
@@ -203,8 +204,10 @@ class ProviderConfigMapper(
     }
 }
 
+@JsonClass(generateAdapter = true)
 data class AuthParametersJson(val authMode: String? = null)
 
+@JsonClass(generateAdapter = true)
 data class OptionsJson(
     val serverSoftwareHint: String? = null,
     val backdateScrobbles: String? = null,

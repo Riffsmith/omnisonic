@@ -2,10 +2,9 @@ package app.omnisonic.core.data.json
 
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 object OmnisonicJson {
-    val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    val moshi: Moshi = Moshi.Builder().build()
 }
 
 object JsonText {

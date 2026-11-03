@@ -3,8 +3,8 @@ package app.omnisonic.provider.api
 import app.omnisonic.core.model.log.ConsoleLogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.model.runCatchingCancellable
+import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 data class OutboxTask(
     val id: Long,
@@ -20,6 +20,7 @@ data class OutboxTask(
  * Wire shape of outbox payload JSON; mirrors the enqueue-merge payload model in
  * core-data so rows decode without a module dependency cycle.
  */
+@JsonClass(generateAdapter = true)
 data class OutboxActionPayload(
     val playCountDelta: Int? = null,
     val isFavorite: Boolean? = null,
@@ -251,6 +252,6 @@ class OutboxDrainer(
         const val BACKOFF_MAX_MS = 3_600_000L
         private const val MIN_BACKOFF_MULTIPLIER = 1L
         private const val RETRY_EXPONENT_MAX = 13
-        private val moshi: Moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+        private val moshi: Moshi = Moshi.Builder().build()
     }
 }

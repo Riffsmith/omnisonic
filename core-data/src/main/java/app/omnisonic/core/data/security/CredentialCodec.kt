@@ -2,6 +2,7 @@ package app.omnisonic.core.data.security
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import java.security.KeyStore
 import java.util.Base64
@@ -11,6 +12,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import app.omnisonic.core.data.json.OmnisonicJson
 
+@JsonClass(generateAdapter = true)
 data class SecretPayload(val secretValues: Map<String, String> = emptyMap())
 
 interface CredentialCodec {

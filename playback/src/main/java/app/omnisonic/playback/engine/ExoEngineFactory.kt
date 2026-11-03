@@ -2,6 +2,7 @@
 package app.omnisonic.playback.engine
 
 import androidx.media3.common.util.UnstableApi
+import android.annotation.SuppressLint
 import android.content.Context
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -27,6 +28,9 @@ class ExoEngineFactory(
     private val processors: () -> Array<AudioProcessor> = { emptyArray() },
 ) : AudioEngineFactory {
 
+    // Test-clock injection is the documented Robolectric seam for playback tests; media3
+    // annotates Builder.setClock test-only, but it is the intended production seam here.
+    @SuppressLint("VisibleForTests")
     override fun create(config: EngineConfig): AudioEngine {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -130,7 +134,7 @@ internal class ExoAudioEngine(
 }
 
 @UnstableApi
-private fun WakeMode.toPlayerWakeMode(): Int = when (this) {
+internal fun WakeMode.toPlayerWakeMode(): Int = when (this) {
     WakeMode.LOCAL -> C.WAKE_MODE_LOCAL
     WakeMode.NETWORK -> C.WAKE_MODE_NETWORK
 }

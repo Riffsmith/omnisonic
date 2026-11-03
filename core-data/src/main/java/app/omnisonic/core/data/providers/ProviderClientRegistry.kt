@@ -12,6 +12,7 @@ import app.omnisonic.provider.api.ProviderConnection
 import app.omnisonic.provider.api.ProviderRegistry
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 
 /**
@@ -51,6 +52,26 @@ class ProviderClientRegistry(
 
     /** API-profile client for library and user-data calls. */
     suspend fun apiClientFor(providerId: Long): OkHttpClient? = mutex.withLock {
+        cachedLocked(providerId)?.apiClient
+    }
+
+    /**
+     * API-profile client of the provider row owning this URL (scheme/host/port
+     * match on the primary or secondary block); used by the image loader so
+     * cover requests ride the provider's headers, identity and trust anchors.
+     * Defaults (80/443) are matched against an explicit block port. Returns
+     * null when no persisted provider claims the URL; the caller falls back to
+     * a plain client. The row scan is intentionally cheap; image fetches are
+     * network-paced.
+     */
+    suspend fun apiClientForUrl(url: HttpUrl): OkHttpClient? = mutex.withLock {
+        val providerId = database.providerDao().selectAll()
+            .firstOrNull { row -> blockMatches(row.primaryScheme, row.primaryHost, row.primaryPort, url) }
+            ?.id
+            ?: database.providerDao().selectAll()
+                .firstOrNull { row -> blockMatches(row.secondaryScheme, row.secondaryHost, row.secondaryPort, url) }
+                ?.id
+            ?: return null
         cachedLocked(providerId)?.apiClient
     }
 
@@ -98,6 +119,18 @@ class ProviderClientRegistry(
             cache[providerId] = cached
             return cached
         }
+    }
+
+    private fun blockMatches(scheme: String?, host: String?, port: Int?, url: HttpUrl): Boolean {
+        if (scheme == null || host == null || port == null) return false
+        if (!scheme.equals(url.scheme, ignoreCase = true) || !host.equals(url.host, ignoreCase = true)) return false
+        return port == url.port || url.port == defaultPortFor(url.scheme)
+    }
+
+    private fun defaultPortFor(scheme: String): Int = when (scheme.lowercase()) {
+        "https" -> 443
+        "http" -> 80
+        else -> -1
     }
 
     /**

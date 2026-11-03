@@ -1,3 +1,14 @@
+plugins {
+    alias(libs.plugins.androidApplication) apply false
+    alias(libs.plugins.androidLibrary) apply false
+    alias(libs.plugins.androidTest) apply false
+    alias(libs.plugins.kotlinAndroid) apply false
+    alias(libs.plugins.kotlinCompose) apply false
+    alias(libs.plugins.hilt) apply false
+    alias(libs.plugins.baselineProfile) apply false
+    alias(libs.plugins.ksp) apply false
+}
+
 tasks.register("clean") {
-    delete(rootProject.buildDir)
+    delete(layout.buildDirectory)
 }

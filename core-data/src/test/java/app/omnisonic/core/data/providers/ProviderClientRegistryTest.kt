@@ -14,6 +14,7 @@ import com.google.common.truth.Truth.assertThat
 import java.io.ByteArrayOutputStream
 import java.security.KeyStore
 import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.tls.HeldCertificate
 import org.junit.Test
@@ -323,6 +324,45 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
 
         assertThat(registry.providerFor(1)).isNull()
         assertThat(registry.httpClientFor(1)).isNull()
+    }
+
+    @Test
+    fun `cover url routes to the owning provider api client`() = runDbTest {
+        newProvider(id = 1, name = "a").let { row -> providerDao.upsert(row.copy(api = "counting")); providerDao.selectById(1)!! }
+        newProvider(id = 2, name = "b").let { row -> providerDao.upsert(row.copy(api = "counting")); providerDao.selectById(2)!! }
+        val (registry, _) = registry(db, providerDao)
+
+        val explicitPort = registry.apiClientForUrl("https://host-1.example:443/cover.jpg".toHttpUrl())
+        val defaultPort = registry.apiClientForUrl("https://host-1.example/cover.jpg".toHttpUrl())
+        val otherProvider = registry.apiClientForUrl("https://host-2.example/img.png".toHttpUrl())
+        val unknown = registry.apiClientForUrl("https://elsewhere.example/img.png".toHttpUrl())
+
+        assertThat(explicitPort).isNotNull()
+        assertThat(defaultPort).isSameInstanceAs(explicitPort)
+        assertThat(otherProvider).isNotNull()
+        assertThat(otherProvider).isNotSameInstanceAs(explicitPort)
+        assertThat(unknown).isNull()
+    }
+
+    @Test
+    fun `cover url on the secondary block routes to the same provider`() = runDbTest {
+        val seeded = newProvider(id = 1, name = "a")
+        providerDao.upsert(
+            seeded.copy(
+                api = "counting",
+                secondaryScheme = "https",
+                secondaryHost = "alt-1.example",
+                secondaryPort = 8443,
+                useSecondary = true,
+            ),
+        )
+        val (registry, _) = registry(db, providerDao)
+
+        val primary = registry.apiClientForUrl("https://host-1.example/cover.jpg".toHttpUrl())
+        val secondary = registry.apiClientForUrl("https://alt-1.example:8443/cover.jpg".toHttpUrl())
+
+        assertThat(primary).isNotNull()
+        assertThat(secondary).isSameInstanceAs(primary)
     }
 
     private fun pkcs12Bytes(): ByteArray {

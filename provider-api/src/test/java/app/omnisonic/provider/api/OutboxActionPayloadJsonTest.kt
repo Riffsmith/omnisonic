@@ -1,7 +1,6 @@
 package app.omnisonic.provider.api
 
 import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -12,7 +11,7 @@ import org.junit.jupiter.api.Test
  */
 class OutboxActionPayloadJsonTest {
 
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+    private val moshi = Moshi.Builder().build()
     private val adapter = moshi.adapter(OutboxActionPayload::class.java)
 
     @Test

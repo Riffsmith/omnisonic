@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidTest)
     alias(libs.plugins.kotlinAndroid)
     alias(libs.plugins.baselineProfile)
 }
@@ -9,7 +9,9 @@ android {
     compileSdk = 36
     defaultConfig {
         minSdk = 29
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+    targetProjectPath = ":app"
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -17,13 +19,4 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-    testOptions {
-        unitTests.all { it.useJUnitPlatform() }
-    }
-}
-
-dependencies {
-    testImplementation(libs.junit.jupiter)
-    testRuntimeOnly(libs.junit.platform.launcher)
-    testImplementation(libs.truth)
 }

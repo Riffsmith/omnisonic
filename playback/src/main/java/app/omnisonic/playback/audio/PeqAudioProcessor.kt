@@ -47,8 +47,6 @@ class PeqAudioProcessor : BaseAudioProcessor() {
         return inputAudioFormat
     }
 
-    override fun isActive(): Boolean = configuredFormat != null
-
     override fun queueInput(inputBuffer: ByteBuffer) {
         if (inputBuffer.remaining() == 0) return
         val format = configuredFormat!!

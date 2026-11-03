@@ -63,22 +63,14 @@ internal class OmniForwardingPlayer(
         port.setShuffleEnabled(shuffleModeEnabled)
     }
 
-    override fun hasNext(): Boolean = QueueCommandPolicy.canSkipNext(queueState.value)
-
-    override fun hasNextWindow(): Boolean = hasNext()
-
-    override fun hasNextMediaItem(): Boolean = hasNext()
+    override fun hasNextMediaItem(): Boolean = QueueCommandPolicy.canSkipNext(queueState.value)
 
     override fun getNextWindowIndex(): Int =
         QueueCommandPolicy.nextOrderIndex(queueState.value) ?: C.INDEX_UNSET
 
     override fun getNextMediaItemIndex(): Int = getNextWindowIndex()
 
-    override fun hasPrevious(): Boolean = QueueCommandPolicy.canSkipPrevious(queueState.value)
-
-    override fun hasPreviousWindow(): Boolean = hasPrevious()
-
-    override fun hasPreviousMediaItem(): Boolean = hasPrevious()
+    override fun hasPreviousMediaItem(): Boolean = QueueCommandPolicy.canSkipPrevious(queueState.value)
 
     override fun getPreviousWindowIndex(): Int =
         QueueCommandPolicy.previousOrderIndex(queueState.value) ?: C.INDEX_UNSET

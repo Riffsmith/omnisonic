@@ -1,5 +1,6 @@
 package app.omnisonic.playback.player
 
+import android.annotation.SuppressLint
 import androidx.media3.common.util.UnstableApi
 import android.net.Uri
 import android.os.Handler
@@ -107,6 +108,7 @@ class OmniPlayerImpl(
             when (playbackState) {
                 Player.STATE_READY -> listener?.onEngineReady(entry)
                 Player.STATE_ENDED -> listener?.onEngineFinished(entry)
+                else -> Unit
             }
             bridge.republish()
         }
@@ -611,6 +613,7 @@ class OmniPlayerImpl(
         preparedStream = null
     }
 
+    @SuppressLint("UseKtx")
     internal fun mediaSourceFor(stream: ResolvedStream): MediaSource =
         DefaultMediaSourceFactory(dataSourceFactoryFor(stream))
             .createMediaSource(

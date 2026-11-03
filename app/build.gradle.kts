@@ -19,7 +19,8 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -45,9 +46,6 @@ android {
             excludes += "/META-INF/AL2.0"
             excludes += "/META-INF/LGPL2.1"
         }
-        jniLibs {
-            pickFirsts += "*/*/*.so"
-        }
     }
     testOptions {
         unitTests {
@@ -63,6 +61,9 @@ dependencies {
     implementation(project(":core-network"))
     implementation(project(":playback"))
     implementation(project(":playback-api"))
+    implementation(project(":provider-api"))
+    implementation(project(":provider-navidrome"))
+    implementation(project(":provider-local"))
     implementation(project(":style"))
     implementation(project(":feature-library"))
     implementation(project(":feature-search"))
@@ -79,8 +80,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.hilt.android)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.moshi)
     implementation(libs.coil)
     implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
     ksp(libs.hilt.compiler)
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)

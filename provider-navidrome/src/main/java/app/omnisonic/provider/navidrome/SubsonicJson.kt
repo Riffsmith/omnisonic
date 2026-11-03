@@ -2,18 +2,17 @@ package app.omnisonic.provider.navidrome
 
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonAdapter
+import com.squareup.moshi.JsonClass
 import com.squareup.moshi.JsonReader
 import com.squareup.moshi.JsonWriter
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.lang.reflect.ParameterizedType
 import java.lang.reflect.Type
 
 object SubsonicJson {
     val moshi: Moshi = Moshi.Builder()
         .add(SubsonicEmbeddedListFactory())
-        .add(KotlinJsonAdapterFactory())
         .build()
 }
 
@@ -66,19 +65,24 @@ private val SUBSONIC_ELEMENT_TYPES: Set<Class<*>> = setOf<Class<*>>(
     SubsonicBookmarkDto::class.java,
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicErrorDto(val code: Int? = null, val message: String? = null)
 
+@JsonClass(generateAdapter = true)
 data class SubsonicExtensionDto(val name: String? = null, val versions: List<Int> = emptyList())
 
+@JsonClass(generateAdapter = true)
 data class SubsonicArtistsRootDto(
     val index: List<SubsonicIndexDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicIndexDto(
     val name: String? = null,
     val artist: List<SubsonicArtistDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicArtistDto(
     val id: String? = null,
     val name: String? = null,
@@ -88,6 +92,7 @@ data class SubsonicArtistDto(
     val artistImageUrl: String? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicChildDto(
     val id: String? = null,
     val title: String? = null,
@@ -110,6 +115,7 @@ data class SubsonicChildDto(
     val starred: String? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicAlbumDto(
     val id: String? = null,
     val name: String? = null,
@@ -126,30 +132,36 @@ data class SubsonicAlbumDto(
     val song: List<SubsonicChildDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicAlbumList2RootDto(
     val album: List<SubsonicAlbumDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicDirectoryDto(
     val id: String? = null,
     val name: String? = null,
     val child: List<SubsonicChildDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicGenresRootDto(
     val genre: List<SubsonicGenreDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicGenreDto(
     val value: String? = null,
     val songCount: Int? = null,
     val albumCount: Int? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicRadiosRootDto(
     val station: List<SubsonicStationDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicStationDto(
     val id: String? = null,
     val name: String? = null,
@@ -157,10 +169,12 @@ data class SubsonicStationDto(
     val homePageUrl: String? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicPlaylistsRootDto(
     val playlist: List<SubsonicPlaylistSummaryDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicPlaylistSummaryDto(
     val id: String? = null,
     val name: String? = null,
@@ -171,6 +185,7 @@ data class SubsonicPlaylistSummaryDto(
     val created: String? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicPlaylistDto(
     val id: String? = null,
     val name: String? = null,
@@ -182,10 +197,12 @@ data class SubsonicPlaylistDto(
     val entry: List<SubsonicChildDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicBookmarkRootDto(
     val bookmark: List<SubsonicBookmarkDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicBookmarkDto(
     val entry: List<SubsonicChildDto> = emptyList(),
     val position: Long? = null,
@@ -193,16 +210,19 @@ data class SubsonicBookmarkDto(
     val changed: String? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicSimilarSongsRootDto(
     val song: List<SubsonicChildDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicSearchDto(
     val artist: List<SubsonicArtistDto> = emptyList(),
     val album: List<SubsonicAlbumDto> = emptyList(),
     val song: List<SubsonicChildDto> = emptyList(),
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicEnvelope(
     val status: String? = null,
     val version: String? = null,
@@ -222,6 +242,7 @@ data class SubsonicEnvelope(
     val similarSongs: SubsonicSimilarSongsRootDto? = null,
 )
 
+@JsonClass(generateAdapter = true)
 data class SubsonicBody(
     @Json(name = "subsonic-response") val subsonicResponse: SubsonicEnvelope? = null,
 )
