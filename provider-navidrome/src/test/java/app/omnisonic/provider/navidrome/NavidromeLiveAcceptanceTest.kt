@@ -124,12 +124,14 @@ class NavidromeLiveAcceptanceTest {
         val preferredBlocks = mutableListOf<Int>()
         val client = testClient(connection) { block -> preferredBlocks += block }
 
+        runCatching { client.listArtists() }
+            .onFailure { println("live failover: first call against the dead primary surfaced ${it.javaClass.simpleName}") }
         val artists = client.listArtists()
         println("live failover: artists=${artists.size} preferredBlocks=$preferredBlocks")
         assumeTrue(artists.isNotEmpty(), "skipped: empty library, nothing to list through the secondary block")
         assertTrue(
             preferredBlocks.contains(ProviderConnection.SECONDARY_BLOCK),
-            "expected a preferred-block change to the secondary after the dead primary refused",
+            "expected a preferred-block change to the secondary after the dead primary refused twice (T12 hysteresis)",
         )
     }
 
