@@ -5,7 +5,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(
-    tableName = "sync_status",
+    tableName = "sync_state",
     indices = [
         Index(value = ["providerId"], unique = true),
     ],

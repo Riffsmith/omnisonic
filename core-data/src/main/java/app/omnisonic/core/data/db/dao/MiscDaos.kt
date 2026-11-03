@@ -47,9 +47,9 @@ interface SyncStatusDao {
         upsertRow(if (existingId == null) status else status.copy(id = existingId))
     }
 
-    @Query("SELECT * FROM sync_status WHERE providerId = :providerId")
+    @Query("SELECT * FROM sync_state WHERE providerId = :providerId")
     suspend fun selectByProvider(providerId: Long): SyncStatusEntity?
 
-    @Query("SELECT COUNT(*) FROM sync_status")
+    @Query("SELECT COUNT(*) FROM sync_state")
     suspend fun count(): Int
 }

@@ -37,30 +37,30 @@ interface DownloadDao {
         items.forEach { upsert(it) }
     }
 
-    @Query("SELECT * FROM download_items ORDER BY createdAt")
+    @Query("SELECT * FROM download_queue ORDER BY createdAt")
     suspend fun selectAll(): List<DownloadItemEntity>
 
-    @Query("SELECT * FROM download_items WHERE status = :status ORDER BY createdAt")
+    @Query("SELECT * FROM download_queue WHERE status = :status ORDER BY createdAt")
     suspend fun selectByStatus(status: String): List<DownloadItemEntity>
 
-    @Query("SELECT * FROM download_items WHERE mediaKey = :mediaKey")
+    @Query("SELECT * FROM download_queue WHERE mediaKey = :mediaKey")
     suspend fun selectByMediaKey(mediaKey: String): DownloadItemEntity?
 
-    @Query("SELECT * FROM download_items WHERE providerId = :providerId ORDER BY createdAt")
+    @Query("SELECT * FROM download_queue WHERE providerId = :providerId ORDER BY createdAt")
     suspend fun selectByProvider(providerId: Long): List<DownloadItemEntity>
 
-    @Query("UPDATE download_items SET progressPercent = :progressPercent, updatedAt = :updatedAt WHERE id = :id")
+    @Query("UPDATE download_queue SET progressPercent = :progressPercent, updatedAt = :updatedAt WHERE id = :id")
     suspend fun setProgress(id: Long, progressPercent: Int, updatedAt: Long)
 
-    @Query("UPDATE download_items SET status = :status, updatedAt = :updatedAt WHERE id = :id")
+    @Query("UPDATE download_queue SET status = :status, updatedAt = :updatedAt WHERE id = :id")
     suspend fun setStatus(id: Long, status: String, updatedAt: Long)
 
-    @Query("UPDATE download_items SET errorCount = errorCount + 1, lastError = :lastError, status = :status, updatedAt = :updatedAt WHERE id = :id")
+    @Query("UPDATE download_queue SET errorCount = errorCount + 1, lastError = :lastError, status = :status, updatedAt = :updatedAt WHERE id = :id")
     suspend fun recordError(id: Long, lastError: String, status: String, updatedAt: Long)
 
-    @Query("DELETE FROM download_items WHERE id = :id")
+    @Query("DELETE FROM download_queue WHERE id = :id")
     suspend fun deleteById(id: Long)
 
-    @Query("DELETE FROM download_items")
+    @Query("DELETE FROM download_queue")
     suspend fun deleteAll()
 }

@@ -5,8 +5,8 @@ import java.security.cert.X509Certificate
 enum class ProviderAuthMethod { TOKEN, LEGACY_PASSWORD, API_KEY }
 
 /**
- * One origin block persisted in providers.primary_[url]/secondary_[url] columns
- * (see .agents/memory/decisions.md, multi-URL failover decision).
+ * One origin block; a provider persists two of these (primary and secondary)
+ * in its endpoint columns for multi-URL failover.
  */
 data class ConnectionBlock(
     val scheme: String,

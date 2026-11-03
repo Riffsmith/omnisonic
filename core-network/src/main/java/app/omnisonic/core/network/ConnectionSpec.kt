@@ -13,7 +13,7 @@ fun pkcs12KeyStore(bytes: ByteArray, password: String?): KeyStore =
 
 enum class ClientProfile { API, MEDIA }
 
-/** Options for one provider connection's OkHttpClient; see app docs (PROVIDERS §multi-URL). */
+/** Options for one provider connection's OkHttpClient. */
 data class ConnectionSpec(
     val headers: Map<String, String> = emptyMap(),
     val connectTimeoutMs: Long = DEFAULT_CONNECT_TIMEOUT_MS,

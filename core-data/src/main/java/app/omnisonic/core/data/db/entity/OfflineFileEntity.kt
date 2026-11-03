@@ -5,7 +5,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(
-    tableName = "offline_files",
+    tableName = "offline_media",
     indices = [
         Index(value = ["sourceKey"], unique = true),
         Index(value = ["offlinePath"], unique = true),

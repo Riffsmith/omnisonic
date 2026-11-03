@@ -55,6 +55,7 @@ class MigrationHarnessTest {
         helper.runMigrationsAndValidate(name, 2, true, MIGRATION_1_2).use { db ->
             assertThat(recursiveTriggers(db)).isEqualTo(0)
             assertProviderDefaults(db)
+            assertCleanRoomRenames(db)
             assertDownloadBackfill(db)
             assertHistoryMigration(db)
             assertQueueRestoreWithoutSong(db)
@@ -143,6 +144,43 @@ class MigrationHarnessTest {
         )
         db.execSQL(
             """
+            INSERT INTO playlists (
+                id, providerId, externalId, title, type, isFavorite, autoSync,
+                autoOffline, entryCount, hidden, updatedAt
+            ) VALUES (9, 42, 'pl-1', 'Road music', 'manual', 0, 0, 0, 1, 0, 2000)
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO playlists_entries (
+                id, playlistId, providerId, entryOrder, externalId, songId, filePath,
+                title, displayArtist, durationMs, imagePath, addedAt
+            ) VALUES (11, 9, 42, 0, 'song-1', 7, NULL, 'Track One', 'Artist One', 300, NULL, 1000)
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO internet_radios (
+                id, providerId, externalId, title, streamUrl, isFavorite, updatedAt
+            ) VALUES (13, 42, 'radio-1', 'Static FM', 'http://radio.example/stream', 1, 1000)
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO offline_files (
+                id, providerId, mediaType, sourceKey, offlinePath, downloadedAt
+            ) VALUES (15, 42, 'SONG', 'source-key-1', '/offline/track-1.mp3', 1000)
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO sync_status (
+                id, providerId, lastFullSyncAt, lastDiffSyncAt, lastSyncResult, lastSyncCount
+            ) VALUES (17, 42, 1000, 1500, 1, 12)
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
             INSERT INTO playback_events (
                 id, providerId, externalId, date, played, skipped, durationMs
             ) VALUES (3, 42, 'song-1', 1736100000000, 1, 0, 300)
@@ -196,8 +234,90 @@ class MigrationHarnessTest {
         assertThat(count(db, "outbox_items")).isEqualTo(1)
     }
 
+    private fun assertCleanRoomRenames(db: SupportSQLiteDatabase) {
+        listOf(
+            "playlists_entries", "internet_radios", "download_items",
+            "offline_files", "sync_status",
+        ).forEach { assertThat(tableExists(db, it)).isFalse() }
+
+        db.query(
+            "SELECT playlistId, providerId, entryOrder, externalId, songId, title, displayArtist, durationMs, addedAt FROM playlist_items WHERE id = 11",
+        ).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getLong(0)).isEqualTo(9)
+            assertThat(cursor.getLong(1)).isEqualTo(42)
+            assertThat(cursor.getInt(2)).isEqualTo(0)
+            assertThat(cursor.getString(3)).isEqualTo("song-1")
+            assertThat(cursor.getLong(4)).isEqualTo(7)
+            assertThat(cursor.getString(5)).isEqualTo("Track One")
+            assertThat(cursor.getString(6)).isEqualTo("Artist One")
+            assertThat(cursor.getLong(7)).isEqualTo(300)
+            assertThat(cursor.getLong(8)).isEqualTo(1000)
+        }
+        db.query(
+            "SELECT providerId, externalId, title, streamUrl, isFavorite FROM radio_stations WHERE id = 13",
+        ).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getLong(0)).isEqualTo(42)
+            assertThat(cursor.getString(1)).isEqualTo("radio-1")
+            assertThat(cursor.getString(2)).isEqualTo("Static FM")
+            assertThat(cursor.getString(3)).isEqualTo("http://radio.example/stream")
+            assertThat(cursor.getInt(4)).isEqualTo(1)
+        }
+        db.query(
+            "SELECT providerId, mediaType, sourceKey, offlinePath FROM offline_media WHERE id = 15",
+        ).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getLong(0)).isEqualTo(42)
+            assertThat(cursor.getString(1)).isEqualTo("SONG")
+            assertThat(cursor.getString(2)).isEqualTo("source-key-1")
+            assertThat(cursor.getString(3)).isEqualTo("/offline/track-1.mp3")
+        }
+        db.query(
+            "SELECT providerId, lastFullSyncAt, lastDiffSyncAt, lastSyncResult, lastSyncCount FROM sync_state WHERE id = 17",
+        ).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getLong(0)).isEqualTo(42)
+            assertThat(cursor.getLong(1)).isEqualTo(1000)
+            assertThat(cursor.getLong(2)).isEqualTo(1500)
+            assertThat(cursor.getInt(3)).isEqualTo(1)
+            assertThat(cursor.getInt(4)).isEqualTo(12)
+        }
+
+        val indexNames = db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'index_%' ORDER BY name",
+        ).use { cursor ->
+            mutableListOf<String>().apply { while (cursor.moveToNext()) add(cursor.getString(0)) }
+        }
+        assertThat(indexNames).containsAtLeast(
+            "index_playlist_items_playlistId_entryOrder",
+            "index_playlist_items_providerId",
+            "index_radio_stations_providerId_externalId",
+            "index_radio_stations_providerId",
+            "index_download_queue_mediaKey",
+            "index_download_queue_status",
+            "index_download_queue_providerId",
+            "index_offline_media_sourceKey",
+            "index_offline_media_offlinePath",
+            "index_offline_media_providerId",
+            "index_sync_state_providerId",
+        )
+        listOf(
+            "index_playlists_entries_playlistId_entryOrder",
+            "index_playlists_entries_providerId",
+            "index_internet_radios_providerId_externalId",
+            "index_internet_radios_providerId",
+            "index_download_items_mediaKey",
+            "index_download_items_status",
+            "index_offline_files_sourceKey",
+            "index_offline_files_offlinePath",
+            "index_offline_files_providerId",
+            "index_sync_status_providerId",
+        ).forEach { assertThat(indexNames).doesNotContain(it) }
+    }
+
     private fun assertDownloadBackfill(db: SupportSQLiteDatabase) {
-        db.query("SELECT id, providerId, tempCache, exportTarget, autoRuleId FROM download_items").use { cursor ->
+        db.query("SELECT id, providerId, tempCache, exportTarget, autoRuleId FROM download_queue").use { cursor ->
             assertThat(cursor.moveToFirst()).isTrue()
             assertThat(cursor.getLong(0)).isEqualTo(5)
             assertThat(cursor.getLong(1)).isEqualTo(42)
@@ -258,9 +378,13 @@ class MigrationHarnessTest {
     private fun assertProviderEditKeepsChildren(db: SupportSQLiteDatabase) {
         db.execSQL("UPDATE providers SET name = 'renamed', primaryHost = 'new.example' WHERE id = 42")
         assertThat(count(db, "songs")).isEqualTo(1)
-        assertThat(count(db, "download_items")).isEqualTo(1)
+        assertThat(count(db, "download_queue")).isEqualTo(1)
         assertThat(count(db, "play_events")).isEqualTo(1)
         assertThat(count(db, "outbox_items")).isEqualTo(1)
+        assertThat(count(db, "playlist_items")).isEqualTo(1)
+        assertThat(count(db, "radio_stations")).isEqualTo(1)
+        assertThat(count(db, "offline_media")).isEqualTo(1)
+        assertThat(count(db, "sync_state")).isEqualTo(1)
     }
 
     private fun assertNewProviderUsesDefaults(db: SupportSQLiteDatabase) {
@@ -286,12 +410,32 @@ class MigrationHarnessTest {
         }
         assertThat(triggerNames).hasSize(ProviderCascadeTriggers.CREATE_STATEMENTS.size)
         assertThat(triggerNames).containsNoDuplicates()
+        assertThat(triggerNames).containsAtLeast(
+            "trg_provider_delete_playlist_items",
+            "trg_provider_delete_radio_stations",
+            "trg_provider_delete_download_queue",
+            "trg_provider_delete_offline_media",
+            "trg_provider_delete_sync_state",
+            "trg_playlist_delete_playlist_items",
+        )
+        listOf(
+            "trg_provider_delete_playlists_entries",
+            "trg_provider_delete_internet_radios",
+            "trg_provider_delete_download_items",
+            "trg_provider_delete_offline_files",
+            "trg_provider_delete_sync_status",
+            "trg_playlist_delete_playlists_entries",
+        ).forEach { assertThat(triggerNames).doesNotContain(it) }
 
         db.execSQL("DELETE FROM providers WHERE id = 42")
         assertThat(count(db, "songs")).isEqualTo(0)
-        assertThat(count(db, "download_items")).isEqualTo(0)
+        assertThat(count(db, "download_queue")).isEqualTo(0)
         assertThat(count(db, "play_events")).isEqualTo(0)
         assertThat(count(db, "outbox_items")).isEqualTo(0)
+        assertThat(count(db, "playlist_items")).isEqualTo(0)
+        assertThat(count(db, "radio_stations")).isEqualTo(0)
+        assertThat(count(db, "offline_media")).isEqualTo(0)
+        assertThat(count(db, "sync_state")).isEqualTo(0)
 
         db.execSQL("DELETE FROM providers WHERE id = 43")
         assertThat(count(db, "queue_entries")).isEqualTo(0)

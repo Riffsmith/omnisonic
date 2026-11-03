@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 2,
-    "identityHash": "ad813ac81d5569ad7fd7bcee7472f51c",
+    "identityHash": "5f98efb9a7b042a8bb83b34b043e598b",
     "entities": [
       {
         "tableName": "providers",
@@ -1317,7 +1317,7 @@
         "foreignKeys": []
       },
       {
-        "tableName": "playlists_entries",
+        "tableName": "playlist_items",
         "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `playlistId` INTEGER NOT NULL, `providerId` INTEGER NOT NULL, `entryOrder` INTEGER NOT NULL, `externalId` TEXT, `songId` INTEGER, `filePath` TEXT, `title` TEXT NOT NULL, `displayArtist` TEXT, `durationMs` INTEGER, `imagePath` TEXT, `addedAt` INTEGER NOT NULL)",
         "fields": [
           {
@@ -1401,29 +1401,29 @@
         },
         "indices": [
           {
-            "name": "index_playlists_entries_playlistId_entryOrder",
+            "name": "index_playlist_items_playlistId_entryOrder",
             "unique": false,
             "columnNames": [
               "playlistId",
               "entryOrder"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_playlists_entries_playlistId_entryOrder` ON `${TABLE_NAME}` (`playlistId`, `entryOrder`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_playlist_items_playlistId_entryOrder` ON `${TABLE_NAME}` (`playlistId`, `entryOrder`)"
           },
           {
-            "name": "index_playlists_entries_providerId",
+            "name": "index_playlist_items_providerId",
             "unique": false,
             "columnNames": [
               "providerId"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_playlists_entries_providerId` ON `${TABLE_NAME}` (`providerId`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_playlist_items_providerId` ON `${TABLE_NAME}` (`providerId`)"
           }
         ],
         "foreignKeys": []
       },
       {
-        "tableName": "internet_radios",
+        "tableName": "radio_stations",
         "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerId` INTEGER NOT NULL, `externalId` TEXT, `externalDataJson` TEXT, `title` TEXT NOT NULL, `streamUrl` TEXT NOT NULL, `description` TEXT, `imagePath` TEXT, `genresJson` TEXT, `tagsJson` TEXT, `isFavorite` INTEGER NOT NULL, `favoriteAt` INTEGER, `lastPlayed` INTEGER, `updatedAt` INTEGER NOT NULL)",
         "fields": [
           {
@@ -1519,23 +1519,23 @@
         },
         "indices": [
           {
-            "name": "index_internet_radios_providerId_externalId",
+            "name": "index_radio_stations_providerId_externalId",
             "unique": true,
             "columnNames": [
               "providerId",
               "externalId"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_internet_radios_providerId_externalId` ON `${TABLE_NAME}` (`providerId`, `externalId`)"
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_radio_stations_providerId_externalId` ON `${TABLE_NAME}` (`providerId`, `externalId`)"
           },
           {
-            "name": "index_internet_radios_providerId",
+            "name": "index_radio_stations_providerId",
             "unique": false,
             "columnNames": [
               "providerId"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_internet_radios_providerId` ON `${TABLE_NAME}` (`providerId`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_radio_stations_providerId` ON `${TABLE_NAME}` (`providerId`)"
           }
         ],
         "foreignKeys": []
@@ -1836,7 +1836,7 @@
         "foreignKeys": []
       },
       {
-        "tableName": "download_items",
+        "tableName": "download_queue",
         "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `mediaKey` TEXT NOT NULL, `providerId` INTEGER NOT NULL, `settingsJson` TEXT, `status` TEXT NOT NULL, `title` TEXT, `imagePath` TEXT, `progressPercent` INTEGER NOT NULL, `errorCount` INTEGER NOT NULL, `lastError` TEXT, `transcodeBitrateKbps` INTEGER, `tempCache` INTEGER NOT NULL, `exportTarget` TEXT, `autoRuleId` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL)",
         "fields": [
           {
@@ -1944,37 +1944,37 @@
         },
         "indices": [
           {
-            "name": "index_download_items_mediaKey",
+            "name": "index_download_queue_mediaKey",
             "unique": true,
             "columnNames": [
               "mediaKey"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_download_items_mediaKey` ON `${TABLE_NAME}` (`mediaKey`)"
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_download_queue_mediaKey` ON `${TABLE_NAME}` (`mediaKey`)"
           },
           {
-            "name": "index_download_items_status",
+            "name": "index_download_queue_status",
             "unique": false,
             "columnNames": [
               "status"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_download_items_status` ON `${TABLE_NAME}` (`status`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_download_queue_status` ON `${TABLE_NAME}` (`status`)"
           },
           {
-            "name": "index_download_items_providerId",
+            "name": "index_download_queue_providerId",
             "unique": false,
             "columnNames": [
               "providerId"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_download_items_providerId` ON `${TABLE_NAME}` (`providerId`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_download_queue_providerId` ON `${TABLE_NAME}` (`providerId`)"
           }
         ],
         "foreignKeys": []
       },
       {
-        "tableName": "offline_files",
+        "tableName": "offline_media",
         "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerId` INTEGER NOT NULL, `mediaType` TEXT NOT NULL, `sourceKey` TEXT NOT NULL, `offlinePath` TEXT NOT NULL, `sizeBytes` INTEGER, `title` TEXT, `imagePath` TEXT, `bitrateKbps` INTEGER, `autoRule` TEXT, `downloadedAt` INTEGER, `syncedAt` INTEGER)",
         "fields": [
           {
@@ -2058,31 +2058,31 @@
         },
         "indices": [
           {
-            "name": "index_offline_files_sourceKey",
+            "name": "index_offline_media_sourceKey",
             "unique": true,
             "columnNames": [
               "sourceKey"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_offline_files_sourceKey` ON `${TABLE_NAME}` (`sourceKey`)"
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_offline_media_sourceKey` ON `${TABLE_NAME}` (`sourceKey`)"
           },
           {
-            "name": "index_offline_files_offlinePath",
+            "name": "index_offline_media_offlinePath",
             "unique": true,
             "columnNames": [
               "offlinePath"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_offline_files_offlinePath` ON `${TABLE_NAME}` (`offlinePath`)"
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_offline_media_offlinePath` ON `${TABLE_NAME}` (`offlinePath`)"
           },
           {
-            "name": "index_offline_files_providerId",
+            "name": "index_offline_media_providerId",
             "unique": false,
             "columnNames": [
               "providerId"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_offline_files_providerId` ON `${TABLE_NAME}` (`providerId`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_offline_media_providerId` ON `${TABLE_NAME}` (`providerId`)"
           }
         ],
         "foreignKeys": []
@@ -2143,7 +2143,7 @@
         "foreignKeys": []
       },
       {
-        "tableName": "sync_status",
+        "tableName": "sync_state",
         "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerId` INTEGER NOT NULL, `lastFullSyncAt` INTEGER, `lastDiffSyncAt` INTEGER, `lastSyncResult` INTEGER NOT NULL, `lastSyncMessage` TEXT, `lastSyncCount` INTEGER NOT NULL, `lastSyncDurationMs` INTEGER)",
         "fields": [
           {
@@ -2203,13 +2203,13 @@
         },
         "indices": [
           {
-            "name": "index_sync_status_providerId",
+            "name": "index_sync_state_providerId",
             "unique": true,
             "columnNames": [
               "providerId"
             ],
             "orders": [],
-            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sync_status_providerId` ON `${TABLE_NAME}` (`providerId`)"
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sync_state_providerId` ON `${TABLE_NAME}` (`providerId`)"
           }
         ],
         "foreignKeys": []
@@ -2415,7 +2415,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ad813ac81d5569ad7fd7bcee7472f51c')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '5f98efb9a7b042a8bb83b34b043e598b')"
     ]
   }
 }

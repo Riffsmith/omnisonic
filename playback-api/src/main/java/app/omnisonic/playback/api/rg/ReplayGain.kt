@@ -10,7 +10,7 @@ enum class ReplayGainMode { OFF, TRACK, PREFER_TRACK, ALBUM, PREFER_ALBUM, AUTOM
  */
 enum class RgNormalisation { OFF, RG2, EBU }
 
-/** Values as stored per song row (`replay_gain_track`, `replay_gain_album`, `replay_gain_type`). */
+/** Values as stored per song row (`replayGainTrack`, `replayGainAlbum`, `replayGainType`). */
 data class ReplayGainValues(
     val trackGainDb: Double? = null,
     val albumGainDb: Double? = null,

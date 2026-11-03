@@ -59,7 +59,7 @@ interface PlaylistDao {
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun deleteById(id: Long)
 
-    @Query("UPDATE playlists SET entryCount = (SELECT COUNT(*) FROM playlists_entries WHERE playlists_entries.playlistId = playlists.id) WHERE playlists.id = :id")
+    @Query("UPDATE playlists SET entryCount = (SELECT COUNT(*) FROM playlist_items WHERE playlist_items.playlistId = playlists.id) WHERE playlists.id = :id")
     suspend fun recountEntries(id: Long)
 }
 
@@ -72,18 +72,18 @@ interface PlaylistEntryDao {
     @Upsert
     suspend fun upsertAll(entries: List<PlaylistEntryEntity>)
 
-    @Query("SELECT * FROM playlists_entries WHERE playlistId = :playlistId ORDER BY entryOrder")
+    @Query("SELECT * FROM playlist_items WHERE playlistId = :playlistId ORDER BY entryOrder")
     suspend fun selectByPlaylist(playlistId: Long): List<PlaylistEntryEntity>
 
-    @Query("SELECT COUNT(*) FROM playlists_entries WHERE playlistId = :playlistId")
+    @Query("SELECT COUNT(*) FROM playlist_items WHERE playlistId = :playlistId")
     suspend fun countByPlaylist(playlistId: Long): Int
 
-    @Query("SELECT MAX(entryOrder) FROM playlists_entries WHERE playlistId = :playlistId")
+    @Query("SELECT MAX(entryOrder) FROM playlist_items WHERE playlistId = :playlistId")
     suspend fun selectMaxEntryOrder(playlistId: Long): Int?
 
-    @Query("DELETE FROM playlists_entries WHERE playlistId = :playlistId")
+    @Query("DELETE FROM playlist_items WHERE playlistId = :playlistId")
     suspend fun deleteByPlaylist(playlistId: Long)
 
-    @Query("DELETE FROM playlists_entries WHERE playlistId NOT IN (SELECT id FROM playlists)")
+    @Query("DELETE FROM playlist_items WHERE playlistId NOT IN (SELECT id FROM playlists)")
     suspend fun deleteOrphanedEntries()
 }

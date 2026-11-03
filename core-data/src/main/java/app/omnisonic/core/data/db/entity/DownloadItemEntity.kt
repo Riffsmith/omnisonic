@@ -11,7 +11,7 @@ import androidx.room.PrimaryKey
  * recoverable from the key itself; see [DownloadKeys].
  */
 @Entity(
-    tableName = "download_items",
+    tableName = "download_queue",
     indices = [
         Index(value = ["mediaKey"], unique = true),
         Index(value = ["status"]),

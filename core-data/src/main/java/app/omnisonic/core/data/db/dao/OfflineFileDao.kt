@@ -25,24 +25,24 @@ interface OfflineFileDao {
         }
     }
 
-    @Query("SELECT id FROM offline_files WHERE sourceKey = :sourceKey")
+    @Query("SELECT id FROM offline_media WHERE sourceKey = :sourceKey")
     suspend fun selectIdBySourceKey(sourceKey: String): Long?
 
-    @Query("SELECT id FROM offline_files WHERE offlinePath = :offlinePath")
+    @Query("SELECT id FROM offline_media WHERE offlinePath = :offlinePath")
     suspend fun selectIdByOfflinePath(offlinePath: String): Long?
 
-    @Query("SELECT * FROM offline_files ORDER BY id")
+    @Query("SELECT * FROM offline_media ORDER BY id")
     suspend fun selectAll(): List<OfflineFileEntity>
 
-    @Query("SELECT * FROM offline_files WHERE providerId = :providerId ORDER BY id")
+    @Query("SELECT * FROM offline_media WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<OfflineFileEntity>
 
-    @Query("SELECT * FROM offline_files WHERE sourceKey = :sourceKey")
+    @Query("SELECT * FROM offline_media WHERE sourceKey = :sourceKey")
     suspend fun selectBySourceKey(sourceKey: String): OfflineFileEntity?
 
-    @Query("SELECT COUNT(*) FROM offline_files")
+    @Query("SELECT COUNT(*) FROM offline_media")
     suspend fun count(): Int
 
-    @Query("DELETE FROM offline_files WHERE sourceKey = :sourceKey")
+    @Query("DELETE FROM offline_media WHERE sourceKey = :sourceKey")
     suspend fun deleteBySourceKey(sourceKey: String)
 }

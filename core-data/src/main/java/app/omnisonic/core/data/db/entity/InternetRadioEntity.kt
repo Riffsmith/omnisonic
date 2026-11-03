@@ -5,7 +5,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(
-    tableName = "internet_radios",
+    tableName = "radio_stations",
     indices = [
         Index(value = ["providerId", "externalId"], unique = true),
         Index(value = ["providerId"]),

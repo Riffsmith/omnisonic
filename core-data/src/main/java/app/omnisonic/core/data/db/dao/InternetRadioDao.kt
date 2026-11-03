@@ -32,18 +32,18 @@ interface InternetRadioDao {
         radios.forEach { upsert(it) }
     }
 
-    @Query("SELECT id FROM internet_radios WHERE providerId = :providerId AND externalId = :externalId")
+    @Query("SELECT id FROM radio_stations WHERE providerId = :providerId AND externalId = :externalId")
     suspend fun selectIdByProviderAndExternal(providerId: Long, externalId: String): Long?
 
-    @Query("SELECT * FROM internet_radios ORDER BY id")
+    @Query("SELECT * FROM radio_stations ORDER BY id")
     suspend fun selectAll(): List<InternetRadioEntity>
 
-    @Query("SELECT * FROM internet_radios WHERE providerId = :providerId ORDER BY id")
+    @Query("SELECT * FROM radio_stations WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<InternetRadioEntity>
 
-    @Query("SELECT * FROM internet_radios WHERE providerId = :providerId AND externalId = :externalId")
+    @Query("SELECT * FROM radio_stations WHERE providerId = :providerId AND externalId = :externalId")
     suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): InternetRadioEntity?
 
-    @Query("DELETE FROM internet_radios WHERE id = :id")
+    @Query("DELETE FROM radio_stations WHERE id = :id")
     suspend fun deleteById(id: Long)
 }

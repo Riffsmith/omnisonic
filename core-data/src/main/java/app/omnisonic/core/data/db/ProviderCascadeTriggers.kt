@@ -14,13 +14,13 @@ object ProviderCascadeTriggers {
         "song_artists",
         "chapters",
         "playlists",
-        "playlists_entries",
-        "internet_radios",
+        "playlist_items",
+        "radio_stations",
         "play_events",
         "outbox_items",
-        "offline_files",
-        "download_items",
-        "sync_status",
+        "offline_media",
+        "download_queue",
+        "sync_state",
         "queue_entries",
     ).map { table ->
         "CREATE TRIGGER IF NOT EXISTS trg_provider_delete_$table " +
@@ -29,10 +29,10 @@ object ProviderCascadeTriggers {
             "DELETE FROM $table WHERE providerId = old.id; " +
             "END"
     } + listOf(
-        "CREATE TRIGGER IF NOT EXISTS trg_playlist_delete_playlists_entries " +
+        "CREATE TRIGGER IF NOT EXISTS trg_playlist_delete_playlist_items " +
             "AFTER DELETE ON playlists " +
             "BEGIN " +
-            "DELETE FROM playlists_entries WHERE playlistId = old.id; " +
+            "DELETE FROM playlist_items WHERE playlistId = old.id; " +
             "END",
     )
 
