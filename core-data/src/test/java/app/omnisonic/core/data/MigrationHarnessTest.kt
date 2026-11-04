@@ -6,6 +6,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import app.omnisonic.core.data.db.MIGRATION_1_2
+import app.omnisonic.core.data.db.MIGRATION_2_3
 import app.omnisonic.core.data.db.Migrations
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.OmnisonicDatabaseFactory
@@ -35,12 +36,41 @@ class MigrationHarnessTest {
     }
 
     @Test
-    fun migrationsContainExactlyOneExplicitV1ToV2Step() {
-        assertThat(Migrations.ALL).hasSize(1)
-        val step = Migrations.ALL.single()
-        assertThat(step.startVersion).isEqualTo(1)
-        assertThat(step.endVersion).isEqualTo(2)
-        assertThat(step).isSameInstanceAs(MIGRATION_1_2)
+    fun migrationsContainTheExplicitUpgradeStepsInOrder() {
+        assertThat(Migrations.ALL).hasSize(2)
+        val (v1ToV2, v2ToV3) = Migrations.ALL
+        assertThat(v1ToV2.startVersion).isEqualTo(1)
+        assertThat(v1ToV2.endVersion).isEqualTo(2)
+        assertThat(v1ToV2).isSameInstanceAs(MIGRATION_1_2)
+        assertThat(v2ToV3.startVersion).isEqualTo(2)
+        assertThat(v2ToV3.endVersion).isEqualTo(3)
+        assertThat(v2ToV3).isSameInstanceAs(MIGRATION_2_3)
+    }
+
+    @Test
+    fun v2SchemaMigratesToV3AddingTheQueuePosition() {
+        val name = "migration-harness-v2-to-v3.db"
+        appContext.deleteDatabase(name)
+
+        helper.createDatabase(name, 2).use { v2 ->
+            v2.execSQL(
+                """
+                INSERT INTO queue_state (id, playIndex, repeatMode, speed, pitch)
+                VALUES (1, 2, 'ALL', 1.25, 0.75)
+                """.trimIndent(),
+            )
+        }
+
+        helper.runMigrationsAndValidate(name, 3, true, MIGRATION_2_3).use { db ->
+            db.query("SELECT playIndex, repeatMode, speed, pitch, positionMs FROM queue_state WHERE id = 1").use { cursor ->
+                assertThat(cursor.moveToFirst()).isTrue()
+                assertThat(cursor.getInt(0)).isEqualTo(2)
+                assertThat(cursor.getString(1)).isEqualTo("ALL")
+                assertThat(cursor.getDouble(2)).isEqualTo(1.25)
+                assertThat(cursor.getDouble(3)).isEqualTo(0.75)
+                assertThat(cursor.isNull(4)).isTrue()
+            }
+        }
     }
 
     @Test

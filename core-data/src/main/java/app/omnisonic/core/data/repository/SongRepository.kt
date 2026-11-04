@@ -54,4 +54,7 @@ class SongRepository @Inject constructor(
             songDao.selectIdByProviderAndExternal(providerId, externalId)
                 ?: error("song row missing after materialisation: provider $providerId external $externalId")
         }
+
+    suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): SongEntity? =
+        db.songDao().selectByProviderAndExternal(providerId, externalId)
 }

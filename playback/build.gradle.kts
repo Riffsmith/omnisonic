@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.media3.datasource)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.ui)
+    implementation(libs.androidx.core)
     implementation(libs.coil)
     implementation(libs.coil.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

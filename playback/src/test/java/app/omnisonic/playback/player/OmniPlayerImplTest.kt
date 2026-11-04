@@ -262,6 +262,22 @@ class OmniPlayerImplTest {
     }
 
     @Test
+    fun `duck multiplier reaches the sink and survives a settings reconfig`() = runBlocking<Unit> {
+        val player = newPlayer()
+
+        player.setDuckLinear(0.2f)
+        assertThat(processors.replayGain.currentDuckFactor).isEqualTo(0.2f)
+
+        settings.setMono(true)
+        await("config push keeps the duck factor") {
+            processors.mono.isEnabled && processors.replayGain.currentDuckFactor == 0.2f
+        }
+
+        player.setDuckLinear(1f)
+        assertThat(processors.replayGain.currentDuckFactor).isEqualTo(1f)
+    }
+
+    @Test
     fun `fade pause and resume arm the sink fade`() {
         val player = newPlayer()
         serveWav()

@@ -98,6 +98,7 @@ class OmniPlayerImpl(
     private var peqConfig: PeqConfig? = null
     private var replayGainLinear = 1f
     private var monoEnabled = false
+    private var duckLinear = 1f
     private var authRetried = false
     private var pausedAtMs: Long? = null
     private var released = false
@@ -299,6 +300,11 @@ class OmniPlayerImpl(
         pushConfig()
     }
 
+    override fun setDuckLinear(multiplier: Float) {
+        duckLinear = multiplier.coerceIn(0f, 1f)
+        pushConfig()
+    }
+
     override fun setPeq(config: PeqConfig?) {
         peqConfig = config
         pushConfig()
@@ -415,6 +421,7 @@ class OmniPlayerImpl(
 
     override fun playWhenReadyRequested(playWhenReady: Boolean) {
         if (released) return
+        if (queuePort.onPlayWhenReady(playWhenReady)) return
         if (playWhenReady) engine.player.play() else engine.player.pause()
     }
 
@@ -631,6 +638,7 @@ class OmniPlayerImpl(
         chainFactory.updateConfig(
             ProcessorConfig(
                 replayGainLinear = replayGainLinear,
+                duckLinear = duckLinear,
                 monoEnabled = monoEnabled,
                 peq = effective,
             ),

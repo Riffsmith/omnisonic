@@ -69,6 +69,7 @@ private class FakeOmniPlayer : OmniPlayer {
     }
 
     override fun setReplayGainLinear(multiplier: Float) = Unit
+    override fun setDuckLinear(multiplier: Float) = Unit
     override fun setMono(enabled: Boolean) = Unit
     override fun setPeq(config: PeqConfig?) = Unit
     override fun fadePause() = Unit
@@ -122,6 +123,7 @@ private class Fixture(
 private fun newFixture(
     resolver: StreamResolver = FakeStreamResolver(),
     prevRestartThresholdMs: Long = QueuePlayerImpl.DEFAULT_PREV_RESTART_THRESHOLD_MS,
+    minResumePositionMs: Long = QueuePlayerImpl.DEFAULT_MIN_RESUME_POSITION_MS,
 ): Fixture {
     val bus = FakeBus()
     val playerFake = FakeOmniPlayer()
@@ -131,6 +133,7 @@ private fun newFixture(
         streamResolver = resolver,
         bus = bus,
         prevRestartThresholdMs = prevRestartThresholdMs,
+        minResumePositionMs = minResumePositionMs,
     )
     return Fixture(queue, playerFake, bus)
 }
@@ -707,6 +710,16 @@ class QueuePlayerImplTest {
     }
 
     @Test
+    fun `restore clamps a play index past the end to the last entry`() {
+        val f = newFixture()
+
+        f.queue.restore(QueueState(entries = listOf(entry(1), entry(2)), playIndex = 99))
+
+        assertThat(f.queue.state.value.playIndex).isEqualTo(1)
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(2L)
+    }
+
+    @Test
     fun `release stops and prevents further starts`() {
         val f = newFixture()
         f.queue.setQueue(listOf(entry(1)))
@@ -846,5 +859,163 @@ class QueuePlayerImplTest {
 
         assertThat(f.playerFake.prepared).isEmpty()
         assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(2L)
+    }
+
+    @Test
+    fun `position tick below the resume threshold is not published`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        f.queue.setQueue(listOf(entry(1, durationMs = 200_000)))
+
+        f.queue.onPositionTick(3_000)
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `position tick past the granularity publishes the resume point`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        f.queue.setQueue(listOf(entry(1, durationMs = 200_000)))
+
+        f.queue.onPositionTick(14_000)
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(14_000L)
+
+        f.queue.onPositionTick(16_000)
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(14_000L)
+
+        f.queue.onPositionTick(20_000)
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(20_000L)
+    }
+
+    @Test
+    fun `a position at or past the track duration is not published`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        f.queue.setQueue(listOf(entry(1, durationMs = 20_000)))
+
+        f.queue.onPositionTick(20_000)
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `a position below the threshold is not published even when paused`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        f.queue.setQueue(listOf(entry(1, durationMs = 200_000)))
+        f.queue.onPositionTick(12_000)
+        assertThat(f.queue.state.value.positionMs).isEqualTo(12_000L)
+
+        f.queue.onPositionTick(5_000)
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `restore applies a saved position and replay starts from it`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        val snapshot = QueueState(
+            entries = listOf(entry(1, durationMs = 200_000), entry(2)),
+            playIndex = 0,
+            positionMs = 95_000,
+        )
+
+        f.queue.restore(snapshot)
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(95_000L)
+        assertThat(f.playerFake.played).isEmpty()
+
+        f.queue.replayCurrent()
+
+        assertThat(f.playerFake.played.single().stream.startPositionMs).isEqualTo(95_000L)
+        assertThat(f.queue.state.value.positionMs).isEqualTo(95_000L)
+    }
+
+    @Test
+    fun `restore drops a saved position below the resume threshold`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        val snapshot = QueueState(
+            entries = listOf(entry(1, durationMs = 200_000)),
+            positionMs = 4_000,
+        )
+
+        f.queue.restore(snapshot)
+        f.queue.replayCurrent()
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(0L)
+        assertThat(f.playerFake.played.single().stream.startPositionMs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `restore drops a saved position at or past the duration`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        val snapshot = QueueState(
+            entries = listOf(entry(1, durationMs = 100_000)),
+            positionMs = 100_000,
+        )
+
+        f.queue.restore(snapshot)
+        f.queue.replayCurrent()
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(0L)
+        assertThat(f.playerFake.played.single().stream.startPositionMs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `a restored position belongs only to its entry`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        f.queue.restore(
+            QueueState(
+                entries = listOf(entry(1, durationMs = 200_000), entry(2, durationMs = 200_000)),
+                playIndex = 0,
+                positionMs = 95_000,
+            ),
+        )
+
+        f.queue.skipNext(true)
+
+        assertThat(f.playerFake.played.single { it.entry.queueItemId == 2L }.stream.startPositionMs).isEqualTo(0L)
+        assertThat(f.queue.state.value.positionMs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `seek while idle keeps the pending restore position`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        f.queue.restore(QueueState(entries = listOf(entry(1, durationMs = 200_000)), positionMs = 30_000))
+
+        f.queue.seekTo(70_000)
+
+        assertThat(f.queue.state.value.positionMs).isEqualTo(70_000L)
+
+        f.queue.replayCurrent()
+
+        assertThat(f.playerFake.played.single().stream.startPositionMs).isEqualTo(70_000L)
+    }
+
+    @Test
+    fun `seek while playing clears the pending restore position`() {
+        val f = newFixture(minResumePositionMs = 10_000)
+        f.queue.setQueue(listOf(entry(1, durationMs = 200_000), entry(2, durationMs = 200_000)))
+        f.queue.onPositionTick(12_000)
+
+        f.queue.seekTo(50_000)
+        assertThat(f.queue.state.value.positionMs).isEqualTo(50_000L)
+
+        f.queue.skipNext(true)
+
+        assertThat(f.playerFake.played.last().stream.startPositionMs).isEqualTo(0L)
+        assertThat(f.queue.state.value.positionMs).isEqualTo(0L)
+    }
+
+    @Test
+    fun `replayCurrent restarts the queue pointer slot when idle`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1), entry(2)))
+        f.queue.onEngineFinishedCurrent()
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(2L)
+
+        f.queue.replayCurrent()
+
+        assertThat(f.playerFake.played.map { it.entry.queueItemId }).containsExactly(1L, 2L, 2L).inOrder()
     }
 }

@@ -96,7 +96,7 @@ abstract class OmnisonicDatabase : RoomDatabase() {
     abstract fun aggregateDao(): AggregateDao
 
     companion object {
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         const val DATABASE_FILE = "omnisonic.db"
 
         fun migrationsForSteps(): Array<Migration> = Migrations.ALL.toTypedArray()

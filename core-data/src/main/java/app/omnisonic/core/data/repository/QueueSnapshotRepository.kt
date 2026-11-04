@@ -39,6 +39,7 @@ class QueueSnapshotRepository @Inject constructor(
         val pitch: Float = 1f,
         val sourceType: String? = null,
         val sourceData: String? = null,
+        val positionMs: Long? = null,
     )
 
     data class Restored(
@@ -80,6 +81,7 @@ class QueueSnapshotRepository @Inject constructor(
                     pitch = it.pitch,
                     sourceType = it.sourceType,
                     sourceData = it.sourceData,
+                    positionMs = it.positionMs,
                 ),
             )
         }
@@ -113,6 +115,7 @@ class QueueSnapshotRepository @Inject constructor(
                     pitch = row.pitch,
                     sourceType = row.sourceType,
                     sourceData = row.sourceData,
+                    positionMs = row.positionMs,
                 )
             },
         )

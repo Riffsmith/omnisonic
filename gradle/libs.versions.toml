@@ -40,6 +40,9 @@ androidx-compose-navigation = { group = "androidx.navigation", name = "navigatio
 # Activity
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 
+# Core (compile-visible NotificationCompat for the media notification provider)
+androidx-core = { group = "androidx.core", name = "core", version = "1.13.1" }
+
 # Hilt
 hilt-gradle-plugin = { group = "com.google.dagger", name = "hilt-android-gradle-plugin", version.ref = "hilt" }
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }

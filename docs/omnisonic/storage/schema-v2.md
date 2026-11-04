@@ -1,27 +1,31 @@
-# Schema v2 — `schema-v2.md`
+# Schema v2/v3 — `schema-v2.md`
 
-Purpose: Record the single pre-release v1→v2 Room migration (including the
+Purpose: Record the pre-release v1→v2 Room migration (including the
 clean-room table renames), the column and table deltas it carries, the queue
-snapshot and per-play history models, and the ownership/materialisation rules
-that depend on it.
+snapshot and per-play history models, the v2→v3 queue-resume-position step, and
+the ownership/materialisation rules that depend on it.
 
 How derived: `core-data/schemas/app.omnisonic.core.data.db.OmnisonicDatabase/1.json`
 and `2.json`, `Migration1To2.kt`, `ProviderCascadeTriggers.kt`, and the migration
 harness test. The studied app is not a source.
 
 Confidence:
-- [VERIFIED] `OmnisonicDatabase.SCHEMA_VERSION = 2`; `Migrations.ALL` contains exactly
-  one `Migration(1, 2)`; no destructive fallback exists in either database builder.
+- [VERIFIED] `OmnisonicDatabase.SCHEMA_VERSION = 3`; `Migrations.ALL` contains
+  exactly `Migration(1, 2)` and `Migration(2, 3)` in order; no destructive fallback
+  exists in either database builder.
 - [VERIFIED] `1.json` is unchanged from the pre-migration baseline; `2.json` is the KSP
-  export for version 2 (regenerated with the renamed v2 table names).
+  export for version 2 (regenerated with the renamed v2 table names); `3.json` is the
+  export for version 3 (`queue_state.positionMs`).
 - [VERIFIED] `MigrationHarnessTest` seeds a real v1 database from `1.json`, runs the
   migration, validates against `2.json`, and checks data, defaults, history, queue
   restore, the renamed tables' data survival, trigger names, index names, and
-  cascade behaviour.
+  cascade behaviour. A second harness test seeds a v2 database from `2.json`, runs
+  `MIGRATION_2_3`, validates against `3.json`, and asserts the preserved
+  `queue_state` row carries a null `positionMs`.
 - [UNKNOWN] Behaviour of the migration on a large production database — there is no
   released v1 and no such database in this repository.
 
-Date: 2026-11-03
+Date: 2026-11-04
 
 Links: `sqlite-api29-floor.md`, `library-sync-ownership.md`,
 `aggregate-null-semantics.md`, `../providers/provider-connections.md`, `../decisions.md`
@@ -99,10 +103,19 @@ the original `shuffleSeed`. The order is STORED rather than regenerated from the
 seed because the anchor index depends on the original entry order; a persisted
 permutation is validated on restore and dropped when invalid.
 
+[VERIFIED] Schema v3 (`Migration(2, 3)`) adds the nullable `queue_state.positionMs`
+column — the resume point of the current entry. Null means "no restore point"
+(idle, stopped, or a track below the resume threshold). `QueueState.positionMs`
+defaults to 0 and is persisted only when the queue is in a playback session and
+the position passed the threshold while staying inside the track; `QueuePlayerImpl`
+carries the same guards on restore, so a stale end-of-track or just-started
+position never becomes a resume point.
+
 [VERIFIED] `core-data` `QueueSnapshotRepository` owns save/restore/clear;
 `:playback` `QueuePersistence` maps `QueueState` to and from the snapshots and
-validates the permutation. No lifecycle owner calls `QueuePersistence.save` yet —
-automatic save/restore wiring belongs to the playback/controller work in phase 4.
+validates the permutation. `QueuePersistenceCoordinator` (T8) debounces saves
+over `QueuePlayer.state`; the controller (T10) calls `flush()` on explicit pause
+and stop, and the service (T11) flushes on stop/background and restores at start.
 
 ## Tables removed
 

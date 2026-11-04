@@ -71,6 +71,7 @@ dependencies {
     implementation(project(":feature-profiles"))
     implementation(project(":feature-settings"))
     implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.media3.session)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)

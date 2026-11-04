@@ -6,6 +6,7 @@ import androidx.room.PrimaryKey
 /**
  * Single-row queue transport state. Shuffle order is persisted as entry
  * indices because restoring a seed alone would lose the current anchor.
+ * [positionMs] is the resume point of the current entry (null = none).
  */
 @Entity(tableName = "queue_state")
 data class QueueStateEntity(
@@ -18,6 +19,7 @@ data class QueueStateEntity(
     val pitch: Float = 1f,
     val sourceType: String? = null,
     val sourceData: String? = null,
+    val positionMs: Long? = null,
 ) {
     companion object {
         const val SINGLETON_ID = 1

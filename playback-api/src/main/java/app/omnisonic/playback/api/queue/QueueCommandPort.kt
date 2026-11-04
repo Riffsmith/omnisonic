@@ -19,4 +19,11 @@ interface QueueCommandPort {
 
     fun setRepeatMode(mode: RepeatMode)
     fun setShuffleEnabled(enabled: Boolean)
+
+    /**
+     * Transport play/pause requested through the exposed player (session,
+     * media button, lock screen). Returns true when the port handled the
+     * command; a false result lets the player command its engine directly.
+     */
+    fun onPlayWhenReady(playWhenReady: Boolean): Boolean = false
 }

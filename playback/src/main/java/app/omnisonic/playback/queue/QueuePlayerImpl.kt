@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -48,6 +49,7 @@ class QueuePlayerImpl(
     private val streamResolver: StreamResolver,
     private val bus: PlaybackEventBus,
     private val prevRestartThresholdMs: Long = DEFAULT_PREV_RESTART_THRESHOLD_MS,
+    private val minResumePositionMs: Long = DEFAULT_MIN_RESUME_POSITION_MS,
 ) : QueuePlayer {
 
     private val _state = MutableStateFlow(QueueState())
@@ -66,6 +68,8 @@ class QueuePlayerImpl(
 
     private var playing = false
     private var lastPositionMs = 0L
+    private var pendingPositionMs = 0L
+    private var pendingPositionId: Long? = null
     private var startGeneration = 0
     private var startFailures = 0
     private var startJob: Job? = null
@@ -288,6 +292,27 @@ class QueuePlayerImpl(
         startCurrent(TrackChangeCause.USER_PREV, current)
     }
 
+    override fun replayCurrent() {
+        if (released) return
+        if (currentEntry() == null) return
+        startCurrent(TrackChangeCause.SOURCE_START, null)
+    }
+
+    override fun seekTo(positionMs: Long) {
+        if (released) return
+        val target = positionMs.coerceAtLeast(0L)
+        player.seekTo(target)
+        lastPositionMs = target
+        if (playing) {
+            pendingPositionMs = 0L
+            pendingPositionId = null
+        } else {
+            pendingPositionMs = target
+            pendingPositionId = currentEntry()?.queueItemId
+        }
+        refreshState()
+    }
+
     override fun setShuffleEnabled(enabled: Boolean) {
         if (released) return
         if (shuffleOn == enabled) return
@@ -363,7 +388,7 @@ class QueuePlayerImpl(
         } else {
             entries.map { it.queueItemId }
         }
-        playIndex = snapshot.playIndex.coerceIn(0, playOrder.size)
+        playIndex = if (playOrder.isEmpty()) 0 else snapshot.playIndex.coerceIn(0, playOrder.lastIndex)
         repeat = snapshot.repeatMode
         speed = sanitizeScale(snapshot.speed, speed)
         pitch = sanitizeScale(snapshot.pitch, pitch)
@@ -371,7 +396,10 @@ class QueuePlayerImpl(
         player.setPlaybackPitch(pitch)
         sourceType = snapshot.sourceType
         sourceData = snapshot.sourceData
-        lastPositionMs = 0L
+        val restoredPosition = restorePositionFor(snapshot.positionMs, currentEntry())
+        lastPositionMs = restoredPosition
+        pendingPositionMs = restoredPosition
+        pendingPositionId = if (restoredPosition > 0L) currentEntry()?.queueItemId else null
         refreshState()
         schedulePrepareFollowing()
         bus.emit(PlaybackEvent.TrackChanged(null, currentEntry(), TrackChangeCause.RESTORE, _state.value))
@@ -409,7 +437,10 @@ class QueuePlayerImpl(
     }
 
     override fun onPositionTick(positionMs: Long) {
-        if (positionMs >= 0) lastPositionMs = positionMs
+        if (positionMs < 0) return
+        lastPositionMs = positionMs
+        val snapshot = snapshotPositionMs()
+        if (abs(snapshot - _state.value.positionMs) >= POSITION_SNAPSHOT_GRANULARITY_MS) refreshState()
     }
 
     override fun release() {
@@ -441,8 +472,14 @@ class QueuePlayerImpl(
                 return@launch
             }
             startFailures = 0
-            lastPositionMs = resolved.startPositionMs
-            player.play(resolved, target)
+            val restorePosition = pendingPositionMs
+                .takeIf { pendingPositionId == target.queueItemId }
+                ?: 0L
+            pendingPositionMs = 0L
+            pendingPositionId = null
+            val stream = if (restorePosition > 0L) resolved.copy(startPositionMs = restorePosition) else resolved
+            lastPositionMs = stream.startPositionMs
+            player.play(stream, target)
             refreshState()
             bus.emit(PlaybackEvent.TrackChanged(previous, target, cause, _state.value))
             schedulePrepareFollowing()
@@ -606,7 +643,32 @@ class QueuePlayerImpl(
             pitch = pitch,
             sourceType = sourceType,
             sourceData = sourceData,
+            positionMs = snapshotPositionMs(),
         )
+    }
+
+    /**
+     * Persisted resume point. A pending restore position survives an idle
+     * (restored but not started) queue; live positions are only kept once they
+     * passed [minResumePositionMs] and stay strictly inside the track.
+     */
+    private fun snapshotPositionMs(): Long {
+        val current = currentEntry()
+        if (pendingPositionMs > 0L && pendingPositionId == current?.queueItemId) return pendingPositionMs
+        if (!playing) return 0L
+        val position = lastPositionMs
+        if (position < minResumePositionMs) return 0L
+        val duration = current?.durationMs
+        if (duration != null && position >= duration) return 0L
+        return position
+    }
+
+    private fun restorePositionFor(positionMs: Long, entry: PlaybackQueueEntry?): Long {
+        if (entry == null || positionMs <= 0L) return 0L
+        if (positionMs < minResumePositionMs) return 0L
+        val duration = entry.durationMs
+        if (duration != null && positionMs >= duration) return 0L
+        return positionMs
     }
 
     private fun sanitizeScale(candidate: Float, fallback: Float): Float {
@@ -616,6 +678,8 @@ class QueuePlayerImpl(
 
     companion object {
         const val DEFAULT_PREV_RESTART_THRESHOLD_MS = 3_000L
+        const val DEFAULT_MIN_RESUME_POSITION_MS = 10_000L
+        const val POSITION_SNAPSHOT_GRANULARITY_MS = 5_000L
         const val MIN_SCALE = 0.25f
         const val MAX_SCALE = 3f
     }

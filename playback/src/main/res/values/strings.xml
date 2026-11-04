@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_channel_playback">Playback</string>
+    <string name="notif_action_play">Play</string>
+    <string name="notif_action_pause">Pause</string>
+    <string name="notif_action_next">Next</string>
+    <string name="notif_action_previous">Previous</string>
+    <string name="notif_action_repeat">Repeat</string>
+    <string name="notif_action_shuffle">Shuffle</string>
+    <string name="notif_action_favorite">Favorite</string>
+    <string name="notif_action_stop">Stop</string>
+    <string name="notif_action_radio">Radio</string>
+    <string name="notif_action_chapter_next">Next chapter</string>
+    <string name="notif_action_chapter_previous">Previous chapter</string>
+    <string name="notif_action_seek_forward_10">Forward 10 seconds</string>
+    <string name="notif_action_seek_forward_30">Forward 30 seconds</string>
+    <string name="notif_action_seek_back_10">Back 10 seconds</string>
+    <string name="notif_action_seek_back_30">Back 30 seconds</string>
+</resources>

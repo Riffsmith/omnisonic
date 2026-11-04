@@ -39,7 +39,9 @@ data class ShuffleState(
 
 /**
  * Authoritative queue snapshot. [playIndex] addresses the effective playback
- * order; helpers resolve it to an entries index.
+ * order; helpers resolve it to an entries index. [positionMs] is the resume
+ * point inside the current entry and doubles as the persisted snapshot value
+ * (0 means "no restore point", e.g. an idle or just-started track).
  */
 data class QueueState(
     val entries: List<PlaybackQueueEntry> = emptyList(),
@@ -50,6 +52,7 @@ data class QueueState(
     val pitch: Float = 1f,
     val sourceType: String? = null,
     val sourceData: String? = null,
+    val positionMs: Long = 0L,
 ) {
     val isNotEmpty
         get() = entries.isNotEmpty()

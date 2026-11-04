@@ -76,6 +76,7 @@ class QueueSnapshotRepositoryTest : DatabaseTestBase() {
                 pitch = 0.75f,
                 sourceType = "album",
                 sourceData = "alb-1",
+                positionMs = 543_210L,
             ),
         )
 
@@ -91,6 +92,7 @@ class QueueSnapshotRepositoryTest : DatabaseTestBase() {
                 pitch = 0.75f,
                 sourceType = "album",
                 sourceData = "alb-1",
+                positionMs = 543_210L,
             ),
         )
     }

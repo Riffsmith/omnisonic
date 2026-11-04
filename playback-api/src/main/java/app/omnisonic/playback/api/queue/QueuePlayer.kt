@@ -29,6 +29,16 @@ interface QueuePlayer {
     fun skipNext(manual: Boolean)
     fun skipPrevious()
 
+    /**
+     * Starts the current queue slot again from its pending resume position.
+     * Used when playback is idle (restored queue, queue end, explicit stop)
+     * but the pointer still addresses the slot to replay.
+     */
+    fun replayCurrent()
+
+    /** Seeks inside the current entry and records the new resume point. */
+    fun seekTo(positionMs: Long)
+
     fun setShuffleEnabled(enabled: Boolean)
     fun reshuffle(seed: Long)
     fun setRepeatMode(mode: RepeatMode)

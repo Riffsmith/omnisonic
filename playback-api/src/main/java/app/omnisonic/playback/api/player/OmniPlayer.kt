@@ -38,6 +38,10 @@ interface OmniPlayer {
 
     /** Scaled by ReplayGain selection before it reaches the sink processor. */
     fun setReplayGainLinear(multiplier: Float)
+
+    /** Output multiplier for temporary focus ducking (1.0 = full volume). */
+    fun setDuckLinear(multiplier: Float)
+
     fun setMono(enabled: Boolean)
     fun setPeq(config: PeqConfig?)
 

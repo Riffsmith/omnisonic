@@ -2,6 +2,7 @@ package app.omnisonic.playback.queue
 
 import androidx.test.core.app.ApplicationProvider
 import app.omnisonic.core.data.db.OmnisonicDatabaseFactory
+import app.omnisonic.core.data.db.entity.QueueStateEntity
 import app.omnisonic.core.data.repository.QueueSnapshotRepository
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.queue.QueueState
@@ -43,6 +44,7 @@ class QueuePersistenceTest {
                 pitch = 0.75f,
                 sourceType = "album",
                 sourceData = "alb-1",
+                positionMs = 123_456L,
             )
 
             persistence.save(state)
@@ -54,6 +56,110 @@ class QueuePersistenceTest {
             assertThat(restored.speed).isEqualTo(1.25f)
             assertThat(restored.pitch).isEqualTo(0.75f)
             assertThat(restored.sourceData).isEqualTo("alb-1")
+            assertThat(restored.positionMs).isEqualTo(123_456L)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun aZeroPositionIsStoredAsNoRestorePoint() = runTest {
+        val db = OmnisonicDatabaseFactory(ApplicationProvider.getApplicationContext()).openInMemory()
+        try {
+            val persistence = QueuePersistence(QueueSnapshotRepository(db))
+            persistence.save(QueueState(entries = listOf(entry), positionMs = 0L))
+
+            val stored = db.queueDao().selectState(QueueStateEntity.SINGLETON_ID)
+            assertThat(stored?.positionMs).isNull()
+            assertThat(persistence.restore()!!.positionMs).isEqualTo(0L)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun emptyQueueClearsTheStoredSnapshot() = runTest {
+        val db = OmnisonicDatabaseFactory(ApplicationProvider.getApplicationContext()).openInMemory()
+        try {
+            val persistence = QueuePersistence(QueueSnapshotRepository(db))
+            persistence.save(QueueState(entries = listOf(entry)))
+
+            persistence.save(QueueState())
+
+            assertThat(persistence.restore()).isNull()
+            assertThat(db.queueDao().countEntries()).isEqualTo(0)
+            assertThat(db.queueDao().selectState(QueueStateEntity.SINGLETON_ID)).isNull()
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun restoreClampsAnOutOfRangePlayIndex() = runTest {
+        val db = OmnisonicDatabaseFactory(ApplicationProvider.getApplicationContext()).openInMemory()
+        try {
+            val snapshots = QueueSnapshotRepository(db)
+            snapshots.save(
+                entries = listOf(
+                    QueueSnapshotRepository.EntrySnapshot(10, 0, 1, "song-1", title = "One"),
+                    QueueSnapshotRepository.EntrySnapshot(11, 1, 1, "song-2", title = "Two"),
+                ),
+                state = QueueSnapshotRepository.StateSnapshot(playIndex = 99),
+            )
+
+            val restored = QueuePersistence(snapshots).restore()!!
+
+            assertThat(restored.playIndex).isEqualTo(1)
+            assertThat(restored.currentEntry?.queueItemId).isEqualTo(11L)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun invalidShuffleOrderClampsPlayIndexToTheEntryRange() = runTest {
+        val db = OmnisonicDatabaseFactory(ApplicationProvider.getApplicationContext()).openInMemory()
+        try {
+            val snapshots = QueueSnapshotRepository(db)
+            snapshots.save(
+                entries = listOf(
+                    QueueSnapshotRepository.EntrySnapshot(10, 0, 1, "song-1", title = "One"),
+                    QueueSnapshotRepository.EntrySnapshot(11, 1, 1, "song-2", title = "Two"),
+                ),
+                state = QueueSnapshotRepository.StateSnapshot(
+                    playIndex = 1,
+                    shuffleOrder = listOf(1, 1),
+                    shuffleSeed = 1,
+                ),
+            )
+
+            val restored = QueuePersistence(snapshots).restore()!!
+
+            assertThat(restored.shuffle).isNull()
+            assertThat(restored.playIndex).isEqualTo(1)
+            assertThat(restored.currentEntry?.queueItemId).isEqualTo(11L)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test
+    fun restoreAdvancesTheQueueItemIdCounterPastTheSnapshot() = runTest {
+        val db = OmnisonicDatabaseFactory(ApplicationProvider.getApplicationContext()).openInMemory()
+        try {
+            PlaybackQueueEntry.resetIdCounterTo(0)
+            val snapshots = QueueSnapshotRepository(db)
+            snapshots.save(
+                entries = listOf(
+                    QueueSnapshotRepository.EntrySnapshot(10, 0, 1, "song-1", title = "One"),
+                    QueueSnapshotRepository.EntrySnapshot(11, 1, 1, "song-2", title = "Two"),
+                ),
+                state = null,
+            )
+
+            QueuePersistence(snapshots).restore()
+
+            assertThat(PlaybackQueueEntry.nextQueueItemId()).isEqualTo(12L)
         } finally {
             db.close()
         }
