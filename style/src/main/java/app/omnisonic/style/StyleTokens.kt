@@ -1,5 +1,7 @@
 package app.omnisonic.style
 
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Easing
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
@@ -24,6 +26,9 @@ data class StyleTokens(
     val shapes: ShapeTokens,
     val layout: LayoutTokens,
     val imagery: ImageryTokens,
+    val effects: EffectTokens,
+    val motion: MotionTokens,
+    val fonts: FontTokens,
 )
 
 @Immutable
@@ -170,12 +175,20 @@ enum class NavigationLayout { BOTTOM_BAR, RAIL }
 
 enum class NavigationLabelMode { ALL, SELECTED_ONLY, NONE }
 
+enum class TabSwipeMode { ENABLED, DISABLED }
+
+enum class TabBarStyle { VISIBLE, HIDDEN }
+
 @Immutable
 data class LayoutTokens(
     val portraitNavigation: NavigationLayout = NavigationLayout.BOTTOM_BAR,
     val landscapeNavigation: NavigationLayout = NavigationLayout.RAIL,
     val portraitLabelMode: NavigationLabelMode = NavigationLabelMode.ALL,
     val landscapeLabelMode: NavigationLabelMode = NavigationLabelMode.ALL,
+    val portraitTabSwipeMode: TabSwipeMode = TabSwipeMode.ENABLED,
+    val landscapeTabSwipeMode: TabSwipeMode = TabSwipeMode.ENABLED,
+    val portraitTabBarStyle: TabBarStyle = TabBarStyle.VISIBLE,
+    val landscapeTabBarStyle: TabBarStyle = TabBarStyle.VISIBLE,
     val bottomBarHeight: Dp = 64.dp,
     val railWidth: Dp = 80.dp,
     val gridColumnsPortrait: Int = 3,
@@ -195,6 +208,12 @@ data class LayoutTokens(
     fun labelModeFor(isLandscape: Boolean): NavigationLabelMode =
         if (isLandscape) landscapeLabelMode else portraitLabelMode
 
+    fun tabSwipeModeFor(isLandscape: Boolean): TabSwipeMode =
+        if (isLandscape) landscapeTabSwipeMode else portraitTabSwipeMode
+
+    fun tabBarStyleFor(isLandscape: Boolean): TabBarStyle =
+        if (isLandscape) landscapeTabBarStyle else portraitTabBarStyle
+
     fun gridColumnsFor(isLandscape: Boolean): Int =
         if (isLandscape) gridColumnsLandscape else gridColumnsPortrait
 }
@@ -207,6 +226,110 @@ data class ImageryTokens(
     val nowPlayingArtSize: Dp = 320.dp,
     val placeholderTintAlpha: Float = 0.6f,
 )
+
+/**
+ * Visual-effect values. Every entry must survive its platform floor
+ * (reference/docs/GESTURES.md §3): blur no-ops below API 31, progressive blur
+ * and the vignette below API 33. Text legibility never depends on an effect —
+ * [backdropOverlayAlpha] and [backdropLegibilityShield] carry legibility when
+ * an effect falls back.
+ */
+@Immutable
+data class EffectTokens(
+    val backdropPreset: BackdropPreset = BackdropPreset.SOLID,
+    val backdropGradientAnchor: BackdropGradientAnchor = BackdropGradientAnchor.TOP,
+    val backdropStrength: Float = 0.5f,
+    val backdropOverlayAlpha: Float = 0.4f,
+    val backdropLegibilityShield: Boolean = true,
+    val backdropBlurRadiusDp: Dp = 24.dp,
+    val backdropBlurScope: BackdropBlurScope = BackdropBlurScope.NOW_PLAYING,
+    val progressiveBlur: ProgressiveBlurMode = ProgressiveBlurMode.AUTO,
+    val vignetteStrength: Float = 0f,
+    val navBarAlpha: Float = 1f,
+    val tabBarAlpha: Float = 1f,
+) {
+    fun vignetteRequested(apiLevel: Int): Boolean =
+        vignetteStrength > 0f && apiLevel >= VIGNETTE_MIN_API
+
+    companion object {
+        const val VIGNETTE_MIN_API = 33
+    }
+}
+
+enum class BackdropPreset { SOLID, GRADIENT, ART_BLURRED, CARD, FULL_BAR }
+
+enum class BackdropGradientAnchor { TOP, BOTTOM, TOP_AND_BOTTOM, START, END, START_AND_END }
+
+enum class BackdropBlurScope { NOW_PLAYING, NAV_BAR, FULL_SCREEN }
+
+enum class ProgressiveBlurMode {
+    AUTO, ON, OFF;
+
+    /** True when the renderer should attempt progressive blur; below the API floor it no-ops. */
+    fun active(apiLevel: Int): Boolean = when (this) {
+        OFF -> false
+        AUTO -> apiLevel >= PROGRESSIVE_BLUR_MIN_API
+        ON -> true
+    }
+
+    companion object {
+        const val PROGRESSIVE_BLUR_MIN_API = 33
+    }
+}
+
+@Immutable
+data class MotionTokens(
+    val durationScale: Float = 1f,
+    val easingProfile: MotionEasingProfile = MotionEasingProfile.STANDARD,
+    val tabTransition: MotionTween = MotionTween(durationMs = 250),
+    val nowPlayingExpand: MotionSpring = MotionSpring(dampingRatio = 0.85f, stiffness = 380f),
+    val queueReorder: MotionTween = MotionTween(durationMs = 300),
+    val artCrossfade: MotionTween = MotionTween(durationMs = 200),
+)
+
+/** Per-interaction tween; easing comes from [MotionTokens.easingProfile]. */
+@Immutable
+data class MotionTween(val durationMs: Int)
+
+/** Per-interaction spring in Compose spring units (damping 1 = critically damped). */
+@Immutable
+data class MotionSpring(val dampingRatio: Float, val stiffness: Float)
+
+enum class MotionEasingProfile { STANDARD, EMPHASIZED, EXPRESSIVE }
+
+private val StandardMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+private val EmphasizedMotionEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+private val ExpressiveMotionEasing = CubicBezierEasing(0.34f, 1.56f, 0.64f, 1f)
+
+fun MotionEasingProfile.toEasing(): Easing = when (this) {
+    MotionEasingProfile.STANDARD -> StandardMotionEasing
+    MotionEasingProfile.EMPHASIZED -> EmphasizedMotionEasing
+    MotionEasingProfile.EXPRESSIVE -> ExpressiveMotionEasing
+}
+
+/**
+ * Font-family selection per role. A `null` family renders the platform
+ * default; a non-null ref names a downloadable-catalog entry or a
+ * [CustomFontFace.id]. Face loading is a later-phase concern; variable-font
+ * axes join it (Compose FontVariation, API 26+).
+ */
+@Immutable
+data class FontTokens(
+    val fontFamilies: FontFamilies = FontFamilies(),
+    val customFontUris: List<CustomFontFace> = emptyList(),
+)
+
+@Immutable
+data class FontFamilies(
+    val title: String? = null,
+    val body: String? = null,
+    val lyrics: String? = null,
+    val nav: String? = null,
+)
+
+/** SAF-imported TTF/OTF face; [id] is the stable reference used by family refs. */
+@Immutable
+data class CustomFontFace(val id: String, val uri: String)
 
 val DefaultStyleTokens: StyleTokens = StyleTokens(
     colors = ColorTokens(
@@ -275,6 +398,9 @@ val DefaultStyleTokens: StyleTokens = StyleTokens(
     shapes = ShapeTokens(),
     layout = LayoutTokens(),
     imagery = ImageryTokens(),
+    effects = EffectTokens(),
+    motion = MotionTokens(),
+    fonts = FontTokens(),
 )
 
 /** Phase 9 swaps the implementation; Phase 5 has exactly one hard-coded default. */

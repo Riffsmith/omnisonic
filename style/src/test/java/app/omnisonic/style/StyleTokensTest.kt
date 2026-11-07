@@ -195,4 +195,127 @@ class StyleTokensTest {
         assertThat(reshaped.colors).isEqualTo(DefaultStyleTokens.colors)
         assertThat(reshaped.typography).isEqualTo(DefaultStyleTokens.typography)
     }
+
+    @Test
+    fun effectDefaultsAreStableAndGatesDefaultToSafeValues() {
+        val effects = DefaultStyleTokens.effects
+        assertThat(effects).isEqualTo(EffectTokens())
+        assertThat(effects.backdropPreset).isEqualTo(BackdropPreset.SOLID)
+        assertThat(effects.backdropLegibilityShield).isTrue()
+        assertThat(effects.progressiveBlur).isEqualTo(ProgressiveBlurMode.AUTO)
+        assertThat(effects.vignetteStrength).isEqualTo(0f)
+    }
+
+    @Test
+    fun effectValuesStayWithinRange() {
+        val effects = DefaultStyleTokens.effects
+        listOf(
+            effects.backdropStrength,
+            effects.backdropOverlayAlpha,
+            effects.vignetteStrength,
+            effects.navBarAlpha,
+            effects.tabBarAlpha,
+        ).forEach { alpha ->
+            assertThat(alpha).isAtLeast(0f)
+            assertThat(alpha).isAtMost(1f)
+        }
+        assertThat(effects.backdropBlurRadiusDp.value).isAtLeast(0f)
+
+        ProgressiveBlurMode.entries.forEach { mode ->
+            assertThat(mode.active(apiLevel = 33)).isEqualTo(mode != ProgressiveBlurMode.OFF)
+            assertThat(mode.active(apiLevel = 32)).isEqualTo(mode == ProgressiveBlurMode.ON)
+            assertThat(mode.active(apiLevel = 29)).isEqualTo(mode == ProgressiveBlurMode.ON)
+        }
+
+        assertThat(effects.vignetteRequested(apiLevel = 29)).isFalse()
+        assertThat(effects.vignetteRequested(apiLevel = 40)).isFalse()
+        val vignetteOn = effects.copy(vignetteStrength = 0.3f)
+        assertThat(vignetteOn.vignetteRequested(apiLevel = 32)).isFalse()
+        assertThat(vignetteOn.vignetteRequested(apiLevel = 33)).isTrue()
+    }
+
+    @Test
+    fun effectOverridesLeaveOtherTokenGroupsUnchanged() {
+        val alternate = DefaultStyleTokens.copy(
+            effects = DefaultStyleTokens.effects.copy(backdropPreset = BackdropPreset.GRADIENT),
+        )
+
+        assertThat(alternate.effects.backdropPreset).isEqualTo(BackdropPreset.GRADIENT)
+        assertThat(alternate.effects.backdropOverlayAlpha)
+            .isEqualTo(DefaultStyleTokens.effects.backdropOverlayAlpha)
+        assertThat(alternate.colors).isEqualTo(DefaultStyleTokens.colors)
+        assertThat(alternate.layout).isEqualTo(DefaultStyleTokens.layout)
+        assertThat(alternate.motion).isEqualTo(DefaultStyleTokens.motion)
+        assertThat(alternate.fonts).isEqualTo(DefaultStyleTokens.fonts)
+
+        val motionOverride = DefaultStyleTokens.copy(
+            motion = DefaultStyleTokens.motion.copy(durationScale = 2f),
+        )
+        assertThat(motionOverride.effects).isEqualTo(DefaultStyleTokens.effects)
+        assertThat(motionOverride.fonts).isEqualTo(DefaultStyleTokens.fonts)
+    }
+
+    @Test
+    fun motionDefaultsAreStableAndValid() {
+        val motion = DefaultStyleTokens.motion
+        assertThat(motion).isEqualTo(MotionTokens())
+        assertThat(motion.durationScale).isEqualTo(1f)
+
+        listOf(motion.tabTransition, motion.queueReorder, motion.artCrossfade)
+            .forEach { tween -> assertThat(tween.durationMs).isGreaterThan(0) }
+        assertThat(motion.nowPlayingExpand.dampingRatio).isGreaterThan(0f)
+        assertThat(motion.nowPlayingExpand.stiffness).isGreaterThan(0f)
+
+        MotionEasingProfile.entries.forEach { profile ->
+            assertThat(profile.toEasing()).isSameInstanceAs(profile.toEasing())
+        }
+        val curves = MotionEasingProfile.entries.map { it.toEasing() }
+        assertThat(curves.distinct()).hasSize(curves.size)
+    }
+
+    @Test
+    fun fontTokensDefaultToPlatformFamiliesAndIsolateOverrides() {
+        val fonts = DefaultStyleTokens.fonts
+        assertThat(fonts).isEqualTo(FontTokens())
+        assertThat(fonts.fontFamilies.title).isNull()
+        assertThat(fonts.fontFamilies.body).isNull()
+        assertThat(fonts.fontFamilies.lyrics).isNull()
+        assertThat(fonts.fontFamilies.nav).isNull()
+        assertThat(fonts.customFontUris).isEmpty()
+
+        val titled = fonts.copy(fontFamilies = fonts.fontFamilies.copy(title = "Serif Display"))
+        assertThat(titled.fontFamilies.title).isEqualTo("Serif Display")
+        assertThat(titled.fontFamilies.body).isNull()
+        assertThat(titled.fontFamilies.lyrics).isNull()
+        assertThat(titled.fontFamilies.nav).isNull()
+        assertThat(titled.customFontUris).isEmpty()
+
+        val imported = fonts.copy(
+            customFontUris = listOf(CustomFontFace(id = "face-1", uri = "content://fonts/face1.ttf")),
+        )
+        assertThat(imported.customFontUris).hasSize(1)
+        assertThat(imported.fontFamilies).isEqualTo(fonts.fontFamilies)
+        assertThat(imported.fontFamilies.title).isNull()
+    }
+
+    @Test
+    fun layoutTokensResolveTabSwipeAndBarStylePerOrientation() {
+        val layout = DefaultStyleTokens.layout
+
+        assertThat(layout.tabSwipeModeFor(isLandscape = false)).isEqualTo(TabSwipeMode.ENABLED)
+        assertThat(layout.tabSwipeModeFor(isLandscape = true)).isEqualTo(TabSwipeMode.ENABLED)
+        assertThat(layout.tabBarStyleFor(isLandscape = false)).isEqualTo(TabBarStyle.VISIBLE)
+        assertThat(layout.tabBarStyleFor(isLandscape = true)).isEqualTo(TabBarStyle.VISIBLE)
+
+        val configured = layout.copy(
+            portraitTabSwipeMode = TabSwipeMode.DISABLED,
+            landscapeTabSwipeMode = TabSwipeMode.ENABLED,
+            portraitTabBarStyle = TabBarStyle.HIDDEN,
+            landscapeTabBarStyle = TabBarStyle.VISIBLE,
+        )
+        assertThat(configured.tabSwipeModeFor(isLandscape = false)).isEqualTo(TabSwipeMode.DISABLED)
+        assertThat(configured.tabSwipeModeFor(isLandscape = true)).isEqualTo(TabSwipeMode.ENABLED)
+        assertThat(configured.tabBarStyleFor(isLandscape = false)).isEqualTo(TabBarStyle.HIDDEN)
+        assertThat(configured.tabBarStyleFor(isLandscape = true)).isEqualTo(TabBarStyle.VISIBLE)
+    }
 }
