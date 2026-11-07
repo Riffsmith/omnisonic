@@ -17,17 +17,22 @@ import kotlinx.coroutines.sync.withLock
  * [runGate] before sync, outbox drain and download work. Network facts come
  * from one [NetworkMonitor]; Wi-Fi-only providers need a Wi-Fi network and
  * stay blocked with [ProviderStatus.NEEDS_WIFI] on any other connected
- * network, which is distinct from [ProviderStatus.OFFLINE]. The credentials
- * marker is the T21 seam: the credentials layer reports unreadable secrets
- * here instead of the mapper failing silently.
+ * network, which is distinct from [ProviderStatus.OFFLINE].
+ *
+ * An authentication failure is either unreadable local credentials or a
+ * server rejection reported as [app.omnisonic.provider.api.ProviderAuthException].
+ * The marker remembers the provider row's `updatedAt`; editing the row clears
+ * it, as does [clearAuthFailed] after a successful provider call.
  */
 @Singleton
 class ProviderStatusTracker @Inject constructor(
     private val database: OmnisonicDatabase,
     private val networkMonitor: NetworkMonitor,
 ) {
+    private data class AuthFailure(val providerUpdatedAt: Long)
+
     private val mutex = Mutex()
-    private val credentialsUnreadable = mutableSetOf<Long>()
+    private val authFailures = mutableMapOf<Long, AuthFailure>()
     private val _statuses = MutableStateFlow<Map<Long, ProviderStatus>>(emptyMap())
 
     val statuses: StateFlow<Map<Long, ProviderStatus>> = _statuses.asStateFlow()
@@ -44,24 +49,36 @@ class ProviderStatusTracker @Inject constructor(
     suspend fun refresh() {
         val rows = database.providerDao().selectAll()
         val network = networkMonitor.current()
+        val rowsById = rows.associateBy { it.id }
         mutex.withLock {
+            authFailures.entries.removeAll { (providerId, failure) ->
+                val row = rowsById[providerId]
+                row == null || row.updatedAt != failure.providerUpdatedAt
+            }
             _statuses.value = rows.associate { row -> row.id to statusFor(row, network) }
         }
     }
 
-    /** T21 seam: credentials could not be unsealed; the provider shows re-enter-password. */
-    suspend fun markCredentialsUnreadable(providerId: Long) {
-        mutex.withLock { credentialsUnreadable += providerId }
+    /** The server rejected this provider's credentials; retry work is blocked. */
+    suspend fun markAuthFailed(providerId: Long) {
+        val row = database.providerDao().selectById(providerId) ?: return
+        mutex.withLock { authFailures[providerId] = AuthFailure(row.updatedAt) }
         refresh()
     }
 
-    suspend fun clearCredentialsUnreadable(providerId: Long) {
-        mutex.withLock { credentialsUnreadable -= providerId }
-        refresh()
+    /** A provider call authenticated successfully; allow retry work again. */
+    suspend fun clearAuthFailed(providerId: Long) {
+        val cleared = mutex.withLock { authFailures.remove(providerId) != null }
+        if (cleared) refresh()
     }
+
+    /** T21 seam: credentials could not be unsealed; the provider shows re-enter-password. */
+    suspend fun markCredentialsUnreadable(providerId: Long) = markAuthFailed(providerId)
+
+    suspend fun clearCredentialsUnreadable(providerId: Long) = clearAuthFailed(providerId)
 
     private fun statusFor(row: ProviderEntity, network: NetworkState): ProviderStatus = when {
-        row.id in credentialsUnreadable -> ProviderStatus.AUTH_FAILED
+        row.id in authFailures -> ProviderStatus.AUTH_FAILED
         !network.connected -> ProviderStatus.OFFLINE
         row.wifiOnly && !network.wifi -> ProviderStatus.NEEDS_WIFI
         else -> ProviderStatus.OK

@@ -2,7 +2,7 @@
 
 Purpose: Pin how the local renderer requests and reacts to audio focus: media/music attributes, duck-versus-pause on transient loss, pause on permanent loss, and the resume-only-if-focus-paused rule.
 
-How derived: the Media3 engine is built with `handleAudioFocus=false`, so focus is app-owned; Android `AudioManager` focus contract (`AudioFocusRequest`, `AUDIOFOCUS_*`) plus Robolectric `ShadowAudioManager` probes in this repository (`AudioFocusHelperTest`). The studied app is not a source.
+How derived: the Media3 engine is built with `handleAudioFocus=false`, so focus is app-owned; Android `AudioManager` focus contract (`AudioFocusRequest`, `AUDIOFOCUS_*`) plus Robolectric `ShadowAudioManager` probes in this repository (`AudioFocusHelperTest`). Evidence categories: public Android framework contract reading, in-repository Robolectric probes.
 
 Confidence:
 - [VERIFIED] `AudioFocusHelper` (`playback/focus/`) owns one permanent-gain `AudioFocusRequest` with `AudioAttributes` usage `USAGE_MEDIA` and content type `CONTENT_TYPE_MUSIC`. The content-type variation seen in the study is deliberately not reproduced.
@@ -12,7 +12,7 @@ Confidence:
 - [VERIFIED] An explicit `requestFocus()` clears stale paused-by-focus and duck state. A permanent loss never produces a spontaneous gain, so without this an app that lost focus could resume on a later unrelated gain.
 - [UNKNOWN] Real-device behavior for call interrupts, assistant ducking, and headset/Bluetooth handoffs. Needs hardware.
 
-Date: 2026-11-03
+Date: 2026-11-07
 
 Links: `sink-processors.md`, `settings-persistence.md`, `../decisions.md`
 

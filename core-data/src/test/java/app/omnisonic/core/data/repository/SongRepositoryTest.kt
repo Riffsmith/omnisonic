@@ -60,14 +60,14 @@ class SongRepositoryTest : DatabaseTestBase() {
         val id = repository.ensureSong(provider.id, "song-1", snapshot())
         songDao.addPlayCount(id, delta = 2, now = 1_500)
         songDao.setFavorite(id, favorite = true, now = 1_600)
-        songDao.setResumePoint(id, resumePointMs = 45_000, now = 1_700)
+        songDao.setResumePoint(id, resumeMs = 45_000, now = 1_700)
 
         repository.ensureSong(provider.id, "song-1", snapshot(title = "Other", coverImageId = "cover-2"))
 
         val row = songDao.selectById(id)!!
         assertThat(row.playCount).isEqualTo(2)
         assertThat(row.isFavorite).isTrue()
-        assertThat(row.resumePointMs).isEqualTo(45_000)
+        assertThat(row.resumeMs).isEqualTo(45_000)
         // Fill-NULL-only: existing values are never downgraded by a snapshot.
         assertThat(row.title).isEqualTo("Queue title")
         assertThat(row.imagePath).isEqualTo("cover-1")
@@ -111,14 +111,14 @@ class SongRepositoryTest : DatabaseTestBase() {
         val id = repository.ensureSong(provider.id, "song-1", snapshot())
         songDao.addPlayCount(id, delta = 2, now = 1_500)
         songDao.setFavorite(id, favorite = true, now = 1_600)
-        songDao.setResumePoint(id, resumePointMs = 45_000, now = 1_700)
+        songDao.setResumePoint(id, resumeMs = 45_000, now = 1_700)
 
         songDao.updateServerFields(
             providerId = 1,
             externalId = "song-1",
             albumId = null,
             title = "Server title",
-            titleRoman = null,
+            latinTitle = null,
             sortTitle = null,
             displayArtist = "Server artist",
             filePath = "/music/song.flac",
@@ -130,6 +130,7 @@ class SongRepositoryTest : DatabaseTestBase() {
             imagePath = "server-cover",
             codec = "flac",
             bitrateKbps = 900,
+            lastSeenSyncId = 1,
             updatedAt = 2_000,
         )
 
@@ -139,7 +140,7 @@ class SongRepositoryTest : DatabaseTestBase() {
         assertThat(row.playCount).isEqualTo(2)
         assertThat(row.isFavorite).isTrue()
         assertThat(row.favoriteAt).isEqualTo(1_600)
-        assertThat(row.resumePointMs).isEqualTo(45_000)
+        assertThat(row.resumeMs).isEqualTo(45_000)
         assertThat(row.resumeUpdatedAt).isEqualTo(1_700)
     }
 

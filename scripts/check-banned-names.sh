@@ -23,13 +23,16 @@ for path in "$@"; do
   esac
   if [ -f "$path" ]; then
     set +e
-    matches=$(grep -Ein -- "$patterns" "$path" 2>/dev/null)
+    line_numbers=$(grep -Einha -- "$patterns" "$path" 2>/dev/null | cut -d: -f1)
     rc=$?
     set -e
     if [ $rc -eq 0 ]; then
-      echo "banned pattern in: $path" >&2
-      printf '%s\n' "$matches" | sed 's/^/    /' >&2
       status=1
+      while IFS= read -r line_no; do
+        if [ -n "$line_no" ]; then
+          printf '%s:%s\n' "$path" "$line_no" >&2
+        fi
+      done <<< "$line_numbers"
     elif [ $rc -ge 2 ]; then
       echo "scan failed on: $path (grep exit $rc)" >&2
       status=1
@@ -38,6 +41,6 @@ for path in "$@"; do
 done
 
 if [ $status -ne 0 ]; then
-  echo "commit rejected: studied-app reference found; rewrite the lines above" >&2
+  echo "commit rejected: studied-app reference found; rewrite the listed locations" >&2
 fi
 exit $status

@@ -22,7 +22,7 @@ data class ChapterEntity(
     val title: String? = null,
     val positionMs: Long,
     val endPositionMs: Long? = null,
-    val sourceKind: String,
-    val sourcePriority: Int,
+    val origin: String,
+    val rank: Int,
     val updatedAt: Long,
 )

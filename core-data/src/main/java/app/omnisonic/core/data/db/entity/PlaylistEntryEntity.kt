@@ -7,7 +7,7 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "playlist_items",
     indices = [
-        Index(value = ["playlistId", "entryOrder"]),
+        Index(value = ["playlistId", "position"]),
         Index(value = ["providerId"]),
     ],
 )
@@ -15,7 +15,7 @@ data class PlaylistEntryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val playlistId: Long,
     val providerId: Long,
-    val entryOrder: Int,
+    val position: Int,
     val externalId: String? = null,
     val songId: Long? = null,
     val filePath: String? = null,

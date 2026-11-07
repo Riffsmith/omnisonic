@@ -18,7 +18,7 @@ interface QueueSnapshotStore {
 /**
  * Maps the authoritative [QueueState] to snapshot rows and back. The queue
  * snapshot carries the resume position of the current entry ([QueueState.positionMs]);
- * the song-level resume point (`songs.resumePointMs`) remains the fallback used
+ * the song-level resume point (`songs.resumeMs`) remains the fallback used
  * by stream resolution when no queue snapshot exists.
  */
 @Singleton

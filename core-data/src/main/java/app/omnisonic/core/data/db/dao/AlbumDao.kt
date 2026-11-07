@@ -45,7 +45,7 @@ interface AlbumDao {
         """
         UPDATE albums SET
             title = :title,
-            titleRoman = :titleRoman,
+            latinTitle = :latinTitle,
             sortTitle = :sortTitle,
             displayArtist = :displayArtist,
             year = :year,
@@ -53,6 +53,7 @@ interface AlbumDao {
             durationMs = :durationMs,
             songCount = :songCount,
             genresJson = :genresJson,
+            lastSeenSyncId = :lastSeenSyncId,
             updatedAt = :updatedAt
         WHERE providerId = :providerId AND externalId = :externalId
         """,
@@ -61,7 +62,7 @@ interface AlbumDao {
         providerId: Long,
         externalId: String,
         title: String,
-        titleRoman: String?,
+        latinTitle: String?,
         sortTitle: String?,
         displayArtist: String?,
         year: Int?,
@@ -69,17 +70,18 @@ interface AlbumDao {
         durationMs: Long?,
         songCount: Int,
         genresJson: String?,
+        lastSeenSyncId: Long,
         updatedAt: Long,
     )
 
     @Transaction
-    suspend fun upsertServerFields(album: AlbumEntity): Long {
-        insertOrIgnore(album)
+    suspend fun upsertServerFields(album: AlbumEntity, lastSeenSyncId: Long): Long {
+        insertOrIgnore(album.copy(lastSeenSyncId = lastSeenSyncId))
         updateServerFields(
             providerId = album.providerId,
             externalId = album.externalId ?: return 0,
             title = album.title,
-            titleRoman = album.titleRoman,
+            latinTitle = album.latinTitle,
             sortTitle = album.sortTitle,
             displayArtist = album.displayArtist,
             year = album.year,
@@ -87,6 +89,7 @@ interface AlbumDao {
             durationMs = album.durationMs,
             songCount = album.songCount,
             genresJson = album.genresJson,
+            lastSeenSyncId = lastSeenSyncId,
             updatedAt = album.updatedAt,
         )
         return selectIdByProviderAndExternal(album.providerId, album.externalId) ?: 0
@@ -114,23 +117,36 @@ interface AlbumDao {
     )
     suspend fun selectMostPlayed(providerId: Long, limit: Int): List<AlbumEntity>
 
-    /** Albums of this provider that were not seen in the sync and have no remaining songs. */
+    @Query("SELECT MAX(lastSeenSyncId) FROM albums WHERE providerId = :providerId")
+    suspend fun selectMaxLastSeenSyncId(providerId: Long): Long?
+
+    /**
+     * Albums of this provider that were not stamped by the current sync run
+     * and have no remaining songs. Rows without any stamp are unseen too: the
+     * caller (SubsonicLibrarySyncer.prune) may only reach pruning after the
+     * FIX-02 safety guards confirmed the walk was complete.
+     */
     @Query(
         """
         SELECT id FROM albums
         WHERE providerId = :providerId
             AND externalId IS NOT NULL
-            AND externalId NOT IN (:seenExternalIds)
+            AND (lastSeenSyncId IS NULL OR lastSeenSyncId != :runId)
             AND id NOT IN (
                 SELECT DISTINCT albumId FROM songs
                 WHERE providerId = :providerId AND albumId IS NOT NULL
             )
         """,
     )
-    suspend fun selectUnseenWithoutSongsIds(providerId: Long, seenExternalIds: List<String>): List<Long>
+    suspend fun selectUnseenWithoutSongsIds(providerId: Long, runId: Long): List<Long>
 
     @Query("DELETE FROM albums WHERE id IN (:ids)")
-    suspend fun deleteByIds(ids: List<Long>)
+    suspend fun deleteByIdsChunk(ids: List<Long>)
+
+    @Transaction
+    suspend fun deleteByIds(ids: List<Long>) {
+        ids.forEachSqlChunk { deleteByIdsChunk(it) }
+    }
 
     @Query("DELETE FROM albums WHERE id = :id")
     suspend fun deleteById(id: Long)

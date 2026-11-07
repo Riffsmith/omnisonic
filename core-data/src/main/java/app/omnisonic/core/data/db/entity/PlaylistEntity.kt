@@ -15,12 +15,12 @@ data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val providerId: Long,
     val externalId: String? = null,
-    val externalDataJson: String? = null,
+    val providerPayloadJson: String? = null,
     val title: String,
     val description: String? = null,
     val imagePath: String? = null,
     val type: Int,
-    val smartFilterJson: String? = null,
+    val ruleJson: String? = null,
     val isFavorite: Boolean = false,
     val favoriteAt: Long? = null,
     val autoSync: Boolean = false,
@@ -30,5 +30,7 @@ data class PlaylistEntity(
     val lastModified: Long? = null,
     val lastPlayed: Long? = null,
     val hidden: Boolean = false,
+    /** Sync-run stamp (D-10); NULL means never seen by a stamping sync run. */
+    val lastSeenSyncId: Long? = null,
     val updatedAt: Long,
 )

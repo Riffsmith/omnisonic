@@ -46,6 +46,11 @@ class OutboxQueue @Inject constructor(
             val merged = existing
                 ?.let { decode(it.payloadJson).merge(payload) }
                 ?: payload
+            val normalized = if (action == OutboxActions.PLAY_COUNT) {
+                merged.withConsistentPlayCount()
+            } else {
+                merged
+            }
             outboxDao.upsert(
                 OutboxItemEntity(
                     id = existing?.id ?: 0,
@@ -53,7 +58,7 @@ class OutboxQueue @Inject constructor(
                     mediaType = mediaType.name,
                     externalId = externalId,
                     action = action,
-                    payloadJson = payloadAdapter.toJson(merged),
+                    payloadJson = payloadAdapter.toJson(normalized),
                     attempts = existing?.attempts ?: 0,
                     nextAttemptAt = 0,
                     lastError = existing?.lastError,
@@ -96,25 +101,35 @@ class OutboxQueue @Inject constructor(
     private fun OutboxActionPayload.merge(incoming: OutboxActionPayload): OutboxActionPayload {
         val incomingDelta = incoming.playCountDelta
         return if (incomingDelta != null) {
+            // Legacy rows can carry a delta without an explicit timestamp list;
+            // synthesise those plays so the merged row keeps one timestamp per play.
+            val timestamps = playTimestampsForSubmission() + incoming.playTimestampsForSubmission()
             copy(
-                playCountDelta = (playCountDelta ?: 0) + incomingDelta,
+                playCountDelta = timestamps.size.takeIf { it > 0 },
                 lastPlayedAt = incoming.lastPlayedAt ?: lastPlayedAt,
-                playTimestamps = ((playTimestamps.orEmpty()) + incoming.playTimestamps.orEmpty())
-                    .takeLast(MAX_PLAY_TIMESTAMPS),
+                playTimestamps = timestamps.takeIf { it.isNotEmpty() },
             )
         } else {
             copy(
                 isFavorite = incoming.isFavorite ?: isFavorite,
                 userRating = incoming.userRating ?: userRating,
-                resumePointMs = incoming.resumePointMs ?: resumePointMs,
+                resumeMs = incoming.resumeMs ?: resumeMs,
                 lastPlayedAt = incoming.lastPlayedAt ?: lastPlayedAt,
                 playTimestamps = incoming.playTimestamps ?: playTimestamps,
             )
         }
     }
 
-    companion object {
-        /** Payload cap; overflow keeps the newest timestamps. */
-        const val MAX_PLAY_TIMESTAMPS = 100
+    private fun OutboxActionPayload.withConsistentPlayCount(): OutboxActionPayload {
+        val timestamps = playTimestampsForSubmission()
+        return if (timestamps.isEmpty()) {
+            copy(playCountDelta = null, playTimestamps = null)
+        } else {
+            copy(
+                playCountDelta = timestamps.size,
+                lastPlayedAt = lastPlayedAt ?: timestamps.last(),
+                playTimestamps = timestamps,
+            )
+        }
     }
 }

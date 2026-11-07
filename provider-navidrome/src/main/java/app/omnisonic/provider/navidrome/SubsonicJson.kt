@@ -226,6 +226,10 @@ data class SubsonicSearchDto(
 data class SubsonicEnvelope(
     val status: String? = null,
     val version: String? = null,
+    // OpenSubsonic response fields; absent on plain Subsonic servers.
+    val type: String? = null,
+    val serverVersion: String? = null,
+    val openSubsonic: Boolean? = null,
     val error: SubsonicErrorDto? = null,
     val openSubsonicExtensions: List<SubsonicExtensionDto> = emptyList(),
     val artists: SubsonicArtistsRootDto? = null,

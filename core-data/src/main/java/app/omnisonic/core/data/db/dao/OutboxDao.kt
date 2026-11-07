@@ -61,8 +61,25 @@ interface OutboxDao {
     @Query("UPDATE outbox_items SET attempts = :attempts, nextAttemptAt = :nextAttemptAt, lastError = :lastError WHERE id = :id")
     suspend fun recordFailure(id: Long, attempts: Int, nextAttemptAt: Long, lastError: String)
 
+    @Query("SELECT * FROM outbox_items WHERE id = :id")
+    suspend fun selectById(id: Long): OutboxItemEntity?
+
     @Query("DELETE FROM outbox_items WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    /**
+     * Deletes a row only while it still carries the payload the drain
+     * submitted; returns the number of deleted rows (0 when a concurrent
+     * enqueue replaced the payload).
+     */
+    @Query(
+        """
+        DELETE FROM outbox_items
+        WHERE id = :id
+        AND ((payloadJson IS NULL AND :payloadJson IS NULL) OR payloadJson = :payloadJson)
+        """,
+    )
+    suspend fun deleteByIdAndPayload(id: Long, payloadJson: String?): Int
 
     @Query("DELETE FROM outbox_items")
     suspend fun deleteAll()

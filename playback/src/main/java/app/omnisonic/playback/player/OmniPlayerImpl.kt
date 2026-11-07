@@ -477,10 +477,12 @@ class OmniPlayerImpl(
                 settings.mono,
                 settings.preampDb,
                 settings.shortFadeMs,
-            ) { cacheFirst, mono, preampDb, fadeMs ->
-                SettingsSnapshot(cacheFirst, mono, preampDb, fadeMs)
+                settings.cacheSizeBytes,
+            ) { cacheFirst, mono, preampDb, fadeMs, cacheSizeBytes ->
+                SettingsSnapshot(cacheFirst, mono, preampDb, fadeMs, cacheSizeBytes)
             }.collect { snapshot ->
                 cacheManager.defaultCacheFirst = snapshot.cacheFirst
+                cacheManager.applyMaxBytes(snapshot.cacheSizeBytes)
                 monoEnabled = snapshot.mono
                 userPreampDb = snapshot.preampDb
                 shortFadeMs = snapshot.shortFadeMs
@@ -654,5 +656,6 @@ class OmniPlayerImpl(
         val mono: Boolean,
         val preampDb: Float,
         val shortFadeMs: Long,
+        val cacheSizeBytes: Long,
     )
 }

@@ -175,6 +175,34 @@ class ProviderConfigMapperTest {
     }
 
     @Test
+    fun `read timeout option is mapped and clamped to safe bounds`() {
+        val configured = encode(OptionsJson(readTimeoutMs = 45_000))
+        assertEquals(
+            45_000,
+            mapper.from(row(optionsJson = configured)).connectionOrNull()!!.readTimeoutMs,
+        )
+
+        val tooSmall = encode(OptionsJson(readTimeoutMs = 1))
+        assertEquals(
+            ProviderConnection.MIN_READ_TIMEOUT_MS,
+            mapper.from(row(optionsJson = tooSmall)).connectionOrNull()!!.readTimeoutMs,
+        )
+
+        val tooLarge = encode(OptionsJson(readTimeoutMs = 999_999))
+        assertEquals(
+            ProviderConnection.MAX_READ_TIMEOUT_MS,
+            mapper.from(row(optionsJson = tooLarge)).connectionOrNull()!!.readTimeoutMs,
+        )
+    }
+
+    @Test
+    fun `missing read timeout option keeps the default`() {
+        val connection = mapper.from(row()).connectionOrNull()!!
+
+        assertEquals(ProviderConnection.DEFAULT_READ_TIMEOUT_MS, connection.readTimeoutMs)
+    }
+
+    @Test
     fun `malformed option json silently ignores`() {
         val connection = mapper.from(row(optionsJson = "not json", customHeadersJson = "not json")).connectionOrNull()!!
 

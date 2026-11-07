@@ -123,7 +123,7 @@ abstract class DatabaseTestBase {
         title: String = "song-$id",
         playCount: Int = 0,
         lastPlayed: Long? = null,
-        resumePointMs: Long? = null,
+        resumeMs: Long? = null,
         filePath: String? = null,
     ): SongEntity {
         val song = SongEntity(
@@ -134,7 +134,7 @@ abstract class DatabaseTestBase {
             title = title,
             playCount = playCount,
             lastPlayed = lastPlayed,
-            resumePointMs = resumePointMs,
+            resumeMs = resumeMs,
             filePath = filePath,
             updatedAt = 1_000,
         )
@@ -181,7 +181,7 @@ abstract class DatabaseTestBase {
             id = 0,
             playlistId = playlistId,
             providerId = providerId,
-            entryOrder = 0,
+            position = 0,
             externalId = "e-1",
             title = "Entry",
             addedAt = 1_000,
@@ -219,8 +219,8 @@ abstract class DatabaseTestBase {
             title = "Intro",
             positionMs = 0,
             endPositionMs = 60_000,
-            sourceKind = "embedded",
-            sourcePriority = 0,
+            origin = "embedded",
+            rank = 0,
             updatedAt = 1_000,
         )
         chapterDao.upsert(chapter)

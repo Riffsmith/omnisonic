@@ -79,6 +79,12 @@ class ProviderConfigMapper(
                 customHeaders = headers.filter { it.key.isNotBlank() },
                 serverSoftwareHint = options.serverSoftwareHint,
                 backdateScrobbles = decodeBackdateMode(options.backdateScrobbles),
+                readTimeoutMs = options.readTimeoutMs
+                    ?.coerceIn(
+                        ProviderConnection.MIN_READ_TIMEOUT_MS,
+                        ProviderConnection.MAX_READ_TIMEOUT_MS,
+                    )
+                    ?: ProviderConnection.DEFAULT_READ_TIMEOUT_MS,
                 clientCertificate = clientCertificate,
                 trustedServerCertificates = trustedServerCertificates,
             ),
@@ -211,4 +217,5 @@ data class AuthParametersJson(val authMode: String? = null)
 data class OptionsJson(
     val serverSoftwareHint: String? = null,
     val backdateScrobbles: String? = null,
+    val readTimeoutMs: Int? = null,
 )

@@ -2,6 +2,7 @@ package app.omnisonic.core.data.sync
 
 import androidx.room.withTransaction
 import app.omnisonic.core.data.db.OmnisonicDatabase
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import app.omnisonic.core.data.db.entity.AlbumArtistEntity
 import app.omnisonic.core.data.db.entity.AlbumEntity
@@ -15,11 +16,13 @@ import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.core.data.db.entity.SyncStatusEntity
 import app.omnisonic.provider.api.OutboxActions
 import app.omnisonic.core.data.json.JsonText
+import app.omnisonic.core.model.runCatchingCancellable
 import app.omnisonic.core.model.text.TextNormalizer
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.AllowAllRunGate
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.ProviderAlbumRequest
+import app.omnisonic.provider.api.ProviderAuthException
 import app.omnisonic.provider.api.ProviderRunGate
 import app.omnisonic.provider.api.ProviderStatus
 import app.omnisonic.provider.api.ProviderTraits
@@ -32,12 +35,18 @@ import app.omnisonic.provider.api.ProviderTraits
  * batch) commits in its own short transaction so concurrent writers never wait
  * for the whole walk.
  *
- * Full sync pages getAlbumList2 alphabetically; diff sync pages newest-first
- * and stops once a whole page predates the last-sync watermark. After a FULL
- * sync only, rows the server no longer reports are pruned: untouched songs are
- * deleted, songs with play history or pending outbox rows are tombstoned with
+ * Every run mints a unique id (`lastSeenSyncId`, D-10) and stamps each row it
+ * writes; full-sync pruning compares stamps instead of passing the seen-id
+ * lists through SQL (Android 10's SQLite caps statements at 999 variables).
+ * After a FULL sync only, rows the server no longer reports are pruned:
+ * untouched songs are deleted, songs with play history, pending outbox rows or
+ * D-9 local state (rating, resume point, clip) are tombstoned with
  * missingOnServer=true, albums die with their last song, artists die with
- * their last link, and vanished playlists are removed outright.
+ * their last link, and vanished playlists are removed outright. Pruning only
+ * runs behind the FIX-02 safety guards: an empty or incomplete server
+ * response — nothing reported, less than half the known songs seen, or a
+ * listed album whose fetch failed — skips pruning and is reported in the
+ * outcome message instead of destroying the library.
  */
 class SubsonicLibrarySyncer(
     private val database: OmnisonicDatabase,
@@ -46,7 +55,24 @@ class SubsonicLibrarySyncer(
     private val traits: ProviderTraits = ProviderTraits(),
     private val runGate: ProviderRunGate = AllowAllRunGate,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    /** Reports a typed server authentication rejection to the status tracker. */
+    private val onAuthFailed: suspend (Long) -> Unit = {},
+    /** Reports a completed provider call so a stale auth failure can clear. */
+    private val onAuthSucceeded: suspend (Long) -> Unit = {},
 ) {
+
+    private val runSequence = AtomicLong(0)
+
+    /**
+     * What the server reported during one library walk. Listed album ids are
+     * recorded before their details are fetched, so a listed album whose
+     * fetch failed still proves the server responded.
+     */
+    private class WalkSeen {
+        val songIds = mutableSetOf<String>()
+        val albumIds = mutableSetOf<String>()
+        var albumFetchFailed = false
+    }
 
     data class Outcome(
         val albumsProcessed: Int,
@@ -73,33 +99,41 @@ class SubsonicLibrarySyncer(
         }
         return try {
             var albumsProcessed = 0
-            val seenSongExternalIds = mutableSetOf<String>()
-            val seenAlbumExternalIds = mutableSetOf<String>()
-            val seenArtistExternalIds = mutableSetOf<String>()
-            val seenPlaylistExternalIds = mutableSetOf<String>()
-
+            val runId = nextRunId()
+            val knownSongCount = if (full) database.songDao().selectCountByProvider(providerId) else 0
+            val seen = WalkSeen()
             val watermark = if (full) null else diffWatermark()
-            syncArtists(seenArtistExternalIds)
-            albumsProcessed = syncAlbumsAndSongs(watermark, seenAlbumExternalIds, seenSongExternalIds)
+            syncArtists(runId)
+            albumsProcessed = syncAlbumsAndSongs(watermark, runId, seen)
             syncGenres()
             syncRadios()
-            syncPlaylists(seenPlaylistExternalIds)
+            syncPlaylists(runId)
             syncBookmarks()
+            var pruneSkippedReason: String? = null
             if (full) {
-                prune(
-                    seenSongExternalIds,
-                    seenAlbumExternalIds,
-                    seenArtistExternalIds,
-                    seenPlaylistExternalIds,
-                )
+                pruneSkippedReason = prune(knownSongCount, seen, runId)
             }
+            val message = pruneSkippedReason?.let { "prune skipped: $it" }
             database.withTransaction {
-                recordStatus(full, started, albumsProcessed, resultOk = true, message = null)
+                recordStatus(full, started, albumsProcessed, resultOk = true, message = message)
             }
-            Outcome(albumsProcessed, nowMs() - started, "ok")
+            runCatchingCancellable { onAuthSucceeded(providerId) }
+            Outcome(albumsProcessed, nowMs() - started, message ?: "ok")
         } catch (cancellation: CancellationException) {
             // Cancellation is not a sync failure: no status row is recorded.
             throw cancellation
+        } catch (authFailure: ProviderAuthException) {
+            database.withTransaction {
+                recordStatus(
+                    full,
+                    started,
+                    0,
+                    resultOk = false,
+                    message = authFailure.message ?: authFailure.javaClass.simpleName,
+                )
+            }
+            runCatchingCancellable { onAuthFailed(providerId) }
+            throw authFailure
         } catch (failure: Exception) {
             database.withTransaction {
                 recordStatus(
@@ -119,10 +153,26 @@ class SubsonicLibrarySyncer(
         return listOfNotNull(status.lastDiffSyncAt, status.lastFullSyncAt).minOrNull()
     }
 
-    private suspend fun syncArtists(seenArtists: MutableSet<String>) {
+    /**
+     * A run id must never repeat for stamps that may still exist in the
+     * database, otherwise an unseen row could pass as seen (`!= :runId`).
+     * The floor of every stamp this provider has written keeps ids above any
+     * stored value across process restarts; the atomic sequence keeps
+     * concurrent or repeated runs of this instance distinct.
+     */
+    private suspend fun nextRunId(): Long {
+        val floor = maxOf(
+            database.songDao().selectMaxLastSeenSyncId(providerId) ?: 0L,
+            database.albumDao().selectMaxLastSeenSyncId(providerId) ?: 0L,
+            database.artistDao().selectMaxLastSeenSyncId(providerId) ?: 0L,
+            database.playlistDao().selectMaxLastSeenSyncId(providerId) ?: 0L,
+        )
+        return runSequence.updateAndGet { previous -> maxOf(previous, floor) + 1 }
+    }
+
+    private suspend fun syncArtists(runId: Long) {
         val dao = database.artistDao()
         val artists = provider.listArtists()
-        seenArtists += artists.map { it.externalId }
         val now = nowMs()
         database.withTransaction {
             artists.forEach { artist ->
@@ -132,7 +182,7 @@ class SubsonicLibrarySyncer(
                         providerId = providerId,
                         externalId = artist.externalId,
                         title = artist.title,
-                        titleRoman = TextNormalizer.romanize(artist.title),
+                        latinTitle = TextNormalizer.romanize(artist.title),
                         sortTitle = TextNormalizer.sortKey(artist.title),
                         imagePath = artist.imagePath ?: existing?.imagePath,
                         description = existing?.description,
@@ -146,6 +196,7 @@ class SubsonicLibrarySyncer(
                         albumCount = artist.albumCount ?: existing?.albumCount ?: 0,
                         updatedAt = now,
                     ),
+                    lastSeenSyncId = runId,
                 )
             }
         }
@@ -153,8 +204,8 @@ class SubsonicLibrarySyncer(
 
     private suspend fun syncAlbumsAndSongs(
         watermarkMs: Long?,
-        seenAlbums: MutableSet<String>,
-        seenSongs: MutableSet<String>,
+        runId: Long,
+        seen: WalkSeen,
     ): Int {
         var processed = 0
         var offset = 0
@@ -177,7 +228,7 @@ class SubsonicLibrarySyncer(
                 }
             }
             candidates.forEach { listed ->
-                if (syncAlbumWithSongs(listed.externalId, seenAlbums, seenSongs)) processed += 1
+                if (syncAlbumWithSongs(listed.externalId, runId, seen)) processed += 1
             }
             if (watermarkMs != null && page.all { album ->
                     val created = album.createdAtMs
@@ -194,12 +245,15 @@ class SubsonicLibrarySyncer(
 
     private suspend fun syncAlbumWithSongs(
         albumExternalId: String,
-        seenAlbums: MutableSet<String>,
-        seenSongs: MutableSet<String>,
+        runId: Long,
+        seen: WalkSeen,
     ): Boolean {
-        val details = provider.getAlbum(albumExternalId) ?: return false
-        seenAlbums += details.album.externalId
-        seenSongs += details.songs.map { it.externalId }
+        seen.albumIds += albumExternalId
+        val details = provider.getAlbum(albumExternalId)
+        if (details == null) {
+            seen.albumFetchFailed = true
+            return false
+        }
         val now = nowMs()
         database.withTransaction {
             val albumDao = database.albumDao()
@@ -212,7 +266,7 @@ class SubsonicLibrarySyncer(
                     providerId = providerId,
                     externalId = details.album.externalId,
                     title = details.album.title,
-                    titleRoman = TextNormalizer.romanize(details.album.title),
+                    latinTitle = TextNormalizer.romanize(details.album.title),
                     sortTitle = TextNormalizer.sortKey(details.album.title),
                     displayArtist = details.album.artistName ?: existingAlbum?.displayArtist,
                     year = details.album.year ?: existingAlbum?.year,
@@ -231,12 +285,13 @@ class SubsonicLibrarySyncer(
                     isFavorite = existingAlbum?.isFavorite ?: false,
                     favoriteAt = existingAlbum?.favoriteAt,
                     serverRating = existingAlbum?.serverRating,
-                    resumeFilePath = existingAlbum?.resumeFilePath,
+                    resumeTrackPath = existingAlbum?.resumeTrackPath,
                     isAudiobook = existingAlbum?.isAudiobook ?: false,
                     description = existingAlbum?.description,
-                    discTitlesJson = existingAlbum?.discTitlesJson,
+                    discNamesJson = existingAlbum?.discNamesJson,
                     updatedAt = now,
                 ),
+                lastSeenSyncId = runId,
             )
 
             details.album.artistExternalId?.let { artistExternalId ->
@@ -248,6 +303,7 @@ class SubsonicLibrarySyncer(
             }
 
             details.songs.forEach { song ->
+                seen.songIds += song.externalId
                 val existing = songDao.selectByProviderAndExternal(providerId, song.externalId)
                 val songId = songDao.upsertServerFields(
                     SongEntity(
@@ -255,7 +311,7 @@ class SubsonicLibrarySyncer(
                         externalId = song.externalId,
                         albumId = albumId,
                         title = song.title,
-                        titleRoman = TextNormalizer.romanize(song.title),
+                        latinTitle = TextNormalizer.romanize(song.title),
                         sortTitle = TextNormalizer.sortKey(song.title),
                         displayArtist = song.artistName ?: existing?.displayArtist,
                         filePath = song.filePath ?: existing?.filePath,
@@ -273,14 +329,14 @@ class SubsonicLibrarySyncer(
                         isFavorite = existing?.isFavorite ?: false,
                         favoriteAt = existing?.favoriteAt,
                         serverRating = existing?.serverRating,
-                        resumePointMs = existing?.resumePointMs,
+                        resumeMs = existing?.resumeMs,
                         resumeUpdatedAt = existing?.resumeUpdatedAt,
                         missingOnServer = existing?.missingOnServer ?: false,
                         replayGainTrack = existing?.replayGainTrack,
                         replayGainAlbum = existing?.replayGainAlbum,
                         replayGainType = existing?.replayGainType,
-                        clipStartMs = existing?.clipStartMs,
-                        clipEndMs = existing?.clipEndMs,
+                        windowStartMs = existing?.windowStartMs,
+                        windowEndMs = existing?.windowEndMs,
                         isAudiobook = existing?.isAudiobook ?: false,
                         codec = song.codec ?: existing?.codec,
                         bitrateKbps = song.bitrateKbps ?: existing?.bitrateKbps,
@@ -289,6 +345,7 @@ class SubsonicLibrarySyncer(
                         channelCount = existing?.channelCount,
                         updatedAt = now,
                     ),
+                    lastSeenSyncId = runId,
                 )
                 song.artistExternalId?.let { artistExternalId ->
                     artistDao.selectByProviderAndExternal(providerId, artistExternalId)?.let { artist ->
@@ -349,12 +406,11 @@ class SubsonicLibrarySyncer(
         }
     }
 
-    private suspend fun syncPlaylists(seenPlaylists: MutableSet<String>) {
+    private suspend fun syncPlaylists(runId: Long) {
         val playlistDao = database.playlistDao()
         val entryDao = database.playlistEntryDao()
         val songDao = database.songDao()
         val summaries = provider.listPlaylists()
-        seenPlaylists += summaries.map { it.externalId }
         val now = nowMs()
         database.withTransaction {
             summaries.forEach { summary ->
@@ -375,6 +431,7 @@ class SubsonicLibrarySyncer(
                         lastModified = summary.changedAtMs ?: existing?.lastModified,
                         lastPlayed = existing?.lastPlayed,
                         hidden = existing?.hidden ?: false,
+                        lastSeenSyncId = runId,
                         updatedAt = now,
                     ),
                 )
@@ -386,7 +443,7 @@ class SubsonicLibrarySyncer(
                         PlaylistEntryEntity(
                             playlistId = playlistId,
                             providerId = providerId,
-                            entryOrder = order,
+                            position = order,
                             externalId = entry.externalId,
                             songId = songDao.selectByProviderAndExternal(providerId, entry.externalId)?.id,
                             title = entry.title,
@@ -422,29 +479,50 @@ class SubsonicLibrarySyncer(
         }
     }
 
-    private suspend fun prune(
-        seenSongs: Set<String>,
-        seenAlbums: Set<String>,
-        seenArtists: Set<String>,
-        seenPlaylists: Set<String>,
-    ) {
+    /**
+     * Full-sync mark-and-sweep behind the FIX-02 safety guards. Returns the
+     * skip reason when pruning did not run, null when it did.
+     *
+     * Guards (in order): the walk must have reported something at all; the
+     * songs it reported must reach at least half of the count recorded before
+     * the walk (a smaller response looks like a broken or partial listing,
+     * not a genuine shrink); and no listed album may have failed to load, or
+     * the songs hidden behind that failure would be treated as vanished. The
+     * half-guard counts songs only, while the emptiness guard accepts any
+     * reported id (songs and listed albums), so an all-failed walk against a
+     * responding server is caught by the fetch-failure guard with an accurate
+     * reason.
+     */
+    private suspend fun prune(knownSongCount: Int, seen: WalkSeen, runId: Long): String? {
+        if (seen.songIds.isEmpty() && seen.albumIds.isEmpty()) {
+            return "server reported no albums or songs"
+        }
+        if (seen.songIds.size * 2 < knownSongCount) {
+            return "server reported ${seen.songIds.size} of $knownSongCount known songs"
+        }
+        if (seen.albumFetchFailed) {
+            return "album details unavailable for a listed album"
+        }
         database.withTransaction {
             val songDao = database.songDao()
-            songDao.tombstoneUnseen(providerId, seenSongs.toList())
-            val deletableSongIds = songDao.selectUnseenDeletableIds(providerId, seenSongs.toList())
+            songDao.tombstoneUnseen(providerId, runId)
+            val deletableSongIds = songDao.selectUnseenDeletableIds(providerId, runId)
+            database.chapterDao().deleteBySongIds(deletableSongIds)
             songDao.deleteByIds(deletableSongIds)
             database.songArtistDao().deleteBySongIds(deletableSongIds)
 
             val albumDao = database.albumDao()
-            val deletableAlbumIds = albumDao.selectUnseenWithoutSongsIds(providerId, seenAlbums.toList())
+            val deletableAlbumIds = albumDao.selectUnseenWithoutSongsIds(providerId, runId)
+            database.chapterDao().deleteByAlbumIds(deletableAlbumIds)
             database.albumArtistDao().deleteByAlbumIds(deletableAlbumIds)
             albumDao.deleteByIds(deletableAlbumIds)
 
-            database.playlistDao().deleteUnseen(providerId, seenPlaylists.toList())
+            database.playlistDao().deleteUnseen(providerId, runId)
             database.playlistEntryDao().deleteOrphanedEntries()
 
-            database.artistDao().deleteUnseenWithoutLinks(providerId, seenArtists.toList())
+            database.artistDao().deleteUnseenWithoutLinks(providerId, runId)
         }
+        return null
     }
 
     private suspend fun recordStatus(full: Boolean, startedAt: Long, count: Int, resultOk: Boolean, message: String?) {

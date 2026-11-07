@@ -24,7 +24,7 @@ class AggregateRecomputeTest : DatabaseTestBase() {
             albumId = album.id,
             playCount = 10,
             lastPlayed = 5_000,
-            resumePointMs = 120,
+            resumeMs = 120,
             filePath = "/a/one.m4a",
         )
         newSong(
@@ -33,7 +33,7 @@ class AggregateRecomputeTest : DatabaseTestBase() {
             albumId = album.id,
             playCount = 20,
             lastPlayed = 100,
-            resumePointMs = 800,
+            resumeMs = 800,
             filePath = "/a/two.m4a",
         )
         linkSongArtist(providerId = providerId, artistId = 99, songId = song1.id, role = "")
@@ -49,7 +49,7 @@ class AggregateRecomputeTest : DatabaseTestBase() {
         val album = requireNotNull(albumDao.selectById(albumId))
         assertThat(album.playCount).isEqualTo(30)
         assertThat(album.lastPlayed).isEqualTo(5_000)
-        assertThat(album.resumeFilePath).isEqualTo("/a/one.m4a")
+        assertThat(album.resumeTrackPath).isEqualTo("/a/one.m4a")
     }
 
     @Test
@@ -95,7 +95,7 @@ class AggregateRecomputeTest : DatabaseTestBase() {
         val album = requireNotNull(albumDao.selectById(albumId))
         assertThat(album.playCount).isEqualTo(30)
         assertThat(album.lastPlayed).isEqualTo(5_000)
-        assertThat(album.resumeFilePath).isEqualTo("/a/one.m4a")
+        assertThat(album.resumeTrackPath).isEqualTo("/a/one.m4a")
         assertThat(artistDao.selectById(primary)!!.playCount).isEqualTo(10)
         assertThat(artistDao.selectById(supporting)!!.playCount).isEqualTo(10)
     }
@@ -110,7 +110,7 @@ class AggregateRecomputeTest : DatabaseTestBase() {
         val album = requireNotNull(albumDao.selectById(emptyAlbum.id))
         assertThat(album.playCount).isEqualTo(0)
         assertThat(album.lastPlayed).isNull()
-        assertThat(album.resumeFilePath).isNull()
+        assertThat(album.resumeTrackPath).isNull()
     }
 
     @Test
@@ -157,6 +157,6 @@ class AggregateRecomputeTest : DatabaseTestBase() {
         val album = requireNotNull(albumDao.selectById(albumId))
         assertThat(album.playCount).isEqualTo(0)
         assertThat(album.lastPlayed).isNull()
-        assertThat(album.resumeFilePath).isNull()
+        assertThat(album.resumeTrackPath).isNull()
     }
 }

@@ -17,8 +17,15 @@ import okio.source
 class HttpClientFactory(
     private val logger: OmnisonicLogger,
     private val decoder: ResponseDecoder = ZstdGzipResponseDecoder,
+    private val zstdProbe: ZstdProbe = ZstdSupport,
 ) {
 
+    /**
+     * A custom TLS context is installed when the connection carries a client
+     * keystore, explicit trust anchors, or both; otherwise OkHttp keeps the
+     * platform defaults. Anchors replace — never augment — platform trust, so
+     * there is no trust-all fallback in any configuration.
+     */
     fun create(spec: ConnectionSpec): OkHttpClient {
         val readTimeoutMs = if (spec.profile == ClientProfile.MEDIA) {
             maxOf(spec.readTimeoutMs, ConnectionSpec.MEDIA_READ_TIMEOUT_MS)
@@ -43,8 +50,11 @@ class HttpClientFactory(
             }
         }
 
-        spec.clientKeyStore?.let { clientKeyStore ->
-            val keyManagers = TlsContexts.keyManagers(clientKeyStore, spec.clientKeyStorePassword)
+        // Null KeyManagers mean "no client certificate" (mTLS disabled); the
+        // SSLContext still installs the custom trust manager so explicit trust
+        // anchors apply without requiring mTLS.
+        val keyManagers = spec.clientKeyStore?.let { TlsContexts.keyManagers(it, spec.clientKeyStorePassword) }
+        if (keyManagers != null || spec.trustedCertificates.isNotEmpty()) {
             val trustManager = TlsContexts.trustManager(spec.trustedCertificates)
             val sslContext = SSLContext.getInstance("TLS").apply { init(keyManagers, arrayOf(trustManager), SecureRandom()) }
             builder.sslSocketFactory(sslContext.socketFactory, trustManager)
@@ -67,8 +77,21 @@ class HttpClientFactory(
 
     private fun acceptEncodings(): Interceptor =
         Interceptor { chain ->
-            chain.proceed(chain.request().newBuilder().header(ACCEPT_ENCODING_HEADER, ACCEPTED_ENCODINGS).build())
+            chain.proceed(chain.request().newBuilder().header(ACCEPT_ENCODING_HEADER, acceptedEncodings()).build())
         }
+
+    private fun acceptedEncodings(): String =
+        if (zstdAvailable) ACCEPTED_ENCODINGS else GZIP_ONLY_ENCODINGS
+
+    private val zstdAvailable: Boolean by lazy {
+        val available = try {
+            zstdProbe.isAvailable()
+        } catch (throwable: Throwable) {
+            false
+        }
+        if (!available) logger.warn(TAG, "zstd native support unavailable; advertising gzip only")
+        available
+    }
 
     private fun suppressTransparentEncoding(): Interceptor =
         Interceptor { chain ->
@@ -112,5 +135,6 @@ class HttpClientFactory(
         private const val TAG = "HttpClient"
         private const val ACCEPT_ENCODING_HEADER = "Accept-Encoding"
         private const val ACCEPTED_ENCODINGS = "zstd, gzip"
+        private const val GZIP_ONLY_ENCODINGS = "gzip"
     }
 }

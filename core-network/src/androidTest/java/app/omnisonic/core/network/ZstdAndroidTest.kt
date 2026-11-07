@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.luben.zstd.Zstd
 import com.github.luben.zstd.ZstdInputStream
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -18,5 +19,10 @@ class ZstdAndroidTest {
         val decoded = ZstdInputStream(compressed.inputStream()).use { it.readBytes() }
 
         assertEquals(payload.toList(), decoded.toList())
+    }
+
+    @Test
+    fun deviceProbeDetectsNativeZstdSupport() {
+        assertTrue(ZstdSupport.available)
     }
 }

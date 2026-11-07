@@ -23,6 +23,12 @@ interface ProviderDao {
     @Query("DELETE FROM providers WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    /**
+     * Persists the learned failover block and nothing else: `updatedAt` stays
+     * untouched because [app.omnisonic.core.data.providers.ProviderClientRegistry]
+     * keys its cache on it, and a preference change must not rebuild the
+     * provider or its clients.
+     */
     @Query("UPDATE providers SET lastWorkingBlock = :block WHERE id = :id")
     suspend fun setLastWorkingBlock(id: Long, block: Int?)
 

@@ -10,6 +10,7 @@ import app.omnisonic.core.data.db.entity.ProviderEntity
 import app.omnisonic.core.data.json.OmnisonicJson
 import app.omnisonic.core.data.security.AesGcmCredentialCodec
 import app.omnisonic.core.data.security.SecretKeySource
+import app.omnisonic.core.data.silentTestLogger
 import app.omnisonic.provider.api.ProviderRegistry
 import app.omnisonic.provider.api.ProviderTraits
 import app.omnisonic.provider.navidrome.SubsonicProviderFactory
@@ -81,7 +82,7 @@ class LocalProviderPersistenceTest {
     fun `device row loads the real local provider end to end from persisted storage`() = runTest {
         withDatabase { db ->
             db.providerDao().upsert(row("DEVICE"))
-            val registry = ProviderClientRegistry(db, providerRegistry(), mapper)
+            val registry = ProviderClientRegistry(db, providerRegistry(), mapper, silentTestLogger)
 
             val provider = registry.providerFor(7L)
 
@@ -97,7 +98,7 @@ class LocalProviderPersistenceTest {
     fun `virtual row loads the real local provider end to end from persisted storage`() = runTest {
         withDatabase { db ->
             db.providerDao().upsert(row("VIRTUAL"))
-            val registry = ProviderClientRegistry(db, providerRegistry(), mapper)
+            val registry = ProviderClientRegistry(db, providerRegistry(), mapper, silentTestLogger)
 
             val provider = registry.providerFor(7L)
 
@@ -132,7 +133,7 @@ class LocalProviderPersistenceTest {
             db.providerDao().upsert(row("REMOTE_SERVER", api = "subsonic", host = " ", port = 4_433))
 
             assertTrue(mapper.from(db.providerDao().selectById(7L)!!) is ProviderLoadResult.Unloadable)
-            val registry = ProviderClientRegistry(db, providerRegistry(), mapper)
+            val registry = ProviderClientRegistry(db, providerRegistry(), mapper, silentTestLogger)
             assertThat(registry.providerFor(7L)).isNull()
         }
     }

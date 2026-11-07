@@ -4,11 +4,12 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import okhttp3.OkHttpClient
 
 private class TagProviderFactory(private val tag: String) : MediaProviderFactory {
     override fun apiType(): String = tag
 
-    override fun create(connection: ProviderConnection): MediaProvider = RecordingProvider()
+    override fun create(connection: ProviderConnection, apiClient: OkHttpClient): MediaProvider = RecordingProvider()
 }
 
 class ProviderRegistryTest {
@@ -46,7 +47,7 @@ class ProviderRegistryTest {
             endpoint = ProviderEndpoint.Remote(ConnectionBlock("https", "example.test", 443)),
         )
 
-        val provider = registry.create("subsonic", connection)
+        val provider = registry.create("subsonic", connection, OkHttpClient())
 
         assertTrue(provider is MediaProvider)
     }
@@ -63,7 +64,7 @@ class ProviderRegistryTest {
                 reportsUserData = false,
             )
 
-            override fun create(connection: ProviderConnection): MediaProvider = RecordingProvider()
+            override fun create(connection: ProviderConnection, apiClient: OkHttpClient): MediaProvider = RecordingProvider()
         }
         val registry = ProviderRegistry(listOf(TagProviderFactory("subsonic"), narrow))
 

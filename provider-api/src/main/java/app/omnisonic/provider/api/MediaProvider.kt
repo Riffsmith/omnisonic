@@ -1,5 +1,7 @@
 package app.omnisonic.provider.api
 
+import okhttp3.OkHttpClient
+
 /**
  * Read/writer surface per provider connection. Implementations map these calls
  * onto their wire protocol; all methods are safe to call from coroutines.
@@ -28,7 +30,9 @@ interface MediaProvider {
 
     /**
      * Reports the given play timestamps to the server (one submission per
-     * timestamp); returns how many submissions the server accepted.
+     * timestamp, in order). The result is the length of the accepted prefix:
+     * submission stops at the first rejection, so later timestamps are not
+     * sent and callers persist `timestamps.drop(result)` as remaining work.
      */
     suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int
 
@@ -57,7 +61,14 @@ interface MediaProviderFactory {
      */
     fun traits(): ProviderTraits = ProviderTraits()
 
-    fun create(connection: ProviderConnection): MediaProvider
+    /**
+     * Builds the provider for [connection]. [apiClient] is the registry-owned
+     * API-profile client built from this connection's headers, timeouts, mTLS
+     * identity and trust anchors; network-calling providers must send every
+     * request through this exact instance so library, outbox, engine and image
+     * traffic share one client and connection pool per provider.
+     */
+    fun create(connection: ProviderConnection, apiClient: OkHttpClient): MediaProvider
 }
 
 class ProviderRegistry(factories: List<MediaProviderFactory>) {
@@ -68,6 +79,6 @@ class ProviderRegistry(factories: List<MediaProviderFactory>) {
     /** Traits for an api without building a provider; unknown apis use the Subsonic-family defaults. */
     fun traitsFor(apiType: String): ProviderTraits = factoryFor(apiType)?.traits() ?: ProviderTraits()
 
-    fun create(apiType: String, connection: ProviderConnection): MediaProvider? =
-        factoryFor(apiType)?.create(connection)
+    fun create(apiType: String, connection: ProviderConnection, apiClient: OkHttpClient): MediaProvider? =
+        factoryFor(apiType)?.create(connection, apiClient)
 }

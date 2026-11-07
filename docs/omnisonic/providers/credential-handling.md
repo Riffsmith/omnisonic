@@ -9,7 +9,7 @@ passed to sinks; mapper substituting empty credentials for unreadable blobs).
 
 Confidence: all behaviours [VERIFIED] by the tests listed below.
 
-Date: 2026-11-03
+Date: 2026-11-06
 
 Links: `core-model` `OmnisonicLogger`/`CredentialRedactor`; `core-data`
 `ProviderConfigMapper` (`ProviderLoadResult`), `ProviderClientRegistry`,
@@ -34,6 +34,14 @@ Links: `core-model` `OmnisonicLogger`/`CredentialRedactor`; `core-data`
 - `ProviderStatusTracker` shows `AUTH_FAILED` ("re-enter password") for
   marked providers until cleared. [VERIFIED, pre-existing test
   `unreadableCredentialsMarkAuthFailedUntilCleared`]
+- The same `AUTH_FAILED` marker is set for a server authentication rejection
+  reported as `ProviderAuthException` (Subsonic codes 40–44, HTTP 401/403).
+  It clears when the provider row is edited (`updatedAt` changes) or when a
+  later provider request succeeds (the Subsonic client reports success to the
+  factory, which clears the tracker). Network outages and server errors never
+  set it. [VERIFIED by `ProviderStatusTrackerTest`, `SubsonicClientTest`,
+  `SubsonicLibrarySyncerTest`, `OutboxDrainerTest`, and
+  `OutboxDrainEndToEndTest`]
 
 ## Sinks receive scrubbed throwables
 
@@ -51,6 +59,11 @@ Links: `core-model` `OmnisonicLogger`/`CredentialRedactor`; `core-data`
   Log.d/i/w/e so release logs are not lost to println. It only forwards
   already-redacted content. [VERIFIED by `AndroidLogSinkTest` under
   Robolectric]
+- `LoggingWiringModule` provides exactly one `LogSink` (`AndroidLogSink`) and
+  one `OmnisonicLogger` as Hilt singletons; `ProviderClientRegistry` and its
+  default API/MEDIA client factories reuse that injected logger (no
+  production `ConsoleLogSink`). [VERIFIED by `ProviderWiringTest` in `:app`,
+  which pins the shared instance and a registry warning reaching `ShadowLog`]
 
 ## Backup exclusions
 

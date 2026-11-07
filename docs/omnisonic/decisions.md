@@ -5,13 +5,13 @@ when, and why. Mechanics and proofs live in the linked topic documents; this fil
 records the choices and their rationale so no decision depends on session history.
 
 How derived: consolidated from the confirmed user decisions recorded during the
-pre-release remediation pass (2026-10-30 – 2026-11-03) and the earlier stack
+pre-release remediation pass (2026-10-30 – 2026-11-07) and the earlier stack
 decisions, cross-checked against the shipped code and tests in this repository.
 
 Confidence: every entry below is [VERIFIED] against the linked topic doc and the
 code it names, unless marked otherwise.
 
-Date: 2026-11-03
+Date: 2026-11-07
 
 Links: `README.md` (documentation map); individual topic docs per section.
 
@@ -24,8 +24,8 @@ Links: `README.md` (documentation map); individual topic docs per section.
 | Kotlin + Jetpack Compose + Media3 (ExoPlayer + MediaLibraryService) + OkHttp + Coil 3 + DataStore + Moshi (codegen) | Version pinning and rationale: `toolchain/build-stack.md` |
 | DI = Hilt | |
 | App id `app.omnisonic`, minSdk 29, target/compileSdk 36 | The SQLite syntax floor that follows from minSdk 29: `storage/sqlite-api29-floor.md` |
-| Room with explicit migrations and cascade triggers instead of foreign keys | No FK pragma and `PRAGMA recursive_triggers` is never enabled; provider deletes cascade via `ProviderCascadeTriggers`. See `storage/schema-v2.md` |
-| Exactly one explicit migration per schema step, never destructive fallback | Schema v2 is the reference implementation: `storage/schema-v2.md` |
+| Room with explicit migrations and cascade triggers instead of foreign keys | No FK pragma and `PRAGMA recursive_triggers` is never enabled; provider deletes cascade via `ProviderCascadeTriggers`. There are no migration steps today: the pre-release database is one clean v1 baseline (D-11). See `storage/schema-v2.md` |
+| Exactly one explicit migration per schema step, never destructive fallback; the pre-release chain was reset to one clean v1 baseline (D-11 option B) | A future change appends one `Migration(1, 2)` and exports `2.json`; an unknown schema fails loudly. `storage/schema-v2.md` |
 | Enum-valued persisted state is stored by NAME (string), never by ordinal | Playback settings and DB enums alike; legacy ordinal reads get a one-release fallback: `playback/settings-persistence.md` |
 
 ## Network and security
@@ -45,8 +45,12 @@ Links: `README.md` (documentation map); individual topic docs per section.
 | Pruning uses tombstones: full sync only; an unseen song is deleted only if `playCount == 0` AND no pending outbox row exists, otherwise kept with `missingOnServer = true` | 2026-10-30 | Local play history and pending scrobbles survive server-side deletions; `isFavorite` alone does not block deletion; albums/artists are pruned when no live children remain; vanished playlists are pruned outright; diff sync never prunes | `storage/library-sync-ownership.md` |
 | Resume merge: a server bookmark applies only when the song has no pending resume outbox row AND the bookmark is newer than the local resume state | 2026-10-31 | Newer local data must not be clobbered by an older server bookmark | `storage/library-sync-ownership.md` |
 | No `REPLACE` upserts anywhere: DAOs resolve the existing row by natural key and use Room `@Upsert` | 2026-11-02 | SQLite `REPLACE` deletes-then-inserts: it orphans join rows on unique-key hits and would fire the provider cascade triggers if `recursive_triggers` were ever on | `storage/library-sync-ownership.md` |
+| Pruning is stamp-based (D-10): each sync run mints a unique run id, stamps every row it writes (`lastSeenSyncId` on songs/albums/artists/playlists), and full-sync pruning selects stale stamps instead of passing seen-id lists through SQL; every remaining parameterized IN list is chunked at 500 behind `...Chunk` DAO methods | 2026-11-05 | Android 10 ships SQLite 3.22, which rejects statements bound with more than 999 variables, so a 5,000-song library's seen-list would crash every prune; per-row stamps move the comparison into SQL with two bound variables regardless of library size | `storage/library-sync-ownership.md` |
+| Full-sync pruning is guarded (FIX-02): the walk records the known song count before it starts and collects a seen-set of reported song ids plus listed album ids (album ids count even when their fetch fails); pruning is skipped with `prune skipped: <reason>` when the seen-set is empty, the reported song count is under half the known count, or a listed album fetch failed. With the guards in place, rows with NULL stamps join the unseen set, and rated, resumed or clipped songs (userRating / resumeMs / windowStartMs / windowEndMs) are tombstoned rather than deleted (D-9, remediation); favorite alone stays non-blocking; chapters of removed songs/albums go with them | 2026-11-05 | An empty or partial server response (broken listing, failed page fetch, per-album error) used to be indistinguishable from a genuine library wipe — the prune deleted or tombstoned everything the walk did not report; the guards trade a conservative no-op for that failure mode. NULL-stamp rows (local materialisations, rows written before the stamp existed) can only be interpreted once a walk is known complete | `storage/library-sync-ownership.md` |
+| Pre-release schema chain replaced by one clean v1 baseline (D-11 option B, FIX-15); pre-release column labels renamed to the durable vocabulary: latinTitle, providerPayloadJson, position, origin, rank, discNamesJson, resumeTrackPath, resumeMs, windowStartMs, windowEndMs, ruleJson | 2026-11-07 | No released database exists, so a migration chain from the discarded pre-release shape protects nothing; one exported baseline removes dead migration code and keeps the schema/harness honest. The baseline includes the FIX-01 `lastSeenSyncId` stamps, `queue_state.positionMs`, and the `play_events_daily` view | `storage/schema-v2.md` |
 | Suspend-call error handling uses `runCatchingCancellable`, which rethrows `CancellationException` | 2026-11-03 | Cancelled coroutines must never be logged as task failures or retried with backoff | `protocol/cancellation-contract.md` |
 | Outbox: one payload class, media types stored as `ProviderMediaType` names, due order `nextAttemptAt, createdAt, id`, per-item action order play_count → favorite → user_rating → resume_point, empty payloads park as FAILED | 2026-11-03 | Moshi ignores renamed fields, so payload drift silently dropped user data; deterministic ordering makes resume clears follow play counts | `storage/outbox-contract.md` |
+| Outbox completion is conditional on the submitted payload, and progress removes only the timestamps the drain submitted | 2026-11-05 | An enqueue that merges into the row while a submission is in flight must survive; deleting by id lost concurrent plays, and rewriting the payload from the stale copy lost newer favorite/rating/resume values | `storage/outbox-contract.md` |
 | Listen history is per-play: `play_events` (one row per play or skip) plus the `play_events_daily` rollup view | 2026-11-01 | Play-level history editing and exact-timestamp submissions (ListenBrainz) are impossible with merged per-day rows; the view keeps day-shaped reads for export/UI | `storage/schema-v2.md`, `storage/sqlite-api29-floor.md` |
 | Queue persistence lives in the main database as snapshot rows (`queue_entries`, `queue_state`) and restores without joining `songs` | 2026-11-01 | A queue entry whose song was never synced must still restore with its metadata; the shuffle order is stored (not regenerated) because the anchor depends on the original order. This supersedes the earlier phase plan of a separate small Room DB inside `:playback` | `storage/schema-v2.md` |
 | Song materialization (`SongRepository.ensureSong`) inserts a minimal row and fills ONLY null snapshot columns | 2026-11-01 | Playback/favorites/playlists work without a prior sync and never downgrade synced metadata or reset local state | `storage/library-sync-ownership.md` |
@@ -75,6 +79,7 @@ Links: `README.md` (documentation map); individual topic docs per section.
 |---|---|---|---|
 | Backdated scrobbles are hint-gated: `backdateScrobbles: auto\|on\|off` per provider; `auto` sends `time` only for known-honoring servers (initially `navidrome`), unknown/absent hints stay OFF | 2026-10-30 | The earlier extension-name-based rule (`formPost`/`transcodeOffset`) had no connection to the scrobble `time` parameter; the hint rule needs no probe round-trip and keeps a per-provider kill switch | `protocol/scrobble-timestamps.md` |
 | One queued play = one timestamp; submissions carry strictly increasing times (+1 ms on ties); the drainer probes capabilities once before its first play-count task | 2026-10-31 | N offline plays must reach the server as N correctly backdated scrobbles, also on a cold start | `protocol/scrobble-timestamps.md` |
+| Play-count payloads keep `playCountDelta == playTimestamps.size`; the drainer submits timestamps chronologically in 100-play chunks and records progress after each accepted chunk | 2026-11-05 | An uncapped delta with a capped timestamp list silently dropped plays; chunk progress bounds a failure to the current chunk while preserving the FIX-03 accepted-prefix contract | `storage/outbox-contract.md`, `protocol/scrobble-timestamps.md` |
 
 ## Toolchain
 

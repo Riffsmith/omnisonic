@@ -4,11 +4,13 @@ import app.omnisonic.core.model.log.ConsoleLogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.network.ConnectionSpec
 import app.omnisonic.core.network.HttpClientFactory
+import app.omnisonic.core.network.ZstdProbe
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.BackdateScrobbles
 import app.omnisonic.provider.api.ConnectionBlock
 import app.omnisonic.provider.api.ProviderAlbumRequest
 import app.omnisonic.provider.api.ProviderAuthMethod
+import app.omnisonic.provider.api.ProviderAuthException
 import app.omnisonic.provider.api.ProviderConnection
 import app.omnisonic.provider.api.ProviderFatalException
 import app.omnisonic.provider.api.ProviderHttpError
@@ -69,10 +71,15 @@ private fun testConnection(
 private fun testClient(
     connection: ProviderConnection,
     onPreferredBlockChange: (Int) -> Unit = {},
+    onAuthSucceeded: suspend (Long) -> Unit = {},
 ): SubsonicClient = SubsonicClient(
     connection,
-    HttpClientFactory(OmnisonicLogger(ConsoleLogSink())).create(ConnectionSpec()),
+    // This module's unit-test JVM has no zstd classes on its runtime classpath,
+    // so the default probe falls back to gzip-only; pin the supported path the
+    // production app ships with.
+    HttpClientFactory(OmnisonicLogger(ConsoleLogSink()), zstdProbe = ZstdProbe { true }).create(ConnectionSpec()),
     onPreferredBlockChange,
+    onAuthSucceeded,
 )
 
 private fun pathDispatcher(responses: Map<String, String>): Dispatcher =
@@ -469,6 +476,160 @@ class SubsonicClientTest {
     }
 
     @Test
+    fun `ping type with no configured hint enables backdated scrobbles`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(
+                mapOf(
+                    "ping" to """
+                    {"status":"ok","version":"1.16.1","type":"navidrome","serverVersion":"0.54.4","openSubsonic":true}
+                    """.trimIndent(),
+                ),
+            )
+            server.start()
+            val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+
+            val capabilities = runBlocking { client.probe() }
+
+            assertThat(capabilities.serverSoftwareHint).isEqualTo("navidrome")
+            assertThat(capabilities.supportsBackdatedScrobbles).isTrue()
+
+            runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000)) }
+            server.takeRequest()
+            server.takeRequest()
+            val scrobble = server.takeRequest().requestUrl!!
+            assertThat(scrobble.queryParameter("time")).isEqualTo("1700000000000")
+        }
+    }
+
+    @Test
+    fun `configured hint enables backdated scrobbles before any probe`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(emptyMap())
+            server.start()
+            val client = testClient(
+                testConnection(
+                    ConnectionBlock("http", server.hostName, server.port),
+                    serverSoftwareHint = "navidrome",
+                ),
+            )
+
+            runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000)) }
+
+            val scrobble = server.takeRequest().requestUrl!!
+            assertThat(scrobble.encodedPath).endsWith("/rest/scrobble.view")
+            assertThat(scrobble.queryParameter("time")).isEqualTo("1700000000000")
+            assertThat(server.requestCount).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `override on forces backdated times without a probe`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(emptyMap())
+            server.start()
+            val client = testClient(
+                testConnection(
+                    ConnectionBlock("http", server.hostName, server.port),
+                    backdateScrobbles = BackdateScrobbles.ON,
+                ),
+            )
+
+            runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000)) }
+
+            val scrobble = server.takeRequest().requestUrl!!
+            assertThat(scrobble.queryParameter("time")).isEqualTo("1700000000000")
+            assertThat(server.requestCount).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `override off omits time even when ping reports navidrome`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(
+                mapOf(
+                    "ping" to """
+                    {"status":"ok","version":"1.16.1","type":"navidrome","serverVersion":"0.54.4","openSubsonic":true}
+                    """.trimIndent(),
+                ),
+            )
+            server.start()
+            val client = testClient(
+                testConnection(
+                    ConnectionBlock("http", server.hostName, server.port),
+                    backdateScrobbles = BackdateScrobbles.OFF,
+                ),
+            )
+
+            val capabilities = runBlocking { client.probe() }
+
+            assertThat(capabilities.serverSoftwareHint).isEqualTo("navidrome")
+            assertThat(capabilities.supportsBackdatedScrobbles).isFalse()
+
+            runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000)) }
+            server.takeRequest()
+            server.takeRequest()
+            val scrobble = server.takeRequest().requestUrl!!
+            assertThat(scrobble.queryParameter("time")).isNull()
+        }
+    }
+
+    @Test
+    fun `probe keeps a configured hint over the ping type`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(
+                mapOf(
+                    "ping" to """
+                    {"status":"ok","version":"1.16.1","type":"gonic","serverVersion":"2.0","openSubsonic":true}
+                    """.trimIndent(),
+                ),
+            )
+            server.start()
+            val client = testClient(
+                testConnection(
+                    ConnectionBlock("http", server.hostName, server.port),
+                    serverSoftwareHint = "navidrome",
+                ),
+            )
+
+            val capabilities = runBlocking { client.probe() }
+
+            assertThat(capabilities.serverSoftwareHint).isEqualTo("navidrome")
+            assertThat(capabilities.supportsBackdatedScrobbles).isTrue()
+        }
+    }
+
+    @Test
+    fun `probe without a ping type leaves the hint unset and backdating off`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(emptyMap())
+            server.start()
+            val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+
+            val capabilities = runBlocking { client.probe() }
+
+            assertThat(capabilities.serverSoftwareHint).isNull()
+            assertThat(capabilities.supportsBackdatedScrobbles).isFalse()
+
+            runBlocking { client.submitPlays("song-1", listOf(1_700_000_000_000)) }
+            server.takeRequest()
+            server.takeRequest()
+            val scrobble = server.takeRequest().requestUrl!!
+            assertThat(scrobble.queryParameter("time")).isNull()
+        }
+    }
+
+    @Test
+    fun `ping envelope decodes the OpenSubsonic server fields`() {
+        val envelope = SubsonicJson.moshi.adapter(SubsonicEnvelope::class.java).fromJson(
+            """{"status":"ok","version":"1.16.1","type":"navidrome","serverVersion":"0.54.4","openSubsonic":true}""",
+        )
+
+        assertThat(envelope?.type).isEqualTo("navidrome")
+        assertThat(envelope?.serverVersion).isEqualTo("0.54.4")
+        assertThat(envelope?.openSubsonic).isTrue()
+    }
+
+    @Test
     fun `scrobble submissions omit the timestamp on unprobed servers`() = runBlocking {
         MockWebServer().use { server ->
             server.dispatcher = pathDispatcher(emptyMap())
@@ -485,6 +646,36 @@ class SubsonicClientTest {
             assertThat(second.queryParameter("time")).isNull()
             assertThat(third.queryParameter("time")).isNull()
             assertThat(first.queryParameter("submission")).isEqualTo("true")
+        }
+    }
+
+    @Test
+    fun `submitPlays stops at the first rejected timestamp`() = runBlocking {
+        MockWebServer().use { server ->
+            var scrobbles = 0
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    if (request.path.orEmpty().contains("scrobble")) {
+                        scrobbles += 1
+                        if (scrobbles == 2) {
+                            return MockResponse()
+                                .setBody("""{"status":"failed","error":{"code":0,"message":"rejected"}}""")
+                        }
+                    }
+                    return MockResponse().setBody("{\"status\":\"ok\"}")
+                }
+            }
+            server.start()
+            val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+
+            val accepted = client.submitPlays(
+                "song-1",
+                listOf(1_700_000_000_000L, 1_700_000_000_001L, 1_700_000_000_002L),
+            )
+
+            assertThat(accepted).isEqualTo(1)
+            assertThat(scrobbles).isEqualTo(2)
+            assertThat(server.requestCount).isEqualTo(2)
         }
     }
 
@@ -526,7 +717,7 @@ class SubsonicClientTest {
     }
 
     @Test
-    fun `failed status maps to a fatal error carrying the subsonic code`() = runBlocking {
+    fun `subsonic auth code 40 maps to a provider auth exception`() = runBlocking {
         MockWebServer().use { server ->
             server.dispatcher = pathDispatcher(
                 mapOf(
@@ -536,12 +727,106 @@ class SubsonicClientTest {
             server.start()
             val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
 
+            val failure = assertThrows(ProviderAuthException::class.java) {
+                runBlocking { client.listAlbums(ProviderAlbumRequest(type = AlbumListType.NEWEST)) }
+            }
+            assertThat(failure.message).contains("code=40")
+            assertThat(failure.message).contains("Wrong username or password")
+        }
+    }
+
+    @Test
+    fun `subsonic auth codes 41 through 44 map to a provider auth exception`() = runBlocking {
+        for (code in 41..44) {
+            MockWebServer().use { server ->
+                server.dispatcher = pathDispatcher(
+                    mapOf(
+                        "getAlbumList2" to """{"status":"failed","error":{"code":$code,"message":"auth"}}""",
+                    ),
+                )
+                server.start()
+                val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+
+                assertThrows(ProviderAuthException::class.java) {
+                    runBlocking { client.listAlbums(ProviderAlbumRequest(type = AlbumListType.NEWEST)) }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `successful requests report authentication success`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(emptyMap())
+            server.start()
+            val successes = mutableListOf<Long>()
+            val client = testClient(
+                testConnection(ConnectionBlock("http", server.hostName, server.port)),
+                onAuthSucceeded = { successes += it },
+            )
+
+            client.listGenres()
+
+            assertThat(successes).containsExactly(1L)
+            Unit
+        }
+    }
+
+    @Test
+    fun `auth failures do not report authentication success`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(
+                mapOf(
+                    "getAlbumList2" to """{"status":"failed","error":{"code":40,"message":"Wrong username or password"}}""",
+                ),
+            )
+            server.start()
+            val successes = mutableListOf<Long>()
+            val client = testClient(
+                testConnection(ConnectionBlock("http", server.hostName, server.port)),
+                onAuthSucceeded = { successes += it },
+            )
+
+            assertThrows(ProviderAuthException::class.java) {
+                runBlocking { client.listAlbums(ProviderAlbumRequest(type = AlbumListType.NEWEST)) }
+            }
+            assertThat(successes).isEmpty()
+        }
+    }
+
+    @Test
+    fun `non-auth subsonic failures stay fatal errors`() = runBlocking {
+        MockWebServer().use { server ->
+            server.dispatcher = pathDispatcher(
+                mapOf(
+                    "getAlbumList2" to """{"status":"failed","error":{"code":70,"message":"Requested data not found"}}""",
+                ),
+            )
+            server.start()
+            val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+
             val failure = assertThrows(ProviderFatalException::class.java) {
                 runBlocking { client.listAlbums(ProviderAlbumRequest(type = AlbumListType.NEWEST)) }
             }
-            assertThat(failure.cause).isInstanceOf(IllegalStateException::class.java)
-            assertThat(failure.cause!!.message).contains("code=40")
-            assertThat(failure.cause!!.message).contains("Wrong username or password")
+            assertThat(failure.cause!!.message).contains("code=70")
+        }
+    }
+
+    @Test
+    fun `http 401 and 403 map to a provider auth exception`() = runBlocking {
+        for (code in listOf(401, 403)) {
+            MockWebServer().use { server ->
+                server.dispatcher = object : Dispatcher() {
+                    override fun dispatch(request: RecordedRequest): MockResponse =
+                        MockResponse().setResponseCode(code).setBody("denied")
+                }
+                server.start()
+                val client = testClient(testConnection(ConnectionBlock("http", server.hostName, server.port)))
+
+                assertThrows(ProviderAuthException::class.java) {
+                    runBlocking { client.listGenres() }
+                }
+            }
         }
     }
 
@@ -657,12 +942,15 @@ class SubsonicClientTest {
                 onPreferredBlockChange = { switchEvents.note(it) },
             )
 
-            val first = runBlocking { client.listArtists() }
-            assertThat(first).isEmpty()
+            val first = assertThrows(ProviderTransportException::class.java) {
+                runBlocking { client.listArtists() }
+            }
+            assertThat(first.cause).isNotNull()
             val second = runBlocking { client.listGenres() }
             assertThat(second).isEmpty()
 
             assertThat(switchEvents.changes()).containsExactly(ProviderConnection.SECONDARY_BLOCK)
+            Unit
         }
     }
 

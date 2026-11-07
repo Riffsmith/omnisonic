@@ -1,7 +1,6 @@
 package app.omnisonic.core.data.providers
 
 import app.omnisonic.core.data.db.OmnisonicDatabase
-import app.omnisonic.core.model.log.ConsoleLogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.network.ClientProfile
 import app.omnisonic.core.network.ConnectionSpec
@@ -16,20 +15,28 @@ import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 
 /**
- * Caches one [MediaProvider] and one OkHttpClient per provider id and client
- * profile so engines, syncers, and downloads share a single connection pool.
- * Both profiles carry the same mTLS client identity and trust anchors. Entries
- * rebuild when the provider row changes (edit) or disappears (delete);
- * [invalidate] forces it for callers that know better.
+ * Owns one [MediaProvider] and one OkHttpClient pair (API + MEDIA profile) per
+ * provider id so engines, syncers, and downloads share a single connection
+ * pool. The API-profile client is built before the provider is created and
+ * injected into it, so the provider's own traffic rides the same instance
+ * apiClientFor returns. Both profiles carry the same mTLS client identity and
+ * trust anchors. Entries rebuild when the provider row changes (edit) or
+ * disappears (delete); [invalidate] forces it for callers that know better.
+ * The default client factories reuse the injected [logger], so production
+ * rides the single Android-backed logger rather than a separate console sink.
  */
 class ProviderClientRegistry(
     private val database: OmnisonicDatabase,
     private val providerRegistry: ProviderRegistry,
     private val mapper: ProviderConfigMapper,
-    private val mediaClientFactory: (ConnectionSpec) -> OkHttpClient = ::defaultMediaClient,
-    private val apiClientFactory: (ConnectionSpec) -> OkHttpClient = ::defaultApiClient,
+    private val logger: OmnisonicLogger,
+    private val mediaClientFactory: (ConnectionSpec) -> OkHttpClient = { spec ->
+        HttpClientFactory(logger).create(spec)
+    },
+    private val apiClientFactory: (ConnectionSpec) -> OkHttpClient = { spec ->
+        HttpClientFactory(logger).create(spec)
+    },
     private val onCredentialsUnreadable: suspend (Long) -> Unit = {},
-    private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),
 ) {
     private data class CachedClient(
         val provider: MediaProvider,
@@ -104,17 +111,19 @@ class ProviderClientRegistry(
 
             is ProviderLoadResult.Loaded -> load.connection
         }.let { connection ->
-            val provider = providerRegistry.create(row.api, connection) ?: run {
-                logger.warn(TAG, "no provider factory for api ${row.api}")
-                return null
-            }
             val mediaSpec = specFor(connection, ClientProfile.MEDIA) ?: run {
                 logger.warn(TAG, "provider $providerId has an unloadable client keystore; mTLS would be silently dropped")
                 return null
             }
             val apiSpec = specFor(connection, ClientProfile.API) ?: return null
-            val mediaClient = mediaClientFactory(mediaSpec)
+            // Build the API client first and hand the same instance to the
+            // factory, so the provider cannot end up on a second client.
             val apiClient = apiClientFactory(apiSpec)
+            val provider = providerRegistry.create(row.api, connection, apiClient) ?: run {
+                logger.warn(TAG, "no provider factory for api ${row.api}")
+                return null
+            }
+            val mediaClient = mediaClientFactory(mediaSpec)
             val cached = CachedClient(provider, mediaClient, apiClient, row.updatedAt)
             cache[providerId] = cached
             return cached
@@ -153,11 +162,5 @@ class ProviderClientRegistry(
 
     companion object {
         private const val TAG = "ProviderClientRegistry"
-
-        private fun defaultMediaClient(spec: ConnectionSpec): OkHttpClient =
-            HttpClientFactory(OmnisonicLogger(ConsoleLogSink())).create(spec)
-
-        private fun defaultApiClient(spec: ConnectionSpec): OkHttpClient =
-            HttpClientFactory(OmnisonicLogger(ConsoleLogSink())).create(spec)
     }
 }

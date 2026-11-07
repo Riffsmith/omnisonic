@@ -3,6 +3,7 @@ package app.omnisonic.provider.navidrome
 import app.omnisonic.core.model.runCatchingCancellable
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.ProviderAuthMethod
+import app.omnisonic.provider.api.ProviderAuthException
 import app.omnisonic.provider.api.BlockAttempt
 import app.omnisonic.provider.api.BlockFailover
 import app.omnisonic.provider.api.ConnectionBlock
@@ -47,17 +48,28 @@ import okhttp3.Response
  */
 class SubsonicClient(
     private val connection: ProviderConnection,
-    private val http: OkHttpClient,
+    /** The client every request rides; the registry owns this instance in production. */
+    val http: OkHttpClient,
     private val onPreferredBlockChange: suspend (Int) -> Unit = {},
+    /** Fired after a successful request so the caller can clear an auth-failure marker. */
+    private val onAuthSucceeded: suspend (Long) -> Unit = {},
 ) : MediaProvider {
 
     private val failover = BlockFailover(connection, onPreferredBlockChange)
 
+    /**
+     * Connection-configured capabilities apply from construction, so a
+     * configured hint and the explicit on/off backdating override work before
+     * any probe round-trip.
+     */
     @Volatile
-    private var capabilities: ProviderCapabilities = ProviderCapabilities()
+    private var capabilities: ProviderCapabilities = ProviderCapabilities(
+        serverSoftwareHint = connection.serverSoftwareHint,
+        backdateScrobbles = connection.backdateScrobbles,
+    )
 
     override suspend fun probe(): ProviderCapabilities {
-        call(Endpoint.PING) { it }
+        val ping = call(Endpoint.PING) { it }
         // getOpenSubsonicExtensions is OpenSubsonic-only; older servers reject
         // the endpoint, which is terminal for the call but not for the protocol.
         val extensions = runCatchingCancellable {
@@ -65,7 +77,9 @@ class SubsonicClient(
         }.getOrDefault(emptyList())
         val caps = ProviderCapabilities(
             extensionNames = extensions.mapNotNull { it.name }.toSet(),
-            serverSoftwareHint = connection.serverSoftwareHint,
+            // A configured hint wins; the OpenSubsonic ping `type` fills the gap.
+            serverSoftwareHint = connection.serverSoftwareHint
+                ?: ping.type?.trim()?.takeIf { it.isNotEmpty() },
             backdateScrobbles = connection.backdateScrobbles,
         )
         capabilities = caps
@@ -312,16 +326,20 @@ class SubsonicClient(
         if (timestamps.isEmpty()) return 0
         var accepted = 0
         var previous = Long.MIN_VALUE
-        timestamps.forEach { raw ->
+        for (raw in timestamps) {
             // Backdated times must be strictly increasing; ties advance by 1 ms.
             val effective = if (raw <= previous) previous + 1 else raw
             previous = effective
-            // A rejected submission counts as not-accepted rather than aborting
-            // the batch: the drainer reports partial acceptance as progress.
             val envelope = runCatchingCancellable {
                 call(Endpoint.SCROBBLE, scrobbleParams(externalId, submission = true, timeMs = effective)) { it }
-            }.getOrNull()
-            if (envelope?.status == STATUS_OK) accepted++
+            }.getOrElse { failure ->
+                if (failure is ProviderAuthException) throw failure
+                return accepted
+            }
+            // The returned count is an accepted prefix: stop at the first
+            // rejection so the drainer retries this timestamp and the rest.
+            if (envelope.status != STATUS_OK) return accepted
+            accepted++
         }
         return accepted
     }
@@ -420,7 +438,10 @@ class SubsonicClient(
         params: List<Pair<String, String>> = emptyList(),
         decode: (SubsonicEnvelope) -> T,
     ): T = when (val attempt = failover.attempt { block -> requestAttempt(block, endpoint, params, decode) }) {
-        is BlockAttempt.Success -> attempt.value
+        is BlockAttempt.Success -> {
+            runCatchingCancellable { onAuthSucceeded(connection.providerId) }
+            attempt.value
+        }
         is BlockAttempt.StatusError -> throw ProviderHttpError(attempt.httpCode, attempt.message)
         is BlockAttempt.TransportError -> throw ProviderTransportException(attempt.cause)
         is BlockAttempt.FatalError -> throw attempt.cause
@@ -477,6 +498,11 @@ class SubsonicClient(
         val response = runCatchingCancellable { http.newCall(request).awaitResponse() }
             .getOrElse { failure -> return BlockAttempt.TransportError(failure) }
         return response.use { handled ->
+            if (handled.code == HTTP_UNAUTHORIZED || handled.code == HTTP_FORBIDDEN) {
+                return BlockAttempt.FatalError(
+                    ProviderAuthException("HTTP ${handled.code} ${handled.message.orEmpty()}"),
+                )
+            }
             if (handled.code >= 300 || handled.code < 200) {
                 return BlockAttempt.StatusError(handled.code, handled.message)
             }
@@ -488,7 +514,13 @@ class SubsonicClient(
                 return BlockAttempt.FatalError(ProviderFatalException(parseFailure))
             } ?: return BlockAttempt.FatalError(ProviderFatalException(IllegalStateException("empty subsonic envelope")))
             if (envelope.status != STATUS_OK) {
-                return BlockAttempt.FatalError(ProviderFatalException(IllegalStateException(failureDescription(envelope))))
+                val cause = IllegalStateException(failureDescription(envelope))
+                val authCode = envelope.error?.code?.let { it in AUTH_SUBSONIC_CODES } == true
+                return if (authCode) {
+                    BlockAttempt.FatalError(ProviderAuthException(cause.message, cause))
+                } else {
+                    BlockAttempt.FatalError(ProviderFatalException(cause))
+                }
             }
             BlockAttempt.Success(decode(envelope))
         }
@@ -514,6 +546,9 @@ class SubsonicClient(
         private const val API_VERSION = "1.13.0"
         private const val CLIENT_ID = "Omnisonic"
         private const val STATUS_OK = "ok"
+        private const val HTTP_UNAUTHORIZED = 401
+        private const val HTTP_FORBIDDEN = 403
+        private val AUTH_SUBSONIC_CODES = 40..44
         private const val SALT_LENGTH = 12
         private const val SALT_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
         private val saltRandom = SecureRandom()

@@ -2,7 +2,7 @@
 
 Purpose: Pin down the stable cache identity used for streamed audio and cover images so rotating per-request authentication parameters cannot create duplicate cache entries.
 
-How derived: Code reading of `StreamResolver.kt`, `PlaybackCacheManager.kt`, `OmniPlayerImpl.kt`, and the Media3 `CacheDataSource` cache-key path, plus the stream-cache tests in this repository. The studied app is not a source.
+How derived: Code reading of `StreamResolver.kt`, `PlaybackCacheManager.kt`, `OmniPlayerImpl.kt`, `CoverImageFetcher.kt`, and the Media3 `CacheDataSource` cache-key path, plus the stream-cache and cover-loader tests in this repository. Evidence categories: own-source reading, published Media3 source reading, in-repository test runs.
 
 Confidence:
 - [VERIFIED] Media3 `CacheDataSource` resolves its cache key through `CacheKeyFactory`; the default factory uses `DataSpec.key` when present and otherwise the URI string.
@@ -10,10 +10,11 @@ Confidence:
 - [VERIFIED] `ResolvedStream` carries a provider-stable `cacheKey`; `OmniPlayerImpl` sets both `MediaItem.customCacheKey` and the cache factory key from it.
 - [INFERRED] Providers should derive the key from `StreamKey(providerId, externalId, maxBitRateKbps, format)` so transcode bitrate or format variants remain distinct while auth salts do not.
 - [VERIFIED] The Coil `CoverKeyer` maps `CoverImageKey` to `cover:$providerId:$imageId:$size`.
+- [VERIFIED] `CoverImageFetcher` resolves the provider URL at fetch time and pins the delegate network fetcher's `diskCacheKey` to `CoverImageKey.cacheKey`, so two salted URLs for one cover produce one memory/disk entry (`CoverImageLoaderTest.salted urls for one cover share a single cache entry`).
 - [VERIFIED] `ResolvedStream.expiresAtMs == null` never expires; a non-null value becomes stale 60 seconds before the deadline.
 - [VERIFIED] `StreamTransport` selects the upstream path: provider HTTP, direct URI, or a registered custom `DataSource.Factory`; the cache key is unchanged.
 
-Date: 2026-11-01
+Date: 2026-11-07
 
 Links: `../protocol/subsonic-auth.md`
 
@@ -54,3 +55,7 @@ stream:<providerId>:<externalId>:<maxBitRateKbps-or-auto>:<format-or-auto>
 ## Cover images
 
 [VERIFIED] `CoverKeyer` keys cover images as `cover:<providerId>:<imageId>:<sizePx-or-original>`, independent of the signed request URL.
+
+[VERIFIED] The app-wide `ImageLoader` registers `CoverKeyer` and `CoverImageFetcher.Factory`. `CoverImageFetcher` resolves a `CoverImageKey` through the provider registry (`MediaProvider.coverArtUrl(imageId, sizePx)`) at fetch time, so a provider's rotating auth salt changes the URL without changing the cache identity. The delegate network fetcher runs with `Options.diskCacheKey = key.cacheKey`; Coil's `NetworkFetcher` uses that value for its disk snapshot/write key instead of the URL.
+
+[VERIFIED] `CoverImageLoaderTest` serves one PNG and executes two requests for the same `CoverImageKey` whose resolver returns different salted URLs with the memory cache disabled: both results are successes, the resolver is called twice, the server sees one request, and both results report the same `diskCacheKey` (`cover:<providerId>:<imageId>:<sizePx>`).

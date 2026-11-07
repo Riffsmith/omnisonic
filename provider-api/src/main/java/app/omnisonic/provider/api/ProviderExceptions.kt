@@ -11,3 +11,11 @@ class ProviderFatalException(cause: Throwable) :
 
 class ProviderHttpError(val code: Int, val serverMessage: String? = null) :
     ProviderException("HTTP $code ${serverMessage.orEmpty()}")
+
+/**
+ * The server rejected the provider's credentials or authorization. Callers
+ * branch on this type to mark the provider AUTH_FAILED and stop retrying;
+ * network outages and other server errors never use it.
+ */
+class ProviderAuthException(message: String? = null, cause: Throwable? = null) :
+    ProviderException(message ?: "provider authentication failed", cause)

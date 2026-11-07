@@ -49,7 +49,12 @@ interface AlbumArtistDao {
     suspend fun deleteByAlbum(albumId: Long)
 
     @Query("DELETE FROM album_artists WHERE albumId IN (:albumIds)")
-    suspend fun deleteByAlbumIds(albumIds: List<Long>)
+    suspend fun deleteByAlbumIdsChunk(albumIds: List<Long>)
+
+    @Transaction
+    suspend fun deleteByAlbumIds(albumIds: List<Long>) {
+        albumIds.forEachSqlChunk { deleteByAlbumIdsChunk(it) }
+    }
 }
 
 @Dao
@@ -94,5 +99,10 @@ interface SongArtistDao {
     suspend fun deleteBySong(songId: Long)
 
     @Query("DELETE FROM song_artists WHERE songId IN (:songIds)")
-    suspend fun deleteBySongIds(songIds: List<Long>)
+    suspend fun deleteBySongIdsChunk(songIds: List<Long>)
+
+    @Transaction
+    suspend fun deleteBySongIds(songIds: List<Long>) {
+        songIds.forEachSqlChunk { deleteBySongIdsChunk(it) }
+    }
 }

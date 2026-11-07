@@ -12,13 +12,24 @@ class RecordingProvider : MediaProvider {
     val events = mutableListOf<String>()
 
     var submitPlaysResult: Int = 0
+    val submitPlaysResults = ArrayDeque<Int>()
     var favoriteResult: Boolean = true
     var ratingResult: Boolean = true
     var bookmarkResult: Boolean = true
     var probeResult: ProviderCapabilities = ProviderCapabilities()
+
+    /** Number of initial probe() calls that throw; each call consumes one. */
+    var probeFailures: Int = 0
     var failNext: Boolean = false
 
-    override suspend fun probe(): ProviderCapabilities = probeResult.also { probed.add(true) }
+    override suspend fun probe(): ProviderCapabilities {
+        probed.add(true)
+        if (probeFailures > 0) {
+            probeFailures--
+            throw IllegalStateException("probe failure")
+        }
+        return probeResult
+    }
 
     override suspend fun listArtists(): List<ProviderArtist> = emptyList()
 
@@ -55,7 +66,7 @@ class RecordingProvider : MediaProvider {
     override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int {
         submittedPlays += SubmittedPlay(externalId, timestamps)
         events += "submitPlays"
-        return submitPlaysResult
+        return submitPlaysResults.removeFirstOrNull() ?: submitPlaysResult
     }
 
     override suspend fun sendNowPlaying(externalId: String, playedMs: Long): Boolean = true

@@ -13,17 +13,18 @@ How derived: code reading of `provider-api` (`ProviderConnection.kt`,
 image wiring (`app/.../image/`), and their unit/integration tests
 (`ProviderConfigMapperTest`, `LocalProviderPersistenceTest`,
 `ProviderStatusTrackerTest`, `MtlsEndToEndHandshakeTest`,
-`DownloadEnqueuerTest`, `ProviderClientRegistryTest`). Decisions dated
+`DownloadEnqueuerTest`, `ProviderClientRegistryTest`, and core-network's
+`TlsHandshakeTest`). Decisions dated
 2026-11-01/02; see `../decisions.md`.
 
 Confidence:
 - [VERIFIED] Every behavior below is asserted by a named test in this repository unless marked otherwise.
 - [UNKNOWN] Live-server and real-device behavior of the network gate and mTLS (no device or server available at decision time).
 
-Date: 2026-11-03
+Date: 2026-11-07
 
 Links: `../decisions.md`, `client-lifecycle.md`, `credential-handling.md`,
-`../storage/schema-v2.md` (schema columns, triggers, migration backfill),
+`../storage/schema-v2.md` (schema columns and triggers),
 `../network/client-profiles.md` (API/MEDIA profile split).
 
 ---
@@ -109,6 +110,22 @@ leaves tasks due with no backoff; `DownloadEnqueuer` returns
 `BlockedByStatus(status)` and writes nothing. Blocked work therefore stays
 pending and runs on the next successful gate check.
 
+[VERIFIED] `AUTH_FAILED` covers both unreadable local credentials and a server
+rejecting the provider's authentication. `SubsonicClient` maps Subsonic error
+codes 40–44 and HTTP 401/403 to the typed `ProviderAuthException`; transport
+failures, other 4xx, 5xx and every other Subsonic error keep their existing
+typed errors and never mark authentication failed. Sync and outbox drain catch
+`ProviderAuthException`, call `ProviderStatusTracker.markAuthFailed(providerId)`,
+and stop work: sync records a failed run and rethrows, while the drainer leaves
+the current task and every later task for that provider due without backoff.
+The marker records the provider row's `updatedAt`: editing the row clears
+`AUTH_FAILED` immediately, and any successful provider request reports
+authentication success through `SubsonicProviderFactory` to
+`clearAuthFailed(providerId)` (search/browse included, not only sync/drain).
+[VERIFIED by `SubsonicClientTest`, `ProviderStatusTrackerTest`,
+`SubsonicLibrarySyncerTest`, `OutboxDrainerTest`, and
+`OutboxDrainEndToEndTest` — red before the typed mapping.]
+
 [VERIFIED] A VPN-only network counts as NOT Wi-Fi: the platform exposes no
 public API for the underlying transport, so a Wi-Fi-only provider stays
 `NEEDS_WIFI` behind a VPN. Documented conservatively — metered data is never
@@ -136,19 +153,41 @@ through logs.
   downgrading server verification; absent blob → ordinary platform verification.
 - A blank alias → null alias; missing password entry → null password.
 
+[VERIFIED] Trust anchors apply to both client profiles even when mTLS is
+disabled (FIX-07): `HttpClientFactory` installs the custom TLS context whenever
+the connection carries a client keystore, explicit trust anchors, or both; with
+no keystore the SSLContext is initialized with null KeyManagers (no client
+certificate presented). Before the fix the custom context was built only inside
+the keystore branch, so anchors without a keystore were silently dropped and
+such clients fell back to platform trust, failing against self-signed servers
+(`SSLHandshakeException`, PKIX path building failed). Anchors replace — never
+augment — platform trust, so no configuration trusts everything; the no-keystore
+no-anchor path still keeps OkHttp platform defaults (`TlsHandshakeTest`:
+anchors-only clients complete real handshakes to a self-signed server on both
+profiles; no-anchor and outside-the-anchor-set clients are rejected with
+`SSLHandshakeException`; a client-certificate-demanding server rejects the
+anchors-only client).
+
 [VERIFIED] The resolved identity is applied to BOTH client profiles:
 `ProviderClientRegistry` builds a MEDIA client (`httpClientFor`) and an API
 client (`apiClientFor`) per provider from the same connection, and a corrupt
 (unparseable) PKCS#12 makes the registry drop the provider with a warning that
-names no secrets. `SubsonicProviderFactory.defaultClient` mirrors the same
-mTLS/trust mapping for the production API path — a deliberate ~8-line
-duplication (provider-api cannot depend on core-network); flagged as a
-unification candidate, not a hidden divergence.
+names no secrets. FIX-09 part 1 (2026-11-06) resolved the previously flagged
+duplication: the registry builds the API-profile client BEFORE creating the
+provider and injects that exact instance through
+`MediaProviderFactory.create(connection, apiClient)` (provider-api depends on
+the OkHttp type, not on core-network), so `SubsonicProviderFactory` no longer
+builds clients at all and `defaultClient` is gone — the registry's
+`apiClientFor` and the provider's own traffic cannot drift onto different
+OkHttp instances (`ProviderWiringClientIdentityTest` pins the identity against
+the real factory).
 
 [VERIFIED] `MtlsEndToEndHandshakeTest` completes real handshakes for both
 profiles through persistence → mapper → registry against a client-certificate-
 demanding MockWebServer, and proves the disabled path fails the handshake
-(custom trust anchor retained, client identity absent).
+(custom trust anchor retained, client identity absent — genuinely the missing
+client certificate since FIX-07; the surfaced client-side error type is
+race-dependent under JDK TLS 1.3, so that test pins `IOException`).
 
 ## Download enqueue
 
@@ -172,6 +211,29 @@ idempotent and never resets progress.
 name. Deleting a provider removes its download rows through the cascade trigger
 (`../storage/schema-v2.md`).
 
+## Read timeout option
+
+[VERIFIED] `providers.optionsJson` may carry `readTimeoutMs`. `ProviderConfigMapper`
+maps it onto `ProviderConnection.readTimeoutMs`; absent values keep
+`ProviderConnection.DEFAULT_READ_TIMEOUT_MS` (15 s), and supplied values are
+clamped to `[MIN_READ_TIMEOUT_MS, MAX_READ_TIMEOUT_MS]` = `[5 s, 120 s]`.
+
+[VERIFIED] `ProviderClientRegistry.specFor` copies the connection timeout into
+both `ConnectionSpec` profiles, so a persisted value reaches the real API and
+MEDIA OkHttp clients. `ProviderConfigMapperTest` pins mapping/clamping/default,
+and `ProviderClientRegistryTest.persisted read timeout reaches both connection
+specs` captures the two built specs for a 45 s row.
+
+Why a read timeout instead of an album page size (FIX-14 decision):
+
+- One setting protects every API call without threading a page size through the
+  syncer and multiplying round trips. A page-size change alters request count
+  and sync shape; a read timeout changes only how long one request may wait.
+- The trade-off is that a genuinely hung server still occupies a request slot
+  for the configured bound. The 15 s default keeps normal library calls
+  responsive, the 120 s ceiling accommodates slow transcoding/proxying, and
+  callers can lower or raise the value per provider.
+
 ## Image loading rides the provider's clients
 
 [VERIFIED] The app-wide Coil `ImageLoader` (Hilt singleton set as Coil's
@@ -180,3 +242,9 @@ default) routes every request through `ProviderRoutedCallFactory` →
 BOTH connection blocks — so cover images carry the provider's custom headers,
 mTLS identity, and trust anchors. A URL that matches no provider block falls
 back to the plain default client.
+
+[VERIFIED] Cover requests use `CoverImageKey` rather than a raw signed URL.
+`CoverImageFetcher` resolves `MediaProvider.coverArtUrl(imageId, sizePx)` for the
+key's provider at fetch time and pins the disk cache key to the key's stable
+identity, so a rotated auth salt reuses one cover cache entry
+(`../playback/stream-cache-identity.md`).

@@ -10,7 +10,7 @@ How derived: playback-api contracts (`StreamResolver`, `ReplayGainSource`,
 `SongRepository` read they bind, plus the tests in this repository
 (`ProviderStreamResolverTest`, `SongReplayGainSourceTest`,
 `ScrobblePointTrackerTest`, `QueueSourceSeamsTest`, `QueueSourcesTest`, and the
-scrobble cases in `PlaybackControllerImplTest`). The studied app is not a source.
+scrobble cases in `PlaybackControllerImplTest`). Evidence categories: own-source reading, in-repository test runs.
 
 Confidence:
 - [VERIFIED] `ProviderStreamResolver` maps a queue entry through
@@ -20,7 +20,7 @@ Confidence:
 - [VERIFIED] `content://`/`file://` URLs mark `requiresNetwork = false`,
   `routedDirect = true` and transport `DIRECT_URI`; every other URL is
   `PROVIDER_HTTP` and network-bound (resolver tests).
-- [VERIFIED] The song-level resume point (`songs.resumePointMs`) seeds
+- [VERIFIED] The song-level resume point (`songs.resumeMs`) seeds
   `ResolvedStream.startPositionMs` when the queue snapshot carries none: values
   ≤ 0 are dropped, values at or past the entry duration restart the track, a
   missing duration keeps the point, and radio stations always start at 0
@@ -52,7 +52,7 @@ Confidence:
 - [UNKNOWN] On-device: resume-point behavior against real bookmark-synced
   values, and radio-stream transport behavior (live-server acceptance).
 
-Date: 2026-11-04
+Date: 2026-11-07
 
 Links: `stream-cache-identity.md`, `controller-and-events.md`,
 `sink-processors.md`, `../storage/library-sync-ownership.md` (resume-point

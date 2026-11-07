@@ -49,7 +49,7 @@ class ProviderStreamResolver @Inject constructor(
     private suspend fun resumePositionMs(entry: PlaybackQueueEntry): Long {
         if (entry.isRadioStation) return 0L
         val resume = songs.selectByProviderAndExternal(entry.providerId, entry.externalId)
-            ?.resumePointMs
+            ?.resumeMs
             ?.takeIf { it > 0L }
             ?: return 0L
         // A resume point at or past the end would end the track instantly; restart instead.

@@ -36,6 +36,7 @@
             android:stopWithTask="false">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 

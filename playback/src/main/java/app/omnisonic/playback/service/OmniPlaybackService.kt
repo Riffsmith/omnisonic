@@ -1,5 +1,6 @@
 package app.omnisonic.playback.service
 
+import android.app.PendingIntent
 import android.content.ComponentCallbacks2
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -30,13 +31,21 @@ import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /**
+ * Restores the persisted queue without letting a slow store hold the service
+ * start path. A timed-out restore leaves the empty in-memory queue, matching a
+ * store with no snapshot.
+ */
+internal suspend fun restoreQueueWithin(controller: PlaybackController, timeoutMs: Long): Boolean =
+    withTimeoutOrNull(timeoutMs) { controller.restoreQueue() } ?: false
+
+/**
  * The media session surface. Binds the session to the exposed player facade so
  * session commands route through the controller, restores the persisted queue
- * (without auto-play) before the session is published, and holds the process
- * wake lock while the controller reports playback. Snapshot flushes happen on
- * teardown and when the app UI goes hidden; media3 owns the notification
- * foreground lifecycle and offers no stop-foreground hook, so those are the
- * service-side flush sites available.
+ * (without auto-play) on the service scope, and holds the process wake lock
+ * while the controller reports playback. Snapshot flushes happen on teardown
+ * and when the app UI goes hidden; media3 owns the notification foreground
+ * lifecycle and offers no stop-foreground hook, so those are the service-side
+ * flush sites available.
  */
 @AndroidEntryPoint
 @UnstableApi
@@ -62,15 +71,17 @@ class OmniPlaybackService : MediaLibraryService() {
         super.onCreate()
         wakeLock = PlaybackWakeLock(this)
         val controller = playback.controller
-        runBlocking { controller.restoreQueue() }
         serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).also { scope ->
             scope.launch {
                 controller.playerState.collect { wakeLock?.setHeld(it.isPlaying) }
             }
+            scope.launch { restoreQueueWithin(controller, RESTORE_TIMEOUT_MS) }
         }
-        session = MediaLibrarySession.Builder(this, playback.sessionPlayer, SessionCallback(controller))
-            .setId(SESSION_ID)
-            .build()
+        val sessionBuilder =
+            MediaLibrarySession.Builder(this, playback.sessionPlayer, SessionCallback(controller))
+                .setId(SESSION_ID)
+        createSessionActivity()?.let(sessionBuilder::setSessionActivity)
+        session = sessionBuilder.build()
         setMediaNotificationProvider(notificationProvider)
     }
 
@@ -81,7 +92,9 @@ class OmniPlaybackService : MediaLibraryService() {
         get() = session
 
     override fun onTrimMemory(level: Int) {
-        if (level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) runBlocking { persistence.flush() }
+        if (level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            serviceScope?.launch { persistence.flush() }
+        }
         super.onTrimMemory(level)
     }
 
@@ -154,8 +167,26 @@ class OmniPlaybackService : MediaLibraryService() {
             .build()
     }
 
+    /**
+     * The package launch intent is the only entry point the app exposes; the
+     * notification content intent reads it back from the session, so this is
+     * the single source for notification taps. Immutable because no consumer
+     * fills in extras.
+     */
+    private fun createSessionActivity(): PendingIntent? {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        return PendingIntent.getActivity(
+            this,
+            SESSION_ACTIVITY_REQUEST_CODE,
+            launchIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
+
     private companion object {
         const val SESSION_ID = "playback"
+        const val SESSION_ACTIVITY_REQUEST_CODE = 0
         const val FLUSH_TIMEOUT_MS = 2_000L
+        const val RESTORE_TIMEOUT_MS = 2_000L
     }
 }

@@ -51,15 +51,15 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         albumDao.upsert(
             AlbumEntity(
                 id = 20, providerId = 1, externalId = "alb-1", title = "Old",
-                isAudiobook = true, description = "local notes", resumeFilePath = "/cache/a.m4b",
-                discTitlesJson = "[\"Disc one\"]", isCompilation = true, updatedAt = 1_000,
+                isAudiobook = true, description = "local notes", resumeTrackPath = "/cache/a.m4b",
+                discNamesJson = "[\"Disc one\"]", isCompilation = true, updatedAt = 1_000,
             ),
         )
         songDao.upsert(
             SongEntity(
                 id = 30, providerId = 1, externalId = "song-1", albumId = 20, title = "Old song",
-                isAudiobook = true, clipStartMs = 500, replayGainTrack = -1.5,
-                resumePointMs = 3_000, updatedAt = 1_000,
+                isAudiobook = true, windowStartMs = 500, replayGainTrack = -1.5,
+                resumeMs = 3_000, updatedAt = 1_000,
             ),
         )
 
@@ -74,16 +74,16 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         assertThat(album.title).isEqualTo("Fresh")
         assertThat(album.isAudiobook).isTrue()
         assertThat(album.description).isEqualTo("local notes")
-        assertThat(album.resumeFilePath).isEqualTo("/cache/a.m4b")
-        assertThat(album.discTitlesJson).isEqualTo("[\"Disc one\"]")
+        assertThat(album.resumeTrackPath).isEqualTo("/cache/a.m4b")
+        assertThat(album.discNamesJson).isEqualTo("[\"Disc one\"]")
         assertThat(album.isCompilation).isTrue()
 
         val song = songDao.selectByProviderAndExternal(1, "song-1")!!
         assertThat(song.title).isEqualTo("Fresh song")
         assertThat(song.isAudiobook).isTrue()
-        assertThat(song.clipStartMs).isEqualTo(500)
+        assertThat(song.windowStartMs).isEqualTo(500)
         assertThat(song.replayGainTrack).isEqualTo(-1.5)
-        assertThat(song.resumePointMs).isEqualTo(3_000)
+        assertThat(song.resumeMs).isEqualTo(3_000)
     }
 
     @Test
@@ -92,7 +92,7 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         songDao.upsert(
             SongEntity(
                 id = 30, providerId = 1, externalId = "song-1", title = "S",
-                resumePointMs = 3_000, resumeUpdatedAt = 9_000, updatedAt = 1_000,
+                resumeMs = 3_000, resumeUpdatedAt = 9_000, updatedAt = 1_000,
             ),
         )
         val provider = providerOf(
@@ -104,7 +104,7 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         syncer(provider).runFullSync()
 
         val song = songDao.selectByProviderAndExternal(1, "song-1")!!
-        assertThat(song.resumePointMs).isEqualTo(3_000)
+        assertThat(song.resumeMs).isEqualTo(3_000)
     }
 
     @Test
@@ -113,7 +113,7 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         songDao.upsert(
             SongEntity(
                 id = 30, providerId = 1, externalId = "song-1", title = "S",
-                resumePointMs = 3_000, resumeUpdatedAt = 1_000, updatedAt = 1_000,
+                resumeMs = 3_000, resumeUpdatedAt = 1_000, updatedAt = 1_000,
             ),
         )
         val provider = providerOf(
@@ -125,7 +125,7 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         syncer(provider).runFullSync()
 
         val song = songDao.selectByProviderAndExternal(1, "song-1")!!
-        assertThat(song.resumePointMs).isEqualTo(42_000)
+        assertThat(song.resumeMs).isEqualTo(42_000)
         assertThat(song.resumeUpdatedAt).isEqualTo(9_000)
     }
 
@@ -135,7 +135,7 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         songDao.upsert(
             SongEntity(
                 id = 30, providerId = 1, externalId = "song-1", title = "S",
-                resumePointMs = 3_000, resumeUpdatedAt = 1_000, updatedAt = 1_000,
+                resumeMs = 3_000, resumeUpdatedAt = 1_000, updatedAt = 1_000,
             ),
         )
         outboxDao.upsert(
@@ -153,13 +153,18 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
         syncer(provider).runFullSync()
 
         val song = songDao.selectByProviderAndExternal(1, "song-1")!!
-        assertThat(song.resumePointMs).isEqualTo(3_000)
+        assertThat(song.resumeMs).isEqualTo(3_000)
     }
 
     @Test
     fun `full sync deletes a vanished untouched song`() = runDbTest {
         newProvider(id = 1)
-        songDao.upsert(SongEntity(id = 30, providerId = 1, externalId = "song-gone", title = "Gone", updatedAt = 1_000))
+        songDao.upsert(
+            SongEntity(
+                id = 30, providerId = 1, externalId = "song-gone", title = "Gone",
+                lastSeenSyncId = 1, updatedAt = 1_000,
+            ),
+        )
         val provider = providerOf(
             albums = listOf(ProviderAlbum(externalId = "alb-1", title = "A")),
             songsByAlbum = mapOf("alb-1" to listOf(ProviderSong(externalId = "song-1", title = "Kept"))),
@@ -175,7 +180,10 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
     fun `full sync tombstones a vanished played song instead of deleting it`() = runDbTest {
         newProvider(id = 1)
         songDao.upsert(
-            SongEntity(id = 30, providerId = 1, externalId = "song-gone", title = "Gone", playCount = 4, updatedAt = 1_000),
+            SongEntity(
+                id = 30, providerId = 1, externalId = "song-gone", title = "Gone",
+                playCount = 4, lastSeenSyncId = 1, updatedAt = 1_000,
+            ),
         )
         val provider = providerOf(
             albums = listOf(ProviderAlbum(externalId = "alb-1", title = "A")),
@@ -192,7 +200,12 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
     @Test
     fun `full sync tombstones a vanished song with pending outbox rows`() = runDbTest {
         newProvider(id = 1)
-        songDao.upsert(SongEntity(id = 30, providerId = 1, externalId = "song-gone", title = "Gone", updatedAt = 1_000))
+        songDao.upsert(
+            SongEntity(
+                id = 30, providerId = 1, externalId = "song-gone", title = "Gone",
+                lastSeenSyncId = 1, updatedAt = 1_000,
+            ),
+        )
         outboxDao.upsert(
             OutboxItemEntity(
                 id = 0, providerId = 1, mediaType = "SONG", externalId = "song-gone",
@@ -226,10 +239,23 @@ class SubsonicLibrarySyncerMergeTest : DatabaseTestBase() {
     @Test
     fun `tombstoned songs keep their album alive but empty albums go`() = runDbTest {
         newProvider(id = 1)
-        albumDao.upsert(AlbumEntity(id = 20, providerId = 1, externalId = "alb-gone", title = "Played album", updatedAt = 1_000))
-        albumDao.upsert(AlbumEntity(id = 21, providerId = 1, externalId = "alb-empty", title = "Empty album", updatedAt = 1_000))
+        albumDao.upsert(
+            AlbumEntity(
+                id = 20, providerId = 1, externalId = "alb-gone", title = "Played album",
+                lastSeenSyncId = 1, updatedAt = 1_000,
+            ),
+        )
+        albumDao.upsert(
+            AlbumEntity(
+                id = 21, providerId = 1, externalId = "alb-empty", title = "Empty album",
+                lastSeenSyncId = 1, updatedAt = 1_000,
+            ),
+        )
         songDao.upsert(
-            SongEntity(id = 30, providerId = 1, externalId = "song-gone", albumId = 20, title = "Gone", playCount = 2, updatedAt = 1_000),
+            SongEntity(
+                id = 30, providerId = 1, externalId = "song-gone", albumId = 20, title = "Gone",
+                playCount = 2, lastSeenSyncId = 1, updatedAt = 1_000,
+            ),
         )
         val provider = providerOf(
             albums = listOf(ProviderAlbum(externalId = "alb-1", title = "A")),

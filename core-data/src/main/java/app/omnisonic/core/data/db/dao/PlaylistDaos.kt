@@ -42,16 +42,24 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE providerId = :providerId AND externalId = :externalId")
     suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): PlaylistEntity?
 
-    /** Playlists of this provider not seen in a full sync; their entries are removed too. */
+    @Query("SELECT MAX(lastSeenSyncId) FROM playlists WHERE providerId = :providerId")
+    suspend fun selectMaxLastSeenSyncId(providerId: Long): Long?
+
+    /**
+     * Playlists of this provider not stamped by the current sync run; their
+     * entries are removed too. Rows without any stamp are unseen too: the
+     * caller (SubsonicLibrarySyncer.prune) may only reach pruning after the
+     * FIX-02 safety guards confirmed the walk was complete.
+     */
     @Query(
         """
         DELETE FROM playlists
         WHERE providerId = :providerId
             AND externalId IS NOT NULL
-            AND externalId NOT IN (:seenExternalIds)
+            AND (lastSeenSyncId IS NULL OR lastSeenSyncId != :runId)
         """,
     )
-    suspend fun deleteUnseen(providerId: Long, seenExternalIds: List<String>)
+    suspend fun deleteUnseen(providerId: Long, runId: Long)
 
     @Query("SELECT * FROM playlists WHERE id = :id")
     suspend fun selectById(id: Long): PlaylistEntity?
@@ -72,14 +80,14 @@ interface PlaylistEntryDao {
     @Upsert
     suspend fun upsertAll(entries: List<PlaylistEntryEntity>)
 
-    @Query("SELECT * FROM playlist_items WHERE playlistId = :playlistId ORDER BY entryOrder")
+    @Query("SELECT * FROM playlist_items WHERE playlistId = :playlistId ORDER BY position")
     suspend fun selectByPlaylist(playlistId: Long): List<PlaylistEntryEntity>
 
     @Query("SELECT COUNT(*) FROM playlist_items WHERE playlistId = :playlistId")
     suspend fun countByPlaylist(playlistId: Long): Int
 
-    @Query("SELECT MAX(entryOrder) FROM playlist_items WHERE playlistId = :playlistId")
-    suspend fun selectMaxEntryOrder(playlistId: Long): Int?
+    @Query("SELECT MAX(position) FROM playlist_items WHERE playlistId = :playlistId")
+    suspend fun selectMaxPosition(playlistId: Long): Int?
 
     @Query("DELETE FROM playlist_items WHERE playlistId = :playlistId")
     suspend fun deleteByPlaylist(playlistId: Long)

@@ -20,7 +20,10 @@ class LocalPlaybackRenderer(
     override val rendererId: String = RENDERER_ID
     override val isLocal: Boolean = true
 
-    override suspend fun activate(): OmniPlayer = mutex.withLock {
+    override suspend fun activate(): OmniPlayer = mutex.withLock { activateNow() }
+
+    /** Synchronous activation for callers that cannot suspend during graph assembly. */
+    fun activateNow(): OmniPlayer = synchronized(this) {
         player ?: playerFactory().also { player = it }
     }
 

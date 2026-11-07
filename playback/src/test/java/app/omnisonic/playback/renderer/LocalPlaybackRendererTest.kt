@@ -58,6 +58,16 @@ class LocalPlaybackRendererTest {
     }
 
     @Test
+    fun `activateNow creates the player synchronously without a suspending caller`() {
+        val player = CountingPlayer()
+        val renderer = LocalPlaybackRenderer { player }
+
+        assertThat(renderer.activateNow()).isSameInstanceAs(player)
+        assertThat(renderer.isActive()).isTrue()
+        assertThat(renderer.activateNow()).isSameInstanceAs(player)
+    }
+
+    @Test
     fun `deactivate releases the player and reports inactivity`() = runTest {
         val player = CountingPlayer()
         val renderer = LocalPlaybackRenderer { player }

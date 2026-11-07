@@ -21,7 +21,7 @@ class EntitySanityTest : DatabaseTestBase() {
             title = "Soothsayer",
             playCount = 3,
             lastPlayed = 500,
-            resumePointMs = 10,
+            resumeMs = 10,
             filePath = "/music/buckethead.mp3",
         )
         val updated = songDao.selectById(2)?.copy(
@@ -88,7 +88,7 @@ class EntitySanityTest : DatabaseTestBase() {
 
         val stored = playlistEntryDao.selectByPlaylist(playlist.id)
         assertThat(stored).hasSize(1)
-        assertThat(stored.first().entryOrder).isEqualTo(0)
+        assertThat(stored.first().position).isEqualTo(0)
     }
 
     @Test

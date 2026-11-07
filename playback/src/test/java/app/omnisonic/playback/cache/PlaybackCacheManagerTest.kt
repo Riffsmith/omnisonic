@@ -10,6 +10,7 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.stream.ResolvedStream
+import app.omnisonic.playback.settings.PlaybackSettingsStore
 import androidx.media3.datasource.DefaultDataSource
 import com.google.common.truth.Truth.assertThat
 import okhttp3.mockwebserver.MockResponse
@@ -147,6 +148,19 @@ class PlaybackCacheManagerTest {
         assertThrows(IllegalStateException::class.java) { manager.factoryFor(stream) }
         assertThrows(IllegalStateException::class.java) { manager.cachedBytesFor(stream.cacheKey) }
         assertThrows(IllegalStateException::class.java) { manager.applyMaxBytes(1) }
+    }
+
+    @Test
+    fun `omitting a budget uses the persisted-settings default without reading settings`() {
+        val manager = PlaybackCacheManager(
+            context = context,
+            cacheDir = File(context.cacheDir, "t5-${UUID.randomUUID()}"),
+            databaseProvider = StandaloneDatabaseProvider(context),
+            upstreamFactory = { DataSource.Factory { ByteArrayDataSource(ByteArray(10)) } },
+        )
+        managers.add(manager)
+
+        assertThat(manager.maxBytes).isEqualTo(PlaybackSettingsStore.DEFAULT_CACHE_SIZE_BYTES)
     }
 
     private fun newManager(maxBytes: Long, upstream: () -> DataSource): PlaybackCacheManager {

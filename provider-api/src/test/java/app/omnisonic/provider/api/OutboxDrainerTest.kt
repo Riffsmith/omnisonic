@@ -35,9 +35,13 @@ private class FakeOutboxStore : OutboxStore {
 
     override suspend fun dueTasks(now: Long, providerId: Long?): List<OutboxTask> = tasks.toList()
 
-    override suspend fun complete(id: Long) {
-        completed += id
-        tasks.removeAll { it.id == id }
+    override suspend fun complete(task: OutboxTask): OutboxCompletion {
+        val index = tasks.indexOfFirst { it.id == task.id }
+        if (index < 0) return OutboxCompletion.Missing
+        if (tasks[index].payloadJson != task.payloadJson) return OutboxCompletion.Superseded
+        completed += task.id
+        tasks.removeAt(index)
+        return OutboxCompletion.Deleted
     }
 
     override suspend fun fail(id: Long, attempts: Int, nextAttemptAt: Long, lastError: String) {
@@ -45,9 +49,26 @@ private class FakeOutboxStore : OutboxStore {
         tasks.removeAll { it.id == id }
     }
 
-    override suspend fun progress(id: Long, payloadJson: String?, nextAttemptAt: Long) {
-        progressed += TrackedProgress(id, payloadJson)
-        tasks.removeAll { it.id == id }
+    override suspend fun progress(
+        task: OutboxTask,
+        submittedTimestamps: List<Long>,
+        nextAttemptAt: Long,
+    ): OutboxProgress {
+        val index = tasks.indexOfFirst { it.id == task.id }
+        if (index < 0) return OutboxProgress.Cleared
+        val current = tasks[index]
+        val payload = current.payloadJson?.let { payloadAdapter.fromJson(it) } ?: OutboxActionPayload()
+        val remaining = payload.afterSubmitting(submittedTimestamps)
+        val remainingTimestamps = remaining.playTimestamps
+        if (remainingTimestamps.isNullOrEmpty()) {
+            progressed += TrackedProgress(task.id, null)
+            tasks.removeAt(index)
+            return OutboxProgress.Cleared
+        }
+        val encoded = payloadAdapter.toJson(remaining)
+        progressed += TrackedProgress(task.id, encoded)
+        tasks[index] = current.copy(payloadJson = encoded)
+        return OutboxProgress.Retained(remainingTimestamps.size)
     }
 
     fun add(
@@ -88,12 +109,19 @@ class OutboxDrainerTest {
     private val provider = RecordingProvider()
     private val sink = CollectingSink()
 
-    private fun drainer(clock: () -> Long = { 1_000L }, runGate: ProviderRunGate = AllowAllRunGate): OutboxDrainer = OutboxDrainer(
+    private fun drainer(
+        clock: () -> Long = { 1_000L },
+        runGate: ProviderRunGate = AllowAllRunGate,
+        onAuthFailed: suspend (Long) -> Unit = {},
+        onAuthSucceeded: suspend (Long) -> Unit = {},
+    ): OutboxDrainer = OutboxDrainer(
         store = store,
         providerLocator = { provider },
         clock = clock,
         runGate = runGate,
         logger = OmnisonicLogger(sink),
+        onAuthFailed = onAuthFailed,
+        onAuthSucceeded = onAuthSucceeded,
     )
 
     @Test
@@ -188,6 +216,59 @@ class OutboxDrainerTest {
     }
 
     @Test
+    fun `play count submits in chunks and records progress between them`() = runTest {
+        val drain = drainer()
+        val timestamps = (0L until 250L).map { 1_700_000_000_000L + it }
+        val task = store.add(
+            "play_count",
+            OutboxActionPayload(
+                playCountDelta = timestamps.size,
+                lastPlayedAt = timestamps.last(),
+                playTimestamps = timestamps,
+            ),
+        )
+        provider.submitPlaysResults += listOf(100, 100, 50)
+
+        val report = drain.drain()
+
+        assertEquals(1, report.completed)
+        assertEquals(listOf(100, 100, 50), provider.submittedPlays.map { it.timestamps.size })
+        assertEquals(timestamps, provider.submittedPlays.flatMap { it.timestamps })
+        val remainingSizes = store.progressed
+            .filter { it.id == task.id }
+            .map { progress ->
+                progress.payloadJson?.let { payloadAdapter.fromJson(it) }?.playTimestamps?.size ?: 0
+            }
+        assertEquals(listOf(150, 50, 0), remainingSizes)
+    }
+
+    @Test
+    fun `a rejected submission inside a chunk keeps every unsubmitted timestamp`() = runTest {
+        val drain = drainer()
+        val timestamps = (0L until 250L).map { 1_700_000_000_000L + it }
+        val task = store.add(
+            "play_count",
+            OutboxActionPayload(
+                playCountDelta = timestamps.size,
+                lastPlayedAt = timestamps.last(),
+                playTimestamps = timestamps,
+            ),
+        )
+        provider.submitPlaysResults += listOf(100, 49)
+
+        val report = drain.drain()
+
+        assertEquals(1, report.progressed)
+        assertEquals(listOf(100, 100), provider.submittedPlays.map { it.timestamps.size })
+        val remaining = store.progressed
+            .last { it.id == task.id }
+            .payloadJson
+            ?.let { payloadAdapter.fromJson(it) }
+        assertEquals(101, remaining?.playCountDelta)
+        assertEquals(timestamps.drop(149), remaining?.playTimestamps)
+    }
+
+    @Test
     fun `first play count task probes the provider exactly once per drainer`() = runTest {
         val drain = drainer()
         store.add("play_count", OutboxActionPayload(playCountDelta = 1, lastPlayedAt = 5_000L))
@@ -202,6 +283,25 @@ class OutboxDrainerTest {
         drain.drain()
 
         assertEquals(1, provider.probed.size)
+    }
+
+    @Test
+    fun `a failed probe is retried on the next drain`() = runTest {
+        val drain = drainer()
+        store.add("play_count", OutboxActionPayload(playCountDelta = 1, lastPlayedAt = 5_000L))
+        provider.submitPlaysResult = 1
+        provider.probeFailures = 1
+
+        val first = drain.drain()
+
+        assertEquals(1, provider.probed.size)
+        assertEquals(1, first.completed)
+
+        store.add("play_count", OutboxActionPayload(playCountDelta = 1, lastPlayedAt = 6_000L))
+        provider.submitPlaysResult = 1
+        drain.drain()
+
+        assertEquals(2, provider.probed.size)
     }
 
     @Test
@@ -256,7 +356,7 @@ class OutboxDrainerTest {
     @Test
     fun `resume point above zero saves bookmark`() = runTest {
         val drain = drainer()
-        store.add("resume_point", OutboxActionPayload(resumePointMs = 42_000L))
+        store.add("resume_point", OutboxActionPayload(resumeMs = 42_000L))
 
         drain.drain()
 
@@ -266,7 +366,7 @@ class OutboxDrainerTest {
     @Test
     fun `resume point zero clears the bookmark`() = runTest {
         val drain = drainer()
-        store.add("resume_point", OutboxActionPayload(resumePointMs = 0L))
+        store.add("resume_point", OutboxActionPayload(resumeMs = 0L))
 
         drain.drain()
 
@@ -297,6 +397,90 @@ class OutboxDrainerTest {
 
         assertEquals(1, report.deferred)
         assertEquals(1, store.failures.single().attempts)
+    }
+
+    @Test
+    fun `auth failure stops later tasks for the provider in the same drain`() = runTest {
+        val authFailures = mutableListOf<Long>()
+        val authProvider = object : MediaProvider by provider {
+            override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int =
+                throw ProviderAuthException("code=40 Wrong username or password")
+
+            override suspend fun setFavorite(
+                mediaType: ProviderMediaType,
+                externalId: String,
+                favorite: Boolean,
+            ): Boolean = throw ProviderAuthException("code=40 Wrong username or password")
+        }
+        store.add("favorite", OutboxActionPayload(isFavorite = true))
+        store.add("play_count", OutboxActionPayload(playCountDelta = 1, playTimestamps = listOf(1_000L)))
+        val drain = OutboxDrainer(
+            store = store,
+            providerLocator = { authProvider },
+            clock = { 1_000L },
+            logger = OmnisonicLogger(sink),
+            onAuthFailed = { authFailures += it },
+        )
+
+        val report = drain.drain(providerId = 7)
+
+        assertEquals(1, report.deferred)
+        assertEquals(2, store.tasks.size)
+        assertTrue(store.failures.isEmpty())
+        assertTrue(provider.submittedPlays.isEmpty())
+        assertEquals(listOf(7L), authFailures)
+    }
+
+    @Test
+    fun `an auth failed provider is not retried by the next drain`() = runTest {
+        var status = ProviderStatus.OK
+        val authProvider = object : MediaProvider by provider {
+            override suspend fun setFavorite(
+                mediaType: ProviderMediaType,
+                externalId: String,
+                favorite: Boolean,
+            ): Boolean = throw ProviderAuthException("expired token")
+        }
+        store.add("favorite", OutboxActionPayload(isFavorite = true))
+        val drain = OutboxDrainer(
+            store = store,
+            providerLocator = { authProvider },
+            clock = { 1_000L },
+            runGate = { status },
+            logger = OmnisonicLogger(sink),
+            onAuthFailed = { status = ProviderStatus.AUTH_FAILED },
+        )
+
+        val first = drain.drain(providerId = 7)
+        val second = drain.drain(providerId = 7)
+
+        assertEquals(1, first.deferred)
+        assertEquals(ProviderStatus.AUTH_FAILED, second.blockedBy)
+        assertEquals(1, store.tasks.size)
+    }
+
+    @Test
+    fun `successful task reports authentication success`() = runTest {
+        val successes = mutableListOf<Long>()
+        val drain = drainer(onAuthSucceeded = { successes += it })
+        store.add("favorite", OutboxActionPayload(isFavorite = true))
+
+        drain.drain(providerId = 7)
+
+        assertEquals(listOf(7L), successes)
+    }
+
+    @Test
+    fun `generic provider failure does not report an auth failure`() = runTest {
+        val authFailures = mutableListOf<Long>()
+        val drain = drainer(onAuthFailed = { authFailures += it })
+        store.add("favorite", OutboxActionPayload(isFavorite = true))
+        provider.failNext = true
+
+        drain.drain(providerId = 7)
+
+        assertTrue(authFailures.isEmpty())
+        assertEquals(1, store.failures.size)
     }
 
     @Test
@@ -389,7 +573,7 @@ class OutboxDrainerTest {
             externalId = "song-1",
             action = "resume_point",
             attempts = 0,
-            payloadJson = payloadAdapter.toJson(OutboxActionPayload(resumePointMs = 0L)),
+            payloadJson = payloadAdapter.toJson(OutboxActionPayload(resumeMs = 0L)),
         )
         val play = OutboxTask(
             id = 2L,

@@ -55,7 +55,7 @@ class PlaylistRepositoryTest : DatabaseTestBase() {
             now = 2_000,
         )
 
-        assertThat(playlistEntryDao.selectByPlaylist(playlist.id).map { it.entryOrder })
+        assertThat(playlistEntryDao.selectByPlaylist(playlist.id).map { it.position })
             .containsExactly(0, 1).inOrder()
     }
 }

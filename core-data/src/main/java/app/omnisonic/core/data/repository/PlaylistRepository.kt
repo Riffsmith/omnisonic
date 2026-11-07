@@ -28,12 +28,12 @@ class PlaylistRepository @Inject constructor(
         }
         val songId = songRepository.ensureSong(providerId, externalId, snapshot)
         val entryDao = db.playlistEntryDao()
-        val nextOrder = entryDao.selectMaxEntryOrder(playlistId)?.plus(1) ?: 0
+        val nextOrder = entryDao.selectMaxPosition(playlistId)?.plus(1) ?: 0
         val entryId = entryDao.upsert(
             PlaylistEntryEntity(
                 playlistId = playlistId,
                 providerId = providerId,
-                entryOrder = nextOrder,
+                position = nextOrder,
                 externalId = externalId,
                 songId = songId,
                 title = snapshot.title,

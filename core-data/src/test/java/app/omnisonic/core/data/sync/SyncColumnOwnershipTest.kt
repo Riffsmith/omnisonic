@@ -27,10 +27,10 @@ class SyncColumnOwnershipTest {
 
     private val songOwnership = mapOf(
         // Server-owned: written by SubsonicLibrarySyncer.updateServerFields.
-        "externalDataJson" to Owner.SERVER,
+        "providerPayloadJson" to Owner.SERVER,
         "albumId" to Owner.SERVER,
         "title" to Owner.SERVER,
-        "titleRoman" to Owner.SERVER,
+        "latinTitle" to Owner.SERVER,
         "sortTitle" to Owner.SERVER,
         "displayArtist" to Owner.SERVER,
         "filePath" to Owner.SERVER,
@@ -46,6 +46,11 @@ class SyncColumnOwnershipTest {
         "bitDepth" to Owner.SERVER,
         "channelCount" to Owner.SERVER,
         "serverRating" to Owner.SERVER,
+        "lastSeenSyncId" to Owner.SERVER,
+        // Sync-owned in both directions: tombstoneUnseen sets it for unseen
+        // rows, updateServerFields clears it when the server reports the song
+        // again (FIX-06). Never written by the app or user.
+        "missingOnServer" to Owner.SERVER,
         "updatedAt" to Owner.SERVER,
         // Locally-owned: playback state, editorial notes, downloads.
         "playCount" to Owner.LOCAL,
@@ -55,21 +60,20 @@ class SyncColumnOwnershipTest {
         "userRating" to Owner.LOCAL,
         "isFavorite" to Owner.LOCAL,
         "favoriteAt" to Owner.LOCAL,
-        "resumePointMs" to Owner.LOCAL,
+        "resumeMs" to Owner.LOCAL,
         "resumeUpdatedAt" to Owner.LOCAL,
-        "missingOnServer" to Owner.LOCAL,
         "replayGainTrack" to Owner.LOCAL,
         "replayGainAlbum" to Owner.LOCAL,
         "replayGainType" to Owner.LOCAL,
-        "clipStartMs" to Owner.LOCAL,
-        "clipEndMs" to Owner.LOCAL,
+        "windowStartMs" to Owner.LOCAL,
+        "windowEndMs" to Owner.LOCAL,
         "isAudiobook" to Owner.LOCAL,
     )
 
     private val albumOwnership = mapOf(
-        "externalDataJson" to Owner.SERVER,
+        "providerPayloadJson" to Owner.SERVER,
         "title" to Owner.SERVER,
-        "titleRoman" to Owner.SERVER,
+        "latinTitle" to Owner.SERVER,
         "sortTitle" to Owner.SERVER,
         "displayArtist" to Owner.SERVER,
         "year" to Owner.SERVER,
@@ -78,28 +82,30 @@ class SyncColumnOwnershipTest {
         "songCount" to Owner.SERVER,
         "genresJson" to Owner.SERVER,
         "serverRating" to Owner.SERVER,
+        "lastSeenSyncId" to Owner.SERVER,
         "updatedAt" to Owner.SERVER,
         "playCount" to Owner.LOCAL,
         "lastPlayed" to Owner.LOCAL,
         "userRating" to Owner.LOCAL,
         "isFavorite" to Owner.LOCAL,
         "favoriteAt" to Owner.LOCAL,
-        "resumeFilePath" to Owner.LOCAL,
+        "resumeTrackPath" to Owner.LOCAL,
         "isAudiobook" to Owner.LOCAL,
         "description" to Owner.LOCAL,
-        "discTitlesJson" to Owner.LOCAL,
+        "discNamesJson" to Owner.LOCAL,
         "isCompilation" to Owner.LOCAL,
     )
 
     private val artistOwnership = mapOf(
-        "externalDataJson" to Owner.SERVER,
+        "providerPayloadJson" to Owner.SERVER,
         "title" to Owner.SERVER,
-        "titleRoman" to Owner.SERVER,
+        "latinTitle" to Owner.SERVER,
         "sortTitle" to Owner.SERVER,
         "imagePath" to Owner.SERVER,
         "songCount" to Owner.SERVER,
         "albumCount" to Owner.SERVER,
         "serverRating" to Owner.SERVER,
+        "lastSeenSyncId" to Owner.SERVER,
         "updatedAt" to Owner.SERVER,
         "description" to Owner.LOCAL,
         "playCount" to Owner.LOCAL,

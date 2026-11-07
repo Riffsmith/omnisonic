@@ -45,11 +45,12 @@ interface ArtistDao {
         """
         UPDATE artists SET
             title = :title,
-            titleRoman = :titleRoman,
+            latinTitle = :latinTitle,
             sortTitle = :sortTitle,
             imagePath = :imagePath,
             songCount = :songCount,
             albumCount = :albumCount,
+            lastSeenSyncId = :lastSeenSyncId,
             updatedAt = :updatedAt
         WHERE providerId = :providerId AND externalId = :externalId
         """,
@@ -58,26 +59,28 @@ interface ArtistDao {
         providerId: Long,
         externalId: String,
         title: String,
-        titleRoman: String?,
+        latinTitle: String?,
         sortTitle: String?,
         imagePath: String?,
         songCount: Int,
         albumCount: Int,
+        lastSeenSyncId: Long,
         updatedAt: Long,
     )
 
     @Transaction
-    suspend fun upsertServerFields(artist: ArtistEntity): Long {
-        insertOrIgnore(artist)
+    suspend fun upsertServerFields(artist: ArtistEntity, lastSeenSyncId: Long): Long {
+        insertOrIgnore(artist.copy(lastSeenSyncId = lastSeenSyncId))
         updateServerFields(
             providerId = artist.providerId,
             externalId = artist.externalId ?: return 0,
             title = artist.title,
-            titleRoman = artist.titleRoman,
+            latinTitle = artist.latinTitle,
             sortTitle = artist.sortTitle,
             imagePath = artist.imagePath,
             songCount = artist.songCount,
             albumCount = artist.albumCount,
+            lastSeenSyncId = lastSeenSyncId,
             updatedAt = artist.updatedAt,
         )
         return selectIdByProviderAndExternal(artist.providerId, artist.externalId) ?: 0
@@ -95,13 +98,21 @@ interface ArtistDao {
     @Query("SELECT * FROM artists WHERE providerId = :providerId AND externalId = :externalId")
     suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): ArtistEntity?
 
-    /** Artists of this provider not seen in the sync and no longer linked to any song or album. */
+    @Query("SELECT MAX(lastSeenSyncId) FROM artists WHERE providerId = :providerId")
+    suspend fun selectMaxLastSeenSyncId(providerId: Long): Long?
+
+    /**
+     * Artists of this provider not stamped by the current sync run and no
+     * longer linked to any song or album. Rows without any stamp are unseen
+     * too: the caller (SubsonicLibrarySyncer.prune) may only reach pruning
+     * after the FIX-02 safety guards confirmed the walk was complete.
+     */
     @Query(
         """
         DELETE FROM artists
         WHERE providerId = :providerId
             AND externalId IS NOT NULL
-            AND externalId NOT IN (:seenExternalIds)
+            AND (lastSeenSyncId IS NULL OR lastSeenSyncId != :runId)
             AND id NOT IN (
                 SELECT artistId FROM song_artists WHERE providerId = :providerId
                 UNION
@@ -109,7 +120,7 @@ interface ArtistDao {
             )
         """,
     )
-    suspend fun deleteUnseenWithoutLinks(providerId: Long, seenExternalIds: List<String>)
+    suspend fun deleteUnseenWithoutLinks(providerId: Long, runId: Long)
 
     @Query("DELETE FROM artists WHERE id = :id")
     suspend fun deleteById(id: Long)

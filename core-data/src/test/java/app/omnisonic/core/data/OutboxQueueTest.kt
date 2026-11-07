@@ -37,20 +37,49 @@ class OutboxQueueTest : DatabaseTestBase() {
     }
 
     @Test
-    fun playTimestampsCapAtHundredKeepingTheNewest() = runDbTest {
+    fun playTimestampsKeepEveryEnqueuedPlayAndMatchTheDelta() = runDbTest {
         val provider = newProvider(id = 1)
         val queue = OutboxQueue(db, outboxDao, moshi = moshi)
+        val firstPlayedAt = 1_700_000_000_000L
+        val expected = (0 until 250).map { firstPlayedAt + it }
 
-        repeat(120) { index ->
-            queue.enqueuePlayCountDelta(provider.id, ProviderMediaType.SONG, "song-1", playedAtMs = index.toLong(), now = index.toLong())
+        repeat(250) { index ->
+            queue.enqueuePlayCountDelta(
+                provider.id,
+                ProviderMediaType.SONG,
+                "song-1",
+                playedAtMs = firstPlayedAt + index,
+                now = index.toLong(),
+            )
         }
 
         val payload = payloadOf(outboxDao.selectByProvider(provider.id).single().payloadJson!!)
-        assertThat(payload.playCountDelta).isEqualTo(120)
-        assertThat(payload.playTimestamps).hasSize(100)
-        // Overflow keeps the newest timestamps.
-        assertThat(payload.playTimestamps!!.first()).isEqualTo(20L)
-        assertThat(payload.playTimestamps!!.last()).isEqualTo(119L)
+        assertThat(payload.playTimestamps).containsExactlyElementsIn(expected).inOrder()
+        assertThat(payload.playCountDelta).isEqualTo(payload.playTimestamps!!.size)
+        assertThat(payload.lastPlayedAt).isEqualTo(expected.last())
+    }
+
+    @Test
+    fun mergingIntoALegacyTimestamplessRowReconcilesDeltaWithTimestamps() = runDbTest {
+        val provider = newProvider(id = 1)
+        val queue = OutboxQueue(db, outboxDao, moshi = moshi)
+        outboxDao.upsert(
+            OutboxItemEntity(
+                providerId = provider.id,
+                mediaType = ProviderMediaType.SONG.name,
+                externalId = "song-1",
+                action = OutboxActions.PLAY_COUNT,
+                payloadJson = """{"playCountDelta":3,"lastPlayedAt":5000}""",
+                nextAttemptAt = 0,
+                createdAt = 1_000,
+            ),
+        )
+
+        queue.enqueuePlayCountDelta(provider.id, ProviderMediaType.SONG, "song-1", playedAtMs = 6_000, now = 2_000)
+
+        val payload = payloadOf(outboxDao.selectByProvider(provider.id).single().payloadJson!!)
+        assertThat(payload.playTimestamps).containsExactly(5_000L, 5_001L, 5_002L, 6_000L).inOrder()
+        assertThat(payload.playCountDelta).isEqualTo(payload.playTimestamps!!.size)
     }
 
     @Test
@@ -59,7 +88,7 @@ class OutboxQueueTest : DatabaseTestBase() {
         val queue = OutboxQueue(db, outboxDao, moshi = moshi)
 
         queue.enqueueMediaChange(provider.id, ProviderMediaType.SONG, "song-1", OutboxActions.RESUME_POINT, OutboxActionPayload(playCountDelta = null), now = 1_000)
-        queue.enqueueMediaChange(provider.id, ProviderMediaType.SONG, "song-1", OutboxActions.RESUME_POINT, OutboxActionPayload(resumePointMs = 500, lastPlayedAt = 2_000), now = 2_000)
+        queue.enqueueMediaChange(provider.id, ProviderMediaType.SONG, "song-1", OutboxActions.RESUME_POINT, OutboxActionPayload(resumeMs = 500, lastPlayedAt = 2_000), now = 2_000)
 
         val items = outboxDao.selectByProvider(provider.id)
         assertThat(items).hasSize(1)

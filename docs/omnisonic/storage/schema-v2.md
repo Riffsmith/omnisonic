@@ -1,188 +1,153 @@
-# Schema v2/v3 — `schema-v2.md`
+# Database schema — clean v1 baseline (`schema-v2.md`)
 
-Purpose: Record the pre-release v1→v2 Room migration (including the
-clean-room table renames), the column and table deltas it carries, the queue
-snapshot and per-play history models, the v2→v3 queue-resume-position step, and
-the ownership/materialisation rules that depend on it.
+Purpose: Record the single exported pre-release database baseline, its table
+and column vocabulary, the sync-run stamp columns, the queue snapshot, the
+per-play history view, and the migration-harness contract.
 
-How derived: `core-data/schemas/app.omnisonic.core.data.db.OmnisonicDatabase/1.json`
-and `2.json`, `Migration1To2.kt`, `ProviderCascadeTriggers.kt`, and the migration
-harness test. The studied app is not a source.
+How derived: own-source reading of the Room entities, DAOs and
+`OmnisonicDatabaseFactory`, the exported Room schema artifact
+`core-data/schemas/app.omnisonic.core.data.db.OmnisonicDatabase/1.json`, and
+in-repository migration-harness runs. Evidence categories: own-source reading,
+exported Room schema artifacts, in-repository test runs.
 
 Confidence:
-- [VERIFIED] `OmnisonicDatabase.SCHEMA_VERSION = 3`; `Migrations.ALL` contains
-  exactly `Migration(1, 2)` and `Migration(2, 3)` in order; no destructive fallback
-  exists in either database builder.
-- [VERIFIED] `1.json` is unchanged from the pre-migration baseline; `2.json` is the KSP
-  export for version 2 (regenerated with the renamed v2 table names); `3.json` is the
-  export for version 3 (`queue_state.positionMs`).
-- [VERIFIED] `MigrationHarnessTest` seeds a real v1 database from `1.json`, runs the
-  migration, validates against `2.json`, and checks data, defaults, history, queue
-  restore, the renamed tables' data survival, trigger names, index names, and
-  cascade behaviour. A second harness test seeds a v2 database from `2.json`, runs
-  `MIGRATION_2_3`, validates against `3.json`, and asserts the preserved
-  `queue_state` row carries a null `positionMs`.
-- [UNKNOWN] Behaviour of the migration on a large production database — there is no
-  released v1 and no such database in this repository.
+- [VERIFIED] `OmnisonicDatabase.SCHEMA_VERSION = 1`; `Migrations.ALL` is empty;
+  neither database builder installs a destructive fallback.
+- [VERIFIED] `1.json` is the only exported schema. It contains every final
+  entity, the renamed column labels, `lastSeenSyncId` on songs/albums/artists/
+  playlists, `queue_state.positionMs`, and the `play_events_daily` view.
+- [VERIFIED] `MigrationHarnessTest` seeds a database from `1.json`, runs the
+  real migration path (the identity step today), validates it against the same
+  export, and reopens the seeded database through the production factory.
+- [UNKNOWN] Behaviour on a large production database — no released database
+  exists; the harness uses small fixture rows.
 
-Date: 2026-11-04
+Date: 2026-11-07
 
-Links: `sqlite-api29-floor.md`, `library-sync-ownership.md`,
-`aggregate-null-semantics.md`, `../providers/provider-connections.md`, `../decisions.md`
+Links: `library-sync-ownership.md`, `sqlite-api29-floor.md`,
+`aggregate-null-semantics.md`, `outbox-contract.md`, `../decisions.md`
 
 ---
 
-## Version and migration
+The filename is retained for link stability; its subject is now the v1
+baseline rather than the retired pre-release v2/v3 chain.
 
-[VERIFIED] The upgrade is one explicit step:
+## One clean baseline (D-11 option B)
+
+The pre-release v1 → v2 → v3 migration chain, its old schema exports and its
+migration harness were removed in FIX-15. No database from that chain was ever
+released, so there is nothing to upgrade. The repository now ships one clean
+v1 baseline:
 
 ```kotlin
-val MIGRATION_1_2: Migration = object : Migration(1, 2) {
-    override fun migrate(db: SupportSQLiteDatabase) { ... }
-}
+const val SCHEMA_VERSION = 1
+val Migrations.ALL: List<Migration> = emptyList()
 ```
 
-It tears down the v1 cascade triggers, rebuilds `providers`, rebuilds
-`download_items` as `download_queue`, renames `playlists_entries` →
-`playlist_items`, `internet_radios` → `radio_stations`, `offline_files` →
-`offline_media`, and `sync_status` → `sync_state`, creates `queue_entries`,
-`queue_state`, `play_events`, and the `play_events_daily` view, copies old
-`playback_events` rows into `play_events`, drops `playback_events`, and installs
-the provider cascade triggers under the v2 names. `PRAGMA recursive_triggers` is
-never enabled.
+A future schema change appends exactly one `Migration(1, 2)` to `Migrations.ALL`
+and exports `2.json`; the harness then seeds `1.json` and validates the result
+against `2.json`. No future migration is invented ahead of that change.
 
-## Clean-room table renames
+## Column vocabulary
 
-Approved by the user (option C: folded into the v2
-migration; precondition verified — no v2 database was ever installed on any
-device, `adb devices` empty and no install recorded in the project history).
+The baseline uses the durable labels below. The mapping is enforced by
+`BannedColumnScannerTest`, whose obsolete-label list lives in local Git
+configuration (`omnisonic.bannedColumns`, with `OMNISONIC_BANNED_COLUMNS` as a
+CI override).
 
-| v1 name | v2 name |
+| Table | Final column labels (renamed labels in bold) |
 |---|---|
-| `playlists_entries` | `playlist_items` |
-| `internet_radios` | `radio_stations` |
-| `download_items` | `download_queue` (rebuilt) |
-| `offline_files` | `offline_media` |
-| `sync_status` | `sync_state` |
+| `songs` | `latinTitle`**, `providerPayloadJson`**, `resumeMs`**, `windowStartMs`**, `windowEndMs`** |
+| `albums` | `latinTitle`**, `providerPayloadJson`**, `resumeTrackPath`**, `discNamesJson`** |
+| `artists` | `latinTitle`**, `providerPayloadJson`** |
+| `genres`, `library_sources`, `radio_stations` | `providerPayloadJson`** |
+| `playlists` | `providerPayloadJson`**, `ruleJson`** |
+| `playlist_items` | `position`** (entry order) |
+| `chapters` | `origin`**, `rank`** (chapter source kind/priority) |
 
-[VERIFIED] SQLite keeps table data attached through `ALTER TABLE RENAME`, but
-index names keep the old prefix, so the migration recreates every affected index
-under the v2 name (e.g. `index_playlist_items_providerId`). The migration test
-asserts the new index names exist and the old ones are gone.
+Generic identifiers such as `providerId`, `externalId`, `playCount`,
+`isFavorite` and `isAudiobook` are unchanged.
 
-## Tables added
+## Tables
 
 | Table | Purpose |
 |---|---|
-| `queue_entries` | Queue metadata snapshot; restores without a `songs` row |
-| `queue_state` | Single-row play index, shuffle order/seed, repeat/speed/pitch, source |
-| `play_events` | One row per play or skip (per-play history decision — see `../decisions.md`) |
+| `providers` | Provider rows: api type, endpoint blocks, secrets, options, mTLS |
+| `library_sources` | Provider-reported library roots and paths |
+| `artists`, `albums`, `songs`, `genres` | Synced library metadata plus local playback state |
+| `album_artists`, `song_artists` | Role-carrying artist links |
+| `playlists`, `playlist_items` | Playlists and their ordered entries |
+| `radio_stations` | Internet radio rows |
+| `chapters` | Chapter/segment rows attached to songs and albums |
+| `play_events` | One immutable row per play or skip |
+| `outbox_items` | Pending provider user-data changes |
+| `download_queue` | Download tasks, owned by a provider |
+| `offline_media` | Offline files and their source keys |
+| `saved_filters` | Saved search/library filters |
+| `sync_state` | Per-provider sync status |
+| `queue_entries`, `queue_state` | Queue snapshot and single-row transport state |
 
-`play_events_daily` is a view grouped by `(providerId, externalId, dayStartMs)`
-exposing `date`, `MAX(played)`, `MAX(skipped)`, `SUM(durationMs)`, and
-`COUNT(*) AS playCount`.
+`play_events_daily` is a view grouped by
+`(providerId, externalId, dayStartMs)` exposing `date`, `MAX(played)`,
+`MAX(skipped)`, `SUM(durationMs)`, and `COUNT(*) AS playCount`.
 
-[VERIFIED] `PlayCounter` writes one event per play and one per skip: a skip is
-`played = false, skipped = true` and does NOT increment `songs.playCount`.
-`PlayEventDao` serves per-play reads plus both rollup reads.
+## Sync-run stamps (FIX-01 / D-10)
 
-## Queue snapshot model
+[VERIFIED] `songs`, `albums`, `artists` and `playlists` carry a nullable
+`lastSeenSyncId` INTEGER. A full-sync run mints a unique id (DB-stamp floor plus
+a per-instance atomic sequence) and stamps every row it writes. Full-sync
+pruning selects rows whose stamp is NULL or different from the run id, behind
+the FIX-02 safety guards. Rows materialised outside sync keep NULL. The stamp
+columns are classified SERVER-owned in `SyncColumnOwnershipTest`.
+
+## Queue snapshot
 
 [VERIFIED] `queue_entries` stores the full metadata snapshot for every entry
 (`providerId`, `externalId`, optional `songRowId`, `title`, `artistName`,
 `albumExternalId`, `coverImageId`, `durationMs`, `isRadioStation`). Restoration
-reads `queue_entries` directly and never joins `songs`, so an entry whose song
-was never synced still restores with its title, artist, album id, cover id,
-duration, and radio flag. Materialised rows cascade on provider delete via the
-existing triggers.
+never joins `songs`, so an entry whose song was never synced still restores.
 
 [VERIFIED] `queue_state` is the single-row transport state (`playIndex`,
-repeat mode stored by name, `speed`, `pitch`, `sourceType`, `sourceData`) plus
-the shuffle order as an entry-index permutation (`shuffleOrderJson`) alongside
-the original `shuffleSeed`. The order is STORED rather than regenerated from the
-seed because the anchor index depends on the original entry order; a persisted
-permutation is validated on restore and dropped when invalid.
+repeat mode stored by name, `speed`, `pitch`, `sourceType`, `sourceData`,
+`positionMs`) plus the shuffle order as an entry-index permutation
+(`shuffleOrderJson`) alongside the original `shuffleSeed`. `positionMs` is the
+resume point of the current entry; NULL means no restore point.
 
-[VERIFIED] Schema v3 (`Migration(2, 3)`) adds the nullable `queue_state.positionMs`
-column — the resume point of the current entry. Null means "no restore point"
-(idle, stopped, or a track below the resume threshold). `QueueState.positionMs`
-defaults to 0 and is persisted only when the queue is in a playback session and
-the position passed the threshold while staying inside the track; `QueuePlayerImpl`
-carries the same guards on restore, so a stale end-of-track or just-started
-position never becomes a resume point.
+## Per-play history
 
-[VERIFIED] `core-data` `QueueSnapshotRepository` owns save/restore/clear;
-`:playback` `QueuePersistence` maps `QueueState` to and from the snapshots and
-validates the permutation. `QueuePersistenceCoordinator` (T8) debounces saves
-over `QueuePlayer.state`; the controller (T10) calls `flush()` on explicit pause
-and stop, and the service (T11) flushes on stop/background and restores at start.
+[VERIFIED] `PlayCounter` writes one `play_events` row per play and one per
+skip: a skip is `played = false, skipped = true` and does not increment
+`songs.playCount`. `PlayEventDao` serves per-play reads plus both rollup reads.
+The view keeps day-shaped reads for export/UI without merging the underlying
+history.
 
-## Tables removed
+## Triggers
 
-| Table | Replacement |
-|---|---|
-| `playback_events` | `play_events`; each old merged day row becomes one play event |
+[VERIFIED] `ProviderCascadeTriggers.CREATE_STATEMENTS` installs the
+provider-delete cascade set plus the playlist-entry trigger, all named after
+the final tables. The factory installs them in both `onCreate` and `onOpen`, so
+a fresh database and a reopened file database end with exactly one trigger per
+statement. `PRAGMA recursive_triggers` is never enabled.
 
-The original per-play count of an old merged day row cannot be recovered; the
-migration copies `played`, `skipped`, and `durationMs` unchanged and sets both
-`playedAtMs` and `dayStartMs` to the old `date`.
+## Materialisation and ownership
 
-## Columns added or changed
+[VERIFIED] `SongRepository.ensureSong` inserts a minimal song row for an
+unsynced `(providerId, externalId)` and never overwrites locally-owned columns.
+It is used by `PlayCounter`, `FavoritesRepository`, and `PlaylistRepository` so
+local state does not require a prior library sync. The SERVER/LOCAL column
+classification and the sync write rules live in `library-sync-ownership.md`.
 
-`providers`:
+## Migration harness
 
-| Column | Change | Notes |
-|---|---|---|
-| `kind` | added `TEXT NOT NULL DEFAULT 'REMOTE_SERVER'` | Old rows become `REMOTE_SERVER` |
-| `wifiOnly` | added `INTEGER NOT NULL DEFAULT 0` | Wi-Fi-only gate |
-| `mtlsEnabled` | added `INTEGER NOT NULL DEFAULT 0` | mTLS is opt-in; blobs alone cannot enable it |
-| `mtlsKeystoreBlob` | added `TEXT NULL` | Sealed PKCS#12 |
-| `mtlsAlias` | added `TEXT NULL` | Non-secret alias |
-| `trustedCertsBlob` | added `TEXT NULL` | Sealed JSON array of base64 DER certs |
-| `primaryScheme` | `NOT NULL` → nullable | `DEVICE`/`VIRTUAL` have no server endpoint |
-| `primaryHost` | `NOT NULL` → nullable | |
-| `primaryPort` | `NOT NULL` → nullable | |
-| `primaryPath` | `NOT NULL` → nullable | |
+[VERIFIED] `MigrationHarnessTest`:
 
-`download_queue` (v1 name `download_items`; renamed, rebuilt):
+1. asserts the current baseline is version 1 with no shipped migration step;
+2. seeds `1.json` with fixture rows exercising the renamed labels, then runs
+   `Migrations.ALL` (empty today) and validates the schema against `1.json`;
+3. reopens that seeded database through `OmnisonicDatabaseFactory`, which
+   proves Room's identity-hash validation and trigger installation on the
+   production path.
 
-| Column | Change | Notes |
-|---|---|---|
-| `providerId` | added `INTEGER NOT NULL` | Backfilled from `mediaKey`; no default owner |
-| `tempCache` | added `INTEGER NOT NULL` | No SQL default; new rows must choose |
-| `exportTarget` | added `TEXT NULL` | e.g. `MEDIASTORE_DOWNLOADS` |
-| `autoRuleId` | added `INTEGER NULL` | Future automatic-download rule |
-
-A `(providerId)` index was added alongside the existing unique `mediaKey` and
-`status` indexes.
-
-## Download orphan policy
-
-[VERIFIED] `mediaKey` is `stream:<providerId>:<externalId>:<maxBitRateKbps|auto>:
-<format|auto>`. The migration parses the numeric provider segment with
-`DownloadKeys.providerIdFromMediaKey` and keeps only rows whose provider row
-exists. A row with no reliable provider segment, or one pointing at a missing
-provider, is deleted. The migration never invents an owner.
-
-## Provider kinds and song materialization
-
-[VERIFIED] `kind` is stored by name: `REMOTE_SERVER`, `DEVICE`, `VIRTUAL`.
-`REMOTE_SERVER` requires a valid primary block in code; `DEVICE` and `VIRTUAL`
-load through `ProviderEndpoint.None`. See `../providers/provider-connections.md`
-for the endpoint model, capability traits, and availability gate, and
-`library-sync-ownership.md` for the column-ownership model.
-
-[VERIFIED] `SongRepository.ensureSong` inserts a minimal song row for an unsynced
-`(providerId, externalId)` and never overwrites locally-owned columns. It is used
-by `PlayCounter`, `FavoritesRepository`, and `PlaylistRepository` so local state
-does not require a prior library sync.
-
-## Trigger set
-
-[VERIFIED] `ProviderCascadeTriggers.CREATE_STATEMENTS` now has 17 provider-delete
-triggers (including `download_queue`, `play_events`, and `queue_entries`) plus the
-playlist-entry trigger (`trg_playlist_delete_playlist_items`), all named after the
-v2 tables. The migration tears down the v1-named triggers first and reinstalls the
-v2-named set, so both fresh and previously-opened v1 databases end with exactly
-one trigger per statement. The migration test asserts the names, the count, and
-that deleting a provider removes its owned rows.
+The harness is structural (Room schema validation plus direct SQLite queries)
+because a Robolectric SQLite image cannot faithfully reproduce every on-device
+SQLite behaviour.

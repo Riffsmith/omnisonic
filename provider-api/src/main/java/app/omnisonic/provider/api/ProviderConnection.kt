@@ -75,5 +75,7 @@ data class ProviderConnection(
         const val SECONDARY_BLOCK = 1
         const val DEFAULT_CONNECT_TIMEOUT_MS = 5_000
         const val DEFAULT_READ_TIMEOUT_MS = 15_000
+        const val MIN_READ_TIMEOUT_MS = 5_000
+        const val MAX_READ_TIMEOUT_MS = 120_000
     }
 }

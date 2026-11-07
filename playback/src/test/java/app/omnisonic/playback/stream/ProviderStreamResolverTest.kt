@@ -22,11 +22,11 @@ private fun entry(
     isRadioStation = isRadioStation,
 )
 
-private fun songRow(resumePointMs: Long? = null) = SongEntity(
+private fun songRow(resumeMs: Long? = null) = SongEntity(
     providerId = 1,
     externalId = "ext-1",
     title = "T1",
-    resumePointMs = resumePointMs,
+    resumeMs = resumeMs,
     updatedAt = 0,
 )
 
@@ -80,15 +80,15 @@ class ProviderStreamResolverTest {
 
     @Test
     fun `seeds the start position from the song resume point`() = runTest {
-        val stream = resolver("http://host/s", songRow(resumePointMs = 42_000)).resolve(entry())
+        val stream = resolver("http://host/s", songRow(resumeMs = 42_000)).resolve(entry())
 
         assertThat(stream!!.startPositionMs).isEqualTo(42_000L)
     }
 
     @Test
     fun `drops resume points at or past the end`() = runTest {
-        val atEnd = resolver("http://host/s", songRow(resumePointMs = 200_000)).resolve(entry())
-        val pastEnd = resolver("http://host/s", songRow(resumePointMs = 250_000)).resolve(entry())
+        val atEnd = resolver("http://host/s", songRow(resumeMs = 200_000)).resolve(entry())
+        val pastEnd = resolver("http://host/s", songRow(resumeMs = 250_000)).resolve(entry())
 
         assertThat(atEnd!!.startPositionMs).isEqualTo(0L)
         assertThat(pastEnd!!.startPositionMs).isEqualTo(0L)
@@ -96,7 +96,7 @@ class ProviderStreamResolverTest {
 
     @Test
     fun `keeps a resume point when the duration is unknown`() = runTest {
-        val stream = resolver("http://host/s", songRow(resumePointMs = 42_000))
+        val stream = resolver("http://host/s", songRow(resumeMs = 42_000))
             .resolve(entry(durationMs = null))
 
         assertThat(stream!!.startPositionMs).isEqualTo(42_000L)
@@ -113,7 +113,7 @@ class ProviderStreamResolverTest {
 
     @Test
     fun `radio entries skip the resume point and report live`() = runTest {
-        val stream = resolver("http://host/radio", songRow(resumePointMs = 42_000))
+        val stream = resolver("http://host/radio", songRow(resumeMs = 42_000))
             .resolve(entry(isRadioStation = true))
 
         assertThat(stream!!.isRadio).isTrue()

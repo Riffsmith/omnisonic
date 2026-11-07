@@ -27,6 +27,7 @@ import app.omnisonic.provider.api.ProviderRadio
 import app.omnisonic.provider.api.ProviderSong
 import app.omnisonic.provider.api.ProviderTraits
 import java.text.Collator
+import okhttp3.OkHttpClient
 
 /**
  * Device-library provider backed by MediaStore audio rows. Local files carry no
@@ -447,7 +448,8 @@ class LocalMediaProviderFactory(private val contentResolver: ContentResolver) : 
         reportsUserData = false,
     )
 
-    override fun create(connection: ProviderConnection): MediaProvider = LocalMediaProvider(contentResolver)
+    override fun create(connection: ProviderConnection, apiClient: OkHttpClient): MediaProvider =
+        LocalMediaProvider(contentResolver)
 
     companion object {
         const val API_TYPE = "local"

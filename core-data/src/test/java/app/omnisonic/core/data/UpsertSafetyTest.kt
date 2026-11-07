@@ -63,7 +63,7 @@ class UpsertSafetyTest : DatabaseTestBase() {
             PlaylistEntryEntity(
                 playlistId = playlist.id,
                 providerId = 1,
-                entryOrder = 0,
+                position = 0,
                 externalId = "song-1",
                 songId = firstId,
                 title = "Entry",

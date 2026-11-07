@@ -10,7 +10,7 @@ How derived: playback-api contracts (`PlaybackController`, `PlaybackEvents`,
 `playback/queue/` (`QueuePlayerImpl`, `QueuePersistenceCoordinator`), and the
 tests in this repository (`PlaybackControllerImplTest`, `PlaybackEventBusImplTest`,
 `LocalPlaybackRendererTest`, `QueuePlayerImplTest`, `QueuePersistenceTest`,
-`QueuePersistenceCoordinatorTest`). The studied app is not a source.
+`QueuePersistenceCoordinatorTest`). Evidence categories: own-source reading, in-repository test runs.
 
 Confidence:
 - [VERIFIED] `PlaybackEventBusImpl` is a `MutableSharedFlow` with replay 0, a
@@ -37,7 +37,7 @@ Confidence:
   (restored queue, natural queue end, explicit stop), `resume()` replays the
   queue's current slot through `QueuePlayer.replayCurrent()` instead of
   `fadeResume()`, so the pinned slot and its pending resume position are used.
-- [VERIFIED] Queue-position persistence (schema v3): `QueuePlayerImpl`
+- [VERIFIED] Queue-position persistence (schema v1): `QueuePlayerImpl`
   publishes `QueueState.positionMs` (pending restore position, or the live
   position once past `minResumePositionMs` = 10 s and strictly inside the
   track; 0 otherwise) with a 5 s publication granularity, so the coordinator's
@@ -64,10 +64,10 @@ Confidence:
   interactions with the notification, kill-relaunch restore timing. Needs
   hardware (Phase 4 deferred acceptance).
 
-Date: 2026-11-04
+Date: 2026-11-07
 
-Links: `audio-focus.md`, `exposed-player.md`, `../storage/schema-v2.md`,
-`../decisions.md`
+Links: `audio-focus.md`, `exposed-player.md`, `service-and-notifications.md`,
+`../storage/schema-v2.md`, `../decisions.md`
 
 ---
 

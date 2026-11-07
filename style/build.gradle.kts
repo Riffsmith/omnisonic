@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.androidLibrary)
     alias(libs.plugins.kotlinAndroid)
+    alias(libs.plugins.kotlinCompose)
 }
 
 android {
@@ -23,6 +24,9 @@ android {
 
 dependencies {
     api(project(":core-model"))
+    implementation(platform(libs.androidx.compose.bom))
+    api(libs.androidx.compose.ui)
+    api(libs.androidx.compose.material3)
     implementation(libs.moshi)
     implementation(libs.moshi.kotlin)
     testImplementation(libs.junit.jupiter)

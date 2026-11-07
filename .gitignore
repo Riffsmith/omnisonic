@@ -43,7 +43,6 @@ lint/
 # Agent contract files (name the studied app by design; never commit)
 AGENTS.md
 example-AGENTS.md
-Prompt.md
 progress/
 
 # Agent memory / study (keep out of app repo)

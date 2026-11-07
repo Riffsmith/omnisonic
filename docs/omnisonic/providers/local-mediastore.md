@@ -2,7 +2,7 @@
 
 Purpose: Pin how the device-library provider pages and filters real `MediaStore` queries on Android 11+, keeps albums with identical titles separate, and derives song metadata without reading `DATA`.
 
-How derived: The Android `ContentResolver` reference, AOSP `MediaProvider` and `SQLiteQueryBuilder` source at the Android 11 release tag, and the provider-local fake-`ContentProvider` tests. The studied app is not a source.
+How derived: The Android `ContentResolver` reference, AOSP `MediaProvider` and `SQLiteQueryBuilder` source at the Android 11 release tag, and the provider-local fake-`ContentProvider` tests. Evidence categories: public Android framework reference reading, public AOSP source reading, in-repository test runs.
 
 Confidence:
 - [VERIFIED] Android 11 `MediaProvider` only lifts `LIMIT` out of `sortOrder` for callers targeting below API 30; targeting API 30+ leaves it in place, where strict grammar rejects the `LIMIT` token.
@@ -11,7 +11,7 @@ Confidence:
 - [VERIFIED] Codec comes from the `DISPLAY_NAME` extension, falling back to the `MIME_TYPE` subtype; local `filePath` is no longer populated from `DATA`.
 - [INFERRED] `READ_EXTERNAL_STORAGE` with `maxSdkVersion="32"` is required for Android 10-12 while Android 13+ uses `READ_MEDIA_AUDIO`.
 
-Date: 2026-10-30
+Date: 2026-11-07
 
 Links: `../00-template.md`
 

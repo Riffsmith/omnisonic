@@ -132,6 +132,14 @@ class OmniPlayerImplTest {
     }
 
     @Test
+    fun `persisted cache size replaces the initial budget`() = runBlocking<Unit> {
+        settings.setCacheSizeBytes(2L * 1024 * 1024)
+        newPlayer()
+
+        await("cache budget applied") { cacheManager.maxBytes == 2L * 1024 * 1024 }
+    }
+
+    @Test
     fun `content and radio streams route direct even with cache-first`() = runBlocking<Unit> {
         settings.setCacheFirst(true)
         val player = newPlayer()

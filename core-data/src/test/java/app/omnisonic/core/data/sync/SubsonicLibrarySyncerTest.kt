@@ -6,6 +6,9 @@ import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.core.data.db.entity.SyncStatusEntity
 import app.omnisonic.core.data.json.JsonText
+import app.omnisonic.core.data.network.NetworkMonitor
+import app.omnisonic.core.data.network.NetworkState
+import app.omnisonic.core.data.network.ProviderStatusTracker
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.AllowAllRunGate
 import app.omnisonic.provider.api.MediaProvider
@@ -13,6 +16,7 @@ import app.omnisonic.provider.api.ProviderAlbum
 import app.omnisonic.provider.api.ProviderAlbumDetails
 import app.omnisonic.provider.api.ProviderAlbumRequest
 import app.omnisonic.provider.api.ProviderArtist
+import app.omnisonic.provider.api.ProviderAuthException
 import app.omnisonic.provider.api.ProviderBookmark
 import app.omnisonic.provider.api.ProviderCapabilities
 import app.omnisonic.provider.api.ProviderRunGate
@@ -111,11 +115,17 @@ private class FakeMediaProvider : MediaProvider {
 @Config(sdk = [34])
 class SubsonicLibrarySyncerTest : DatabaseTestBase() {
 
+    private class AlwaysOnlineMonitor : NetworkMonitor {
+        override fun current(): NetworkState = NetworkState(connected = true, wifi = true)
+    }
+
     private fun syncer(
         provider: MediaProvider,
         nowMs: () -> Long = { 7_000L },
         traits: ProviderTraits = ProviderTraits(),
         runGate: ProviderRunGate = AllowAllRunGate,
+        onAuthFailed: suspend (Long) -> Unit = {},
+        onAuthSucceeded: suspend (Long) -> Unit = {},
     ) = SubsonicLibrarySyncer(
         db,
         provider,
@@ -123,7 +133,11 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         traits = traits,
         runGate = runGate,
         nowMs = nowMs,
+        onAuthFailed = onAuthFailed,
+        onAuthSucceeded = onAuthSucceeded,
     )
+
+    private fun statusTracker() = ProviderStatusTracker(db, AlwaysOnlineMonitor())
 
     @Test
     fun `cancelling the sync records no failed sync status`() = runDbTest {
@@ -200,14 +214,15 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
             SongEntity(
                 id = 30, providerId = 1, externalId = "song-1", albumId = 20, title = "Old song title",
                 playCount = 7, userRating = 4, isFavorite = true, favoriteAt = 222,
-                resumePointMs = 1_000, replayGainTrack = -1.5, clipStartMs = 500,
+                resumeMs = 1_000, replayGainTrack = -1.5, windowStartMs = 500,
                 sampleRate = 44_100, updatedAt = 1_000,
             ),
         )
         songDao.upsert(
             SongEntity(
                 id = 31, providerId = 1, externalId = "song-3", albumId = 20, title = "Unbookmarked",
-                resumePointMs = 9_000, updatedAt = 1_000,
+                // Stamped by an earlier sync run so this run's prune sees it as vanished.
+                resumeMs = 9_000, lastSeenSyncId = 1, updatedAt = 1_000,
             ),
         )
 
@@ -264,9 +279,9 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         assertThat(song1.userRating).isEqualTo(4)
         assertThat(song1.isFavorite).isTrue()
         // The server bookmark carries no timestamp, so the local resume state wins.
-        assertThat(song1.resumePointMs).isEqualTo(1_000)
+        assertThat(song1.resumeMs).isEqualTo(1_000)
         assertThat(song1.replayGainTrack).isEqualTo(-1.5)
-        assertThat(song1.clipStartMs).isEqualTo(500)
+        assertThat(song1.windowStartMs).isEqualTo(500)
         assertThat(song1.sampleRate).isEqualTo(44_100)
         assertThat(song1.codec).isEqualTo("flac")
         assertThat(song1.bitrateKbps).isEqualTo(1000)
@@ -275,9 +290,11 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         val song2 = songDao.selectByProviderAndExternal(1, "song-2")!!
         assertThat(song2.albumId).isEqualTo(20)
         assertThat(song2.trackNo).isEqualTo(2)
-        // song-3 is no longer on the server and has no play history or outbox
-        // rows, so a full sync prunes it.
-        assertThat(songDao.selectByProviderAndExternal(1, "song-3")).isNull()
+        // song-3 is no longer on the server; its local resume point tombstones
+        // it instead of letting the prune delete it (D-9).
+        val song3 = songDao.selectByProviderAndExternal(1, "song-3")!!
+        assertThat(song3.missingOnServer).isTrue()
+        assertThat(song3.resumeMs).isEqualTo(9_000)
 
         assertThat(songArtistDao.selectBySong(30).single().artistId).isEqualTo(10)
         assertThat(albumArtistDao.selectByAlbum(20).single().artistId).isEqualTo(10)
@@ -286,7 +303,7 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         assertThat(playlist.title).isEqualTo("Fireside")
         assertThat(playlist.entryCount).isEqualTo(1)
         val entry = playlistEntryDao.selectByPlaylist(playlist.id).single()
-        assertThat(entry.entryOrder).isEqualTo(0)
+        assertThat(entry.position).isEqualTo(0)
         assertThat(entry.songId).isEqualTo(30)
 
         assertThat(genreDao.selectByProvider(1).single().songCount).isEqualTo(9)
@@ -363,6 +380,66 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         assertThat(status.lastSyncResult).isEqualTo(SubsonicLibrarySyncer.RESULT_FAILED)
         assertThat(status.lastSyncMessage).isEqualTo("boom")
         assertThat(status.lastFullSyncAt).isNull()
+    }
+
+    @Test
+    fun `auth failure marks the provider auth failed and rethrows`() = runDbTest {
+        newProvider(id = 1)
+        val tracker = statusTracker()
+        val failing = object : MediaProvider by FakeMediaProvider() {
+            override suspend fun listArtists(): List<ProviderArtist> =
+                throw ProviderAuthException("code=40 Wrong username or password")
+        }
+
+        assertThrows(ProviderAuthException::class.java) {
+            kotlinx.coroutines.runBlocking {
+                syncer(
+                    failing,
+                    onAuthFailed = tracker::markAuthFailed,
+                    onAuthSucceeded = tracker::clearAuthFailed,
+                ).runFullSync()
+            }
+        }
+
+        assertThat(tracker.check(1)).isEqualTo(ProviderStatus.AUTH_FAILED)
+    }
+
+    @Test
+    fun `successful sync clears a prior auth failure`() = runDbTest {
+        newProvider(id = 1)
+        val tracker = statusTracker()
+        tracker.markAuthFailed(1)
+        assertThat(tracker.check(1)).isEqualTo(ProviderStatus.AUTH_FAILED)
+
+        syncer(
+            FakeMediaProvider(),
+            onAuthFailed = tracker::markAuthFailed,
+            onAuthSucceeded = tracker::clearAuthFailed,
+        ).runFullSync()
+
+        assertThat(tracker.check(1)).isEqualTo(ProviderStatus.OK)
+    }
+
+    @Test
+    fun `generic sync failure does not mark auth failed`() = runDbTest {
+        newProvider(id = 1)
+        val tracker = statusTracker()
+        val failing = object : MediaProvider by FakeMediaProvider() {
+            override suspend fun listArtists(): List<ProviderArtist> =
+                throw IllegalStateException("network outage")
+        }
+
+        assertThrows(IllegalStateException::class.java) {
+            kotlinx.coroutines.runBlocking {
+                syncer(
+                    failing,
+                    onAuthFailed = tracker::markAuthFailed,
+                    onAuthSucceeded = tracker::clearAuthFailed,
+                ).runFullSync()
+            }
+        }
+
+        assertThat(tracker.check(1)).isEqualTo(ProviderStatus.OK)
     }
 
     @Test

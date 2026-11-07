@@ -23,6 +23,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowContentResolver
+import okhttp3.OkHttpClient
 
 private data class RecordedQuery(
     val uri: Uri,
@@ -311,7 +312,7 @@ class LocalMediaProviderTest {
         val factory = LocalMediaProviderFactory(context.contentResolver)
 
         assertThat(factory.apiType()).isEqualTo("local")
-        assertThat(factory.create(ProviderConnection(providerId = 1))).isInstanceOf(LocalMediaProvider::class.java)
+        assertThat(factory.create(ProviderConnection(providerId = 1), OkHttpClient())).isInstanceOf(LocalMediaProvider::class.java)
     }
 
     @Test

@@ -24,6 +24,7 @@ android {
 
 dependencies {
     api(project(":core-model"))
+    api(libs.okhttp)
     implementation(libs.moshi)
     ksp(libs.moshi.kotlin.codegen)
     testImplementation(libs.junit.jupiter)

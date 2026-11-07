@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       OMNISONIC_BANNED_PATTERNS: ${{ secrets.OMNISONIC_BANNED_PATTERNS }}
+      OMNISONIC_BANNED_COLUMNS: ${{ secrets.OMNISONIC_BANNED_COLUMNS }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,6 +20,9 @@ jobs:
           java-version: 17
 
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: scanner self-test
+        run: scripts/test-check-banned-names.sh
 
       - name: banned-name scan
         run: git ls-files -z | xargs -0 -r scripts/check-banned-names.sh

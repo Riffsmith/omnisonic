@@ -1,6 +1,7 @@
 package app.omnisonic.core.data.providers
 
 import app.omnisonic.core.data.DatabaseTestBase
+import app.omnisonic.core.data.silentTestLogger
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.dao.ProviderDao
 import app.omnisonic.core.network.ClientProfile
@@ -33,7 +34,7 @@ private class CountingProviderFactory(
 
     override fun apiType(): String = "counting"
 
-    override fun create(connection: ProviderConnection): MediaProvider {
+    override fun create(connection: ProviderConnection, apiClient: OkHttpClient): MediaProvider {
         createdProviders += connection.providerId
         capturedConnections += connection
         val callback: suspend (Int) -> Unit = { block -> onPreferredBlockChange(connection.providerId, block) }
@@ -129,6 +130,7 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
             database = db,
             providerRegistry = ProviderRegistry(listOf(factory)),
             mapper = ProviderConfigMapper(codec),
+            logger = silentTestLogger,
             mediaClientFactory = { builtClients += 1; OkHttpClient() },
         )
         return clientRegistry to factory
@@ -155,6 +157,28 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
         assertThat(first).isSameInstanceAs(second)
         assertThat(factory.createdProviders).containsExactly(1L)
         assertThat(builtClients).isEqualTo(1)
+    }
+
+    @Test
+    fun `persisted read timeout reaches both connection specs`() = runDbTest {
+        newProvider(id = 1, name = "a").let { row ->
+            providerDao.upsert(
+                row.copy(api = "counting", optionsJson = """{"readTimeoutMs":45000}"""),
+            )
+        }
+        val recorder = RecordingClientFactory()
+        val registry = ProviderClientRegistry(
+            database = db,
+            providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
+            mapper = ProviderConfigMapper(codec),
+            logger = silentTestLogger,
+            mediaClientFactory = recorder::build,
+            apiClientFactory = recorder::build,
+        )
+
+        registry.providerFor(1)
+
+        assertThat(recorder.specs.map { it.readTimeoutMs }).containsExactly(45_000L, 45_000L)
     }
 
     @Test
@@ -227,6 +251,7 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
             database = db,
             providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
             mapper = ProviderConfigMapper(codec),
+            logger = silentTestLogger,
             mediaClientFactory = media::build,
             apiClientFactory = api::build,
         )
@@ -271,6 +296,7 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
             database = db,
             providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
             mapper = ProviderConfigMapper(codec),
+            logger = silentTestLogger,
             mediaClientFactory = media::build,
             apiClientFactory = api::build,
         )
@@ -301,6 +327,7 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
             database = db,
             providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
             mapper = ProviderConfigMapper(codec),
+            logger = silentTestLogger,
             mediaClientFactory = { OkHttpClient() },
             apiClientFactory = { OkHttpClient() },
         )
@@ -318,6 +345,7 @@ class ProviderClientRegistryTest : DatabaseTestBase() {
             database = db,
             providerRegistry = ProviderRegistry(listOf(CountingProviderFactory { _, _ -> })),
             mapper = ProviderConfigMapper(codec),
+            logger = silentTestLogger,
             mediaClientFactory = { OkHttpClient() },
             apiClientFactory = { OkHttpClient() },
         )

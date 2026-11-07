@@ -15,7 +15,7 @@ data class InternetRadioEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val providerId: Long,
     val externalId: String? = null,
-    val externalDataJson: String? = null,
+    val providerPayloadJson: String? = null,
     val title: String,
     val streamUrl: String,
     val description: String? = null,

@@ -1,11 +1,13 @@
 package app.omnisonic.core.data.providers
 
 import app.omnisonic.core.data.DatabaseTestBase
+import app.omnisonic.core.data.silentTestLogger
 import app.omnisonic.core.data.db.entity.ProviderEntity
 import app.omnisonic.core.data.security.AesGcmCredentialCodec
 import app.omnisonic.core.data.security.SecretKeySource
 import app.omnisonic.core.data.security.SecretPayload
 import app.omnisonic.provider.api.ProviderRegistry
+import app.omnisonic.provider.navidrome.SubsonicClient
 import app.omnisonic.provider.navidrome.SubsonicProviderFactory
 import com.google.common.truth.Truth.assertThat
 import java.io.ByteArrayOutputStream
@@ -95,6 +97,7 @@ class MtlsEndToEndHandshakeTest : DatabaseTestBase() {
             database = db,
             providerRegistry = ProviderRegistry(listOf(SubsonicProviderFactory())),
             mapper = mapper,
+            logger = silentTestLogger,
         )
 
     @Test
@@ -104,6 +107,11 @@ class MtlsEndToEndHandshakeTest : DatabaseTestBase() {
 
         val mediaClient = registry.httpClientFor(1)!!
         val apiClient = registry.apiClientFor(1)!!
+
+        // FIX-09 part 1: the provider rides the registry-built API client.
+        val provider = registry.providerFor(1)
+        assertThat(provider).isInstanceOf(SubsonicClient::class.java)
+        assertThat((provider as SubsonicClient).http).isSameInstanceAs(apiClient)
 
         MockWebServer().use { server ->
             server.useHttps(demandingClientCertificates(serverHandshake().sslSocketFactory()), false)
@@ -124,8 +132,14 @@ class MtlsEndToEndHandshakeTest : DatabaseTestBase() {
     @Test
     fun disabledMtlsFailsTheHandshakeAgainstAClientCertDemandingServer() = runDbTest {
         seedMtlsProvider(id = 1)
-        // Trust anchors stay; only the client identity is dropped, so the
-        // failure below is the missing client certificate, not server trust.
+        // Since FIX-07 the anchors are honored even without a keystore, so the
+        // server certificate verifies and the failure below is genuinely the
+        // missing client certificate (enabledMtlsCompletesRealHandshakes...
+        // accepts the same server with the identity present). The surfaced
+        // type is race-dependent under TLS 1.3 — the server's
+        // certificate_required alert (SSLHandshakeException) or the broken
+        // pipe from the mid-flight abort (SocketException) — so only
+        // IOException is pinned.
         providerDao.upsert(providerDao.selectById(1)!!.copy(mtlsEnabled = false, updatedAt = 2_000))
         val registry = registry()
 
@@ -141,7 +155,7 @@ class MtlsEndToEndHandshakeTest : DatabaseTestBase() {
                 ).execute().use { it.body!!.string() }
             }.exceptionOrNull()
 
-            assertThat(failure).isInstanceOf(javax.net.ssl.SSLHandshakeException::class.java)
+            assertThat(failure).isInstanceOf(java.io.IOException::class.java)
         }
     }
 

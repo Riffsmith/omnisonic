@@ -69,14 +69,18 @@ interface SongDao {
     /**
      * Server-owned columns only; locally-owned playback state (play counts,
      * favorites, ratings, resume points, replay gain, clips) is never in the
-     * SET list.
+     * SET list. [lastSeenSyncId] stamps the row as seen by the sync run that
+     * wrote it (D-10). [missingOnServer] is sync-owned in both directions:
+     * [tombstoneUnseen] sets it for rows the server stopped reporting, and
+     * this update clears it because the caller only runs for a song the
+     * server just reported again (FIX-06).
      */
     @Query(
         """
         UPDATE songs SET
             albumId = :albumId,
             title = :title,
-            titleRoman = :titleRoman,
+            latinTitle = :latinTitle,
             sortTitle = :sortTitle,
             displayArtist = :displayArtist,
             filePath = :filePath,
@@ -88,6 +92,8 @@ interface SongDao {
             imagePath = :imagePath,
             codec = :codec,
             bitrateKbps = :bitrateKbps,
+            missingOnServer = 0,
+            lastSeenSyncId = :lastSeenSyncId,
             updatedAt = :updatedAt
         WHERE providerId = :providerId AND externalId = :externalId
         """,
@@ -97,7 +103,7 @@ interface SongDao {
         externalId: String,
         albumId: Long?,
         title: String,
-        titleRoman: String?,
+        latinTitle: String?,
         sortTitle: String?,
         displayArtist: String?,
         filePath: String?,
@@ -109,18 +115,19 @@ interface SongDao {
         imagePath: String?,
         codec: String?,
         bitrateKbps: Int?,
+        lastSeenSyncId: Long,
         updatedAt: Long,
     )
 
     @Transaction
-    suspend fun upsertServerFields(song: SongEntity): Long {
-        insertOrIgnore(song)
+    suspend fun upsertServerFields(song: SongEntity, lastSeenSyncId: Long): Long {
+        insertOrIgnore(song.copy(lastSeenSyncId = lastSeenSyncId))
         updateServerFields(
             providerId = song.providerId,
             externalId = song.externalId ?: return 0,
             albumId = song.albumId,
             title = song.title,
-            titleRoman = song.titleRoman,
+            latinTitle = song.latinTitle,
             sortTitle = song.sortTitle,
             displayArtist = song.displayArtist,
             filePath = song.filePath,
@@ -132,6 +139,7 @@ interface SongDao {
             imagePath = song.imagePath,
             codec = song.codec,
             bitrateKbps = song.bitrateKbps,
+            lastSeenSyncId = lastSeenSyncId,
             updatedAt = song.updatedAt,
         )
         return selectIdByProviderAndExternal(song.providerId, song.externalId) ?: 0
@@ -160,19 +168,19 @@ interface SongDao {
 
     @Query(
         """
-        UPDATE songs SET resumePointMs = :resumePointMs, lastPlayed = :now, resumeUpdatedAt = :now
+        UPDATE songs SET resumeMs = :resumeMs, lastPlayed = :now, resumeUpdatedAt = :now
         WHERE id = :id
         """,
     )
-    suspend fun setResumePoint(id: Long, resumePointMs: Long, now: Long)
+    suspend fun setResumePoint(id: Long, resumeMs: Long, now: Long)
 
     @Query(
         """
-        UPDATE songs SET resumePointMs = :resumePointMs, resumeUpdatedAt = :serverUpdatedAtMs
+        UPDATE songs SET resumeMs = :resumeMs, resumeUpdatedAt = :serverUpdatedAtMs
         WHERE id = :id
         """,
     )
-    suspend fun applyServerResumePoint(id: Long, resumePointMs: Long?, serverUpdatedAtMs: Long)
+    suspend fun applyServerResumePoint(id: Long, resumeMs: Long?, serverUpdatedAtMs: Long)
 
     @Query("UPDATE songs SET userRating = :rating WHERE id = :id")
     suspend fun setUserRating(id: Long, rating: Int?)
@@ -183,40 +191,74 @@ interface SongDao {
     @Query("UPDATE songs SET skipped = 1, lastSkipped = :now WHERE id = :id")
     suspend fun markSkipped(id: Long, now: Long)
 
+    @Query("SELECT MAX(lastSeenSyncId) FROM songs WHERE providerId = :providerId")
+    suspend fun selectMaxLastSeenSyncId(providerId: Long): Long?
+
+    @Query("SELECT COUNT(*) FROM songs WHERE providerId = :providerId")
+    suspend fun selectCountByProvider(providerId: Long): Int
+
+    /**
+     * Rows the current run did not stamp are unseen; rows without any stamp
+     * count too, because the caller (SubsonicLibrarySyncer.prune) may only
+     * reach pruning after the FIX-02 safety guards confirmed the walk was
+     * complete: non-empty seen-set, seen songs at least half the known count,
+     * no failed album fetch. D-9: rated, resumed or clipped songs carry local
+     * value and are preserved through tombstoning; favorite status alone does
+     * not block deletion.
+     */
     @Query(
         """
         UPDATE songs SET missingOnServer = 1
         WHERE providerId = :providerId
             AND missingOnServer = 0
             AND externalId IS NOT NULL
-            AND externalId NOT IN (:seenExternalIds)
+            AND (lastSeenSyncId IS NULL OR lastSeenSyncId != :runId)
             AND (
                 playCount > 0
+                OR userRating IS NOT NULL
+                OR resumeMs IS NOT NULL
+                OR windowStartMs IS NOT NULL
+                OR windowEndMs IS NOT NULL
                 OR externalId IN (
                     SELECT externalId FROM outbox_items WHERE providerId = :providerId
                 )
             )
         """,
     )
-    suspend fun tombstoneUnseen(providerId: Long, seenExternalIds: List<String>)
+    suspend fun tombstoneUnseen(providerId: Long, runId: Long)
 
+    /**
+     * Deletable = unseen with none of the tombstone protections. The D-9
+     * columns are excluded here directly, so rated, resumed or clipped songs
+     * can never be deleted even if the tombstone pass missed them; the stamp
+     * predicate may only run behind the FIX-02 safety guards of
+     * SubsonicLibrarySyncer.prune.
+     */
     @Query(
         """
         SELECT id FROM songs
         WHERE providerId = :providerId
-            AND externalId IS NOT NULL
             AND missingOnServer = 0
             AND playCount = 0
-            AND externalId NOT IN (:seenExternalIds)
+            AND userRating IS NULL
+            AND resumeMs IS NULL
+            AND windowStartMs IS NULL
+            AND windowEndMs IS NULL
+            AND (lastSeenSyncId IS NULL OR lastSeenSyncId != :runId)
             AND externalId NOT IN (
                 SELECT externalId FROM outbox_items WHERE providerId = :providerId
             )
         """,
     )
-    suspend fun selectUnseenDeletableIds(providerId: Long, seenExternalIds: List<String>): List<Long>
+    suspend fun selectUnseenDeletableIds(providerId: Long, runId: Long): List<Long>
 
     @Query("DELETE FROM songs WHERE id IN (:ids)")
-    suspend fun deleteByIds(ids: List<Long>)
+    suspend fun deleteByIdsChunk(ids: List<Long>)
+
+    @Transaction
+    suspend fun deleteByIds(ids: List<Long>) {
+        ids.forEachSqlChunk { deleteByIdsChunk(it) }
+    }
 
     @Query("DELETE FROM songs WHERE id = :id")
     suspend fun deleteById(id: Long)

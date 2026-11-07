@@ -10,18 +10,19 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.tls.HandshakeCertificates
 import okhttp3.tls.HeldCertificate
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 private const val CLIENT_KEY_PASSWORD = "gate-test"
+private const val LOOPBACK = "127.0.0.1"
 
 class TlsHandshakeTest {
 
     @Test
     fun pkcs12ClientIdentityCompletesMtlsHandshakeToServerRequiringCertificates() {
-        val loopback = "127.0.0.1"
         val serverCertificate = HeldCertificate.Builder()
             .addSubjectAlternativeName("localhost")
-            .addSubjectAlternativeName(loopback)
+            .addSubjectAlternativeName(LOOPBACK)
             .build()
         val clientCertificate = HeldCertificate.Builder()
             .addSubjectAlternativeName("omnisonic-client")
@@ -52,6 +53,143 @@ class TlsHandshakeTest {
         }
     }
 
+    /**
+     * FIX-07: trust anchors must apply without a client keystore. The failure
+     * proof in the demanding-server test below is triangulated by this test:
+     * the same anchors verify this exact server certificate when client auth
+     * is not demanded, so a rejection under the demand can only be the absent
+     * client certificate.
+     */
+    @Test
+    fun trustAnchorsAloneCompleteTheHandshakeToASelfSignedServerWithoutAClientKeystore() {
+        val serverCertificate = selfSignedLoopbackCertificate()
+        val client = HttpClientFactory(OmnisonicLogger(SilentSink)).create(
+            ConnectionSpec(trustedCertificates = listOf(serverCertificate.certificate)),
+        )
+
+        MockWebServer().use { server ->
+            server.useHttps(serverHandshakeFor(serverCertificate).sslSocketFactory(), false)
+            server.enqueue(MockResponse().setBody("anchors-only-ok"))
+            server.start()
+
+            val body = client.newCall(
+                Request.Builder().url("https://$LOOPBACK:${server.port}/rest/ping.view").build(),
+            ).execute().use { it.body!!.string() }
+
+            assertThat(body).isEqualTo("anchors-only-ok")
+        }
+    }
+
+    @Test
+    fun mediaProfileClientsHonorTrustAnchorsWithoutAClientKeystore() {
+        val serverCertificate = selfSignedLoopbackCertificate()
+        val client = HttpClientFactory(OmnisonicLogger(SilentSink)).create(
+            ConnectionSpec(
+                profile = ClientProfile.MEDIA,
+                trustedCertificates = listOf(serverCertificate.certificate),
+            ),
+        )
+
+        MockWebServer().use { server ->
+            server.useHttps(serverHandshakeFor(serverCertificate).sslSocketFactory(), false)
+            server.enqueue(MockResponse().setBody("media-anchors-ok"))
+            server.start()
+
+            val body = client.newCall(
+                Request.Builder().url("https://$LOOPBACK:${server.port}/rest/stream").build(),
+            ).execute().use { it.body!!.string() }
+
+            assertThat(body).isEqualTo("media-anchors-ok")
+            assertThat(client.readTimeoutMillis).isAtLeast(ConnectionSpec.MEDIA_READ_TIMEOUT_MS.toInt())
+        }
+    }
+
+    @Test
+    fun aSelfSignedServerIsRejectedWithoutConfiguredTrustAnchors() {
+        val serverCertificate = selfSignedLoopbackCertificate()
+        val client = HttpClientFactory(OmnisonicLogger(SilentSink)).create(ConnectionSpec())
+
+        MockWebServer().use { server ->
+            server.useHttps(serverHandshakeFor(serverCertificate).sslSocketFactory(), false)
+            server.start()
+
+            assertThrows(javax.net.ssl.SSLHandshakeException::class.java) {
+                client.newCall(
+                    Request.Builder().url("https://$LOOPBACK:${server.port}/rest/ping.view").build(),
+                ).execute().use { it.body?.string() }
+            }
+        }
+    }
+
+    /** The anchors replace platform trust; anything outside them must still fail. */
+    @Test
+    fun trustAnchorsDoNotTrustCertificatesOutsideTheAnchorSet() {
+        val serverCertificate = selfSignedLoopbackCertificate()
+        val unrelatedCertificate = HeldCertificate.Builder()
+            .addSubjectAlternativeName("localhost")
+            .addSubjectAlternativeName(LOOPBACK)
+            .build()
+        val client = HttpClientFactory(OmnisonicLogger(SilentSink)).create(
+            ConnectionSpec(trustedCertificates = listOf(unrelatedCertificate.certificate)),
+        )
+
+        MockWebServer().use { server ->
+            server.useHttps(serverHandshakeFor(serverCertificate).sslSocketFactory(), false)
+            server.start()
+
+            assertThrows(javax.net.ssl.SSLHandshakeException::class.java) {
+                client.newCall(
+                    Request.Builder().url("https://$LOOPBACK:${server.port}/rest/ping.view").build(),
+                ).execute().use { it.body?.string() }
+            }
+        }
+    }
+
+    /**
+     * mTLS disabled (no client keystore), trust anchors present. The failure is
+     * the missing client certificate, proven by triangulation: the anchors-only
+     * client passes server verification against this exact certificate when the
+     * server does not demand client auth (see the anchors-only test), and the
+     * same demanding server accepts the keystore+anchors client (see the mTLS
+     * test). Only the absent keystore differs here.
+     *
+     * The surfaced client-side error is pinned only as IOException: under JDK
+     * TLS 1.3 the server aborts on the empty client certificate while the
+     * client is still writing its flight, so the caller sees either the
+     * server's certificate_required alert (SSLHandshakeException) or the
+     * resulting broken pipe (SocketException), depending on which side wins
+     * the race. Asserting the exact type would be timing-dependent.
+     */
+    @Test
+    fun clientCertificateDemandingServerRejectsClientsWithoutAKeystore() {
+        val serverCertificate = selfSignedLoopbackCertificate()
+        val clientCertificate = HeldCertificate.Builder()
+            .addSubjectAlternativeName("omnisonic-client")
+            .build()
+        val client = HttpClientFactory(OmnisonicLogger(SilentSink)).create(
+            ConnectionSpec(trustedCertificates = listOf(serverCertificate.certificate)),
+        )
+
+        MockWebServer().use { server ->
+            server.useHttps(
+                demandingClientCertificates(serverHandshakeFor(serverCertificate, clientCertificate).sslSocketFactory()),
+                false,
+            )
+            server.start()
+
+            assertThrows(java.io.IOException::class.java) {
+                client.newCall(
+                    Request.Builder().url("https://$LOOPBACK:${server.port}/rest/ping.view").build(),
+                ).execute().use { it.body?.string() }
+            }
+        }
+    }
+
+    private fun selfSignedLoopbackCertificate(): HeldCertificate = HeldCertificate.Builder()
+        .addSubjectAlternativeName("localhost")
+        .addSubjectAlternativeName(LOOPBACK)
+        .build()
+
     private fun pkcs12BytesFor(certificate: HeldCertificate, password: CharArray): ByteArray {
         val keyStore = KeyStore.getInstance("PKCS12").apply { load(null, null) }
         keyStore.setKeyEntry("omnisonic-test-client", certificate.keyPair.private, password, arrayOf(certificate.certificate))
@@ -65,6 +203,11 @@ class TlsHandshakeTest {
         HandshakeCertificates.Builder()
             .heldCertificate(certificate)
             .addTrustedCertificate(clientCertificate.certificate)
+            .build()
+
+    private fun serverHandshakeFor(certificate: HeldCertificate): HandshakeCertificates =
+        HandshakeCertificates.Builder()
+            .heldCertificate(certificate)
             .build()
 
     @Suppress("LargeClass")

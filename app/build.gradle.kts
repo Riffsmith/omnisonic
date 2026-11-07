@@ -93,6 +93,10 @@ dependencies {
     testImplementation(libs.truth)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.mockk)
+    testImplementation(libs.okhttp.mockwebserver)
+    // core-data keeps room as `implementation`; the wiring test opens the DB.
+    testImplementation(libs.room.runtime)
     testImplementation(libs.hilt.android.testing)
     kspTest(libs.hilt.compiler)
 }

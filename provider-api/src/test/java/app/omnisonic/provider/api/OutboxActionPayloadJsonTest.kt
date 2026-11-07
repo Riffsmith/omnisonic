@@ -20,7 +20,7 @@ class OutboxActionPayloadJsonTest {
             playCountDelta = 3,
             isFavorite = true,
             userRating = 5,
-            resumePointMs = 42_000L,
+            resumeMs = 42_000L,
             lastPlayedAt = 1_700_000_000_000L,
             playTimestamps = listOf(1_700_000_000_000L, 1_700_000_000_500L),
         )
@@ -29,7 +29,7 @@ class OutboxActionPayloadJsonTest {
 
         assertEquals(
             """{"playCountDelta":3,"isFavorite":true,"userRating":5,""" +
-                """"resumePointMs":42000,"lastPlayedAt":1700000000000,""" +
+                """"resumeMs":42000,"lastPlayedAt":1700000000000,""" +
                 """"playTimestamps":[1700000000000,1700000000500]}""",
             encoded,
         )
@@ -38,7 +38,7 @@ class OutboxActionPayloadJsonTest {
     @Test
     fun `decoding the golden json reproduces every field`() {
         val golden = "{\"playCountDelta\":2,\"isFavorite\":false,\"userRating\":1," +
-            "\"resumePointMs\":7,\"lastPlayedAt\":9,\"playTimestamps\":[7,8]}"
+            "\"resumeMs\":7,\"lastPlayedAt\":9,\"playTimestamps\":[7,8]}"
 
         val decoded = adapter.fromJson(golden)
 
@@ -47,7 +47,7 @@ class OutboxActionPayloadJsonTest {
                 playCountDelta = 2,
                 isFavorite = false,
                 userRating = 1,
-                resumePointMs = 7L,
+                resumeMs = 7L,
                 lastPlayedAt = 9L,
                 playTimestamps = listOf(7L, 8L),
             ),
@@ -63,10 +63,34 @@ class OutboxActionPayloadJsonTest {
     }
 
     @Test
+    fun `submitting one of two identical timestamps keeps the other`() {
+        val payload = OutboxActionPayload(
+            playCountDelta = 2,
+            lastPlayedAt = 1_000L,
+            playTimestamps = listOf(1_000L, 1_000L),
+        )
+
+        assertEquals(
+            OutboxActionPayload(playCountDelta = 1, lastPlayedAt = 1_000L, playTimestamps = listOf(1_000L)),
+            payload.afterSubmitting(listOf(1_000L)),
+        )
+    }
+
+    @Test
+    fun `submitting part of a legacy timestampless payload keeps the rest`() {
+        val payload = OutboxActionPayload(playCountDelta = 3, lastPlayedAt = 5_000L)
+
+        assertEquals(
+            OutboxActionPayload(playCountDelta = 2, lastPlayedAt = 5_001L, playTimestamps = listOf(5_001L, 5_002L)),
+            payload.afterSubmitting(listOf(5_000L)),
+        )
+    }
+
+    @Test
     fun `round trip through encode and decode is lossless`() {
         val payload = OutboxActionPayload(
             playCountDelta = 1,
-            resumePointMs = 12_345L,
+            resumeMs = 12_345L,
             playTimestamps = listOf(1L, 2L, 3L),
         )
 

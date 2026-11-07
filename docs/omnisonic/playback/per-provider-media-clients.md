@@ -2,18 +2,19 @@
 
 Purpose: Pin down how streamed audio reaches the provider's MEDIA-profile OkHttp client so custom headers, mTLS identity and media timeouts apply to Media3 data-source reads.
 
-How derived: Code reading of `MediaDataSourceFactoryProvider.kt`, `PlaybackCacheManager.kt`, `OmniPlayerImpl.kt`, `HttpClientFactory.kt`, plus the MockWebServer and mTLS playback tests. The studied app is not a source.
+How derived: Code reading of `MediaDataSourceFactoryProvider.kt`, `PlaybackCacheManager.kt`, `OmniPlayerImpl.kt`, `HttpClientFactory.kt`, plus the MockWebServer and mTLS playback tests. Evidence categories: own-source reading, in-repository test runs (MockWebServer and mTLS harnesses).
 
 Confidence:
 - [VERIFIED] `MediaDataSourceFactoryProvider.factoryFor(providerId)` returns a cached `OkHttpDataSource.Factory` backed by the resolver's client for that provider.
 - [VERIFIED] `PlaybackCacheManager` resolves its upstream factory per `ResolvedStream`, so each provider id gets its own OkHttp data source inside the cache wrapper.
+- [VERIFIED] `ProviderConnection.readTimeoutMs` (sourced from `OptionsJson.readTimeoutMs`, 15 s default, 5–120 s clamp) reaches the MEDIA `ConnectionSpec`; `HttpClientFactory` still applies the 60 s media floor, so a lower provider value cannot shorten audio reads (FIX-14).
 - [VERIFIED] A stream request with `X-Test: 1` from a provider MEDIA client reaches MockWebServer through `OmniPlayerImpl`; the same request without that header is rejected by the server and surfaces as a playback error.
 - [VERIFIED] A PKCS#12 client identity and an extra trusted server certificate complete a mutual-TLS handshake through `OkHttpDataSource`.
 - [INFERRED] Callers must pass the provider's MEDIA-profile client to `MediaDataSourceFactoryProvider`; an API-profile client would keep API compression and timeout behavior on audio reads.
 - [VERIFIED] The provider HTTP factory is used only for `StreamTransport.PROVIDER_HTTP`; direct and custom transports bypass it.
 - [UNKNOWN] Production dependency-injection wiring for provider ids and client factories is not present yet; it belongs to the provider/client lifecycle work.
 
-Date: 2026-11-01
+Date: 2026-11-07
 
 Links: `../network/client-profiles.md`, `stream-cache-identity.md`
 

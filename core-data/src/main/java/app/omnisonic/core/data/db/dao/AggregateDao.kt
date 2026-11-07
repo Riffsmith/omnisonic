@@ -2,63 +2,84 @@ package app.omnisonic.core.data.db.dao
 
 import androidx.room.Dao
 import androidx.room.Query
+import androidx.room.Transaction
 
 @Dao
 interface AggregateDao {
+
+    @Transaction
+    suspend fun recomputeAlbumsSumById(albumIds: List<Long>) {
+        albumIds.forEachSqlChunk { recomputeAlbumsSumByIdChunk(it) }
+    }
+
+    @Transaction
+    suspend fun recomputeAlbumsAverageById(albumIds: List<Long>) {
+        albumIds.forEachSqlChunk { recomputeAlbumsAverageByIdChunk(it) }
+    }
+
+    @Transaction
+    suspend fun recomputeAlbumsMinimumById(albumIds: List<Long>) {
+        albumIds.forEachSqlChunk { recomputeAlbumsMinimumByIdChunk(it) }
+    }
+
+    @Transaction
+    suspend fun recomputeArtistsById(artistIds: List<Long>, includeSupporting: Boolean) {
+        artistIds.forEachSqlChunk { recomputeArtistsByIdChunk(it, includeSupporting) }
+    }
 
     @Query(
         """
         UPDATE albums SET
           playCount = (SELECT COALESCE(SUM(songs.playCount), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
-          resumeFilePath = (
+          resumeTrackPath = (
             SELECT songs.filePath FROM songs
-            WHERE songs.albumId = albums.id AND songs.resumePointMs > 0
+            WHERE songs.albumId = albums.id AND songs.resumeMs > 0
             ORDER BY songs.lastPlayed DESC LIMIT 1
           )
         WHERE albums.id IN (:albumIds)
         """,
     )
-    suspend fun recomputeAlbumsSumById(albumIds: List<Long>)
+    suspend fun recomputeAlbumsSumByIdChunk(albumIds: List<Long>)
 
     @Query(
         """
         UPDATE albums SET
           playCount = (SELECT COALESCE(ROUND(AVG(songs.playCount)), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
-          resumeFilePath = (
+          resumeTrackPath = (
             SELECT songs.filePath FROM songs
-            WHERE songs.albumId = albums.id AND songs.resumePointMs > 0
+            WHERE songs.albumId = albums.id AND songs.resumeMs > 0
             ORDER BY songs.lastPlayed DESC LIMIT 1
           )
         WHERE albums.id IN (:albumIds)
         """,
     )
-    suspend fun recomputeAlbumsAverageById(albumIds: List<Long>)
+    suspend fun recomputeAlbumsAverageByIdChunk(albumIds: List<Long>)
 
     @Query(
         """
         UPDATE albums SET
           playCount = (SELECT COALESCE(MIN(songs.playCount), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
-          resumeFilePath = (
+          resumeTrackPath = (
             SELECT songs.filePath FROM songs
-            WHERE songs.albumId = albums.id AND songs.resumePointMs > 0
+            WHERE songs.albumId = albums.id AND songs.resumeMs > 0
             ORDER BY songs.lastPlayed DESC LIMIT 1
           )
         WHERE albums.id IN (:albumIds)
         """,
     )
-    suspend fun recomputeAlbumsMinimumById(albumIds: List<Long>)
+    suspend fun recomputeAlbumsMinimumByIdChunk(albumIds: List<Long>)
 
     @Query(
         """
         UPDATE albums SET
           playCount = (SELECT COALESCE(SUM(songs.playCount), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
-          resumeFilePath = (
+          resumeTrackPath = (
             SELECT songs.filePath FROM songs
-            WHERE songs.albumId = albums.id AND songs.resumePointMs > 0
+            WHERE songs.albumId = albums.id AND songs.resumeMs > 0
             ORDER BY songs.lastPlayed DESC LIMIT 1
           )
         WHERE albums.providerId = :providerId
@@ -71,9 +92,9 @@ interface AggregateDao {
         UPDATE albums SET
           playCount = (SELECT COALESCE(ROUND(AVG(songs.playCount)), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
-          resumeFilePath = (
+          resumeTrackPath = (
             SELECT songs.filePath FROM songs
-            WHERE songs.albumId = albums.id AND songs.resumePointMs > 0
+            WHERE songs.albumId = albums.id AND songs.resumeMs > 0
             ORDER BY songs.lastPlayed DESC LIMIT 1
           )
         WHERE albums.providerId = :providerId
@@ -86,9 +107,9 @@ interface AggregateDao {
         UPDATE albums SET
           playCount = (SELECT COALESCE(MIN(songs.playCount), 0) FROM songs WHERE songs.albumId = albums.id),
           lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id),
-          resumeFilePath = (
+          resumeTrackPath = (
             SELECT songs.filePath FROM songs
-            WHERE songs.albumId = albums.id AND songs.resumePointMs > 0
+            WHERE songs.albumId = albums.id AND songs.resumeMs > 0
             ORDER BY songs.lastPlayed DESC LIMIT 1
           )
         WHERE albums.providerId = :providerId
@@ -112,7 +133,7 @@ interface AggregateDao {
         WHERE artists.id IN (:artistIds)
         """,
     )
-    suspend fun recomputeArtistsById(artistIds: List<Long>, includeSupporting: Boolean)
+    suspend fun recomputeArtistsByIdChunk(artistIds: List<Long>, includeSupporting: Boolean)
 
     @Query(
         """

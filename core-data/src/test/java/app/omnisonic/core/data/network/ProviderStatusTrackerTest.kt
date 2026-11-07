@@ -82,6 +82,31 @@ class ProviderStatusTrackerTest : DatabaseTestBase() {
     }
 
     @Test
+    fun serverAuthFailureMarksAuthFailedUntilCleared() = runDbTest {
+        newProvider(id = 1)
+        val tracker = tracker(FakeMonitor(NetworkState(connected = true, wifi = true)))
+
+        tracker.markAuthFailed(1)
+        assertThat(tracker.check(1)).isEqualTo(ProviderStatus.AUTH_FAILED)
+
+        tracker.clearAuthFailed(1)
+        assertThat(tracker.check(1)).isEqualTo(ProviderStatus.OK)
+    }
+
+    @Test
+    fun editingTheProviderClearsServerAuthFailure() = runDbTest {
+        newProvider(id = 1)
+        val tracker = tracker(FakeMonitor(NetworkState(connected = true, wifi = true)))
+        tracker.markAuthFailed(1)
+        assertThat(tracker.check(1)).isEqualTo(ProviderStatus.AUTH_FAILED)
+
+        val row = providerDao.selectById(1)!!
+        providerDao.upsert(row.copy(username = "fixed-user", updatedAt = row.updatedAt + 1))
+
+        assertThat(tracker.check(1)).isEqualTo(ProviderStatus.OK)
+    }
+
+    @Test
     fun unknownProviderResolvesToOk() = runDbTest {
         val tracker = tracker(FakeMonitor(NetworkState(connected = false, wifi = false)))
 

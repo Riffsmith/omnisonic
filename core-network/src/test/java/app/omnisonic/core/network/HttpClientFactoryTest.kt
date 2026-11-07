@@ -76,6 +76,46 @@ class HttpClientFactoryTest {
     }
 
     @Test
+    fun zstdUnavailableAdvertisesGzipOnlyAndStillDecodesGzip() {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse().setHeader("Content-Encoding", "gzip").setBody(Buffer().write(gzipped("gzip-only".toByteArray()))),
+            )
+            server.start()
+            val client = HttpClientFactory(OmnisonicLogger(RecordingSink()), zstdProbe = ZstdProbe { false }).create(
+                ConnectionSpec(),
+            )
+
+            val body = client.newCall(Request.Builder().url(server.url("/rest/ping.view")).build()).execute().use { it.body!!.string() }
+
+            assertThat(body).isEqualTo("gzip-only")
+            val request = server.takeRequest()
+            assertThat(request.getHeader("Accept-Encoding")).isEqualTo("gzip")
+            assertThat(request.getHeader("Accept-Encoding")).doesNotContain("zstd")
+        }
+    }
+
+    @Test
+    fun zstdProbeNativeLoadFailureAdvertisesGzipOnly() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("plain"))
+            server.start()
+            val sink = RecordingSink()
+            val client = HttpClientFactory(
+                OmnisonicLogger(sink),
+                zstdProbe = ZstdProbe { throw UnsatisfiedLinkError("missing libzstd-jni") },
+            ).create(ConnectionSpec())
+
+            client.newCall(Request.Builder().url(server.url("/rest/ping.view")).build()).execute().use { }
+
+            val request = server.takeRequest()
+            assertThat(request.getHeader("Accept-Encoding")).isEqualTo("gzip")
+            assertThat(request.getHeader("Accept-Encoding")).doesNotContain("zstd")
+            assertThat(sink.entries.joinToString(" ")).contains("gzip only")
+        }
+    }
+
+    @Test
     fun mediaRequestsMustReturnRawBodies() {
         MockWebServer().use { server ->
             val compressed = Zstd.compress("raw-media".toByteArray())

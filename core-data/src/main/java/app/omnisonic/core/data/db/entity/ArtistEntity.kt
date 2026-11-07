@@ -16,9 +16,9 @@ data class ArtistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val providerId: Long,
     val externalId: String? = null,
-    val externalDataJson: String? = null,
+    val providerPayloadJson: String? = null,
     val title: String,
-    val titleRoman: String? = null,
+    val latinTitle: String? = null,
     val sortTitle: String? = null,
     val imagePath: String? = null,
     val description: String? = null,
@@ -30,5 +30,7 @@ data class ArtistEntity(
     val serverRating: Double? = null,
     val songCount: Int = 0,
     val albumCount: Int = 0,
+    /** Sync-run stamp (D-10); NULL means never seen by a stamping sync run. */
+    val lastSeenSyncId: Long? = null,
     val updatedAt: Long,
 )

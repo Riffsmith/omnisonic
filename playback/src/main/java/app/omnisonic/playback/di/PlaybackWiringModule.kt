@@ -53,7 +53,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import java.io.File
@@ -115,13 +114,11 @@ object PlaybackWiringModule {
     @Singleton
     fun cacheManager(
         @ApplicationContext context: Context,
-        settings: PlaybackSettingsStore,
         dataSources: MediaDataSourceFactoryProvider,
     ): PlaybackCacheManager = PlaybackCacheManager(
         context = context,
         cacheDir = File(context.cacheDir, CACHE_DIR_NAME),
         databaseProvider = StandaloneDatabaseProvider(context),
-        initialMaxBytes = runBlocking { settings.cacheSizeBytes.first() },
         upstreamFactory = { stream -> dataSources.factoryFor(stream.entry.providerId) },
     )
 
@@ -189,7 +186,7 @@ object PlaybackWiringModule {
         val renderer = LocalPlaybackRenderer {
             OmniPlayerImpl(engineFactory, chainFactory, cacheManager, settings, replayGainSource, scope, port)
         }
-        val player = runBlocking { renderer.activate() }
+        val player = renderer.activateNow()
         val focusFactory = FocusOwnerFactory { callbacks ->
             AudioFocusHelper(context, callbacks, settings.transientLossAction, scope)
         }

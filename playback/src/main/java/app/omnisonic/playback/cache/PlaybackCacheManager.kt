@@ -10,6 +10,7 @@ import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import app.omnisonic.playback.api.stream.ResolvedStream
 import app.omnisonic.playback.api.stream.StreamTransport
+import app.omnisonic.playback.settings.PlaybackSettingsStore
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -23,13 +24,16 @@ class PlaybackCacheManager(
     private val context: Context,
     private val cacheDir: File,
     private val databaseProvider: DatabaseProvider,
-    initialMaxBytes: Long,
+    initialMaxBytes: Long = PlaybackSettingsStore.DEFAULT_CACHE_SIZE_BYTES,
     private val upstreamFactory: (ResolvedStream) -> DataSource.Factory,
     private val dataSourceRegistry: DataSourceRegistry = DataSourceRegistry(),
 ) {
     private val lock = Any()
-    private var maxBytes = initialMaxBytes
+    private var byteBudget = initialMaxBytes
     private var cache = newCache(initialMaxBytes)
+
+    internal val maxBytes: Long
+        get() = synchronized(lock) { byteBudget }
 
     @Volatile
     var defaultCacheFirst: Boolean = false
@@ -80,10 +84,10 @@ class PlaybackCacheManager(
     fun applyMaxBytes(bytes: Long) {
         check(!released) { "cache released" }
         synchronized(lock) {
-            if (bytes == maxBytes) return
+            if (bytes == byteBudget) return
             cache.release()
             cache = newCache(bytes)
-            maxBytes = bytes
+            byteBudget = bytes
         }
     }
 

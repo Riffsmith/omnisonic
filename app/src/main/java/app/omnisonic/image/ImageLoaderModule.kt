@@ -2,9 +2,8 @@ package app.omnisonic.image
 
 import android.content.Context
 import app.omnisonic.core.data.providers.ProviderClientRegistry
+import app.omnisonic.playback.cache.CoverImageKey
 import coil3.ImageLoader
-import coil3.network.okhttp.OkHttpNetworkFetcherFactory
-import coil3.request.crossfade
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -21,10 +20,11 @@ object ImageLoaderModule {
     fun imageLoader(
         @ApplicationContext context: Context,
         registry: ProviderClientRegistry,
-    ): ImageLoader = ImageLoader.Builder(context)
-        .crossfade(true)
-        .components {
-            add(OkHttpNetworkFetcherFactory(ProviderRoutedCallFactory(registry)))
-        }
-        .build()
+    ): ImageLoader = buildImageLoader(
+        context = context,
+        callFactory = ProviderRoutedCallFactory(registry),
+        resolveCoverUrl = { key: CoverImageKey ->
+            registry.providerFor(key.providerId)?.coverArtUrl(key.imageId, key.sizePx)
+        },
+    )
 }

@@ -96,7 +96,14 @@ abstract class OmnisonicDatabase : RoomDatabase() {
     abstract fun aggregateDao(): AggregateDao
 
     companion object {
-        const val SCHEMA_VERSION = 3
+        /**
+         * Clean pre-release baseline (FIX-15 / D-11 option B). It already
+         * contains every final table, column and view, including the
+         * sync-run stamps (`lastSeenSyncId`) and `queue_state.positionMs`.
+         * There is no released schema and no migration chain; a future
+         * schema change starts at v1 → v2.
+         */
+        const val SCHEMA_VERSION = 1
         const val DATABASE_FILE = "omnisonic.db"
 
         fun migrationsForSteps(): Array<Migration> = Migrations.ALL.toTypedArray()

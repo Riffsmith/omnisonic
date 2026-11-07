@@ -25,10 +25,52 @@ data class OutboxActionPayload(
     val playCountDelta: Int? = null,
     val isFavorite: Boolean? = null,
     val userRating: Int? = null,
-    val resumePointMs: Long? = null,
+    val resumeMs: Long? = null,
     val lastPlayedAt: Long? = null,
     val playTimestamps: List<Long>? = null,
-)
+) {
+
+    /**
+     * The timestamps this payload submits: explicit timestamps when present,
+     * otherwise [playCountDelta] one-millisecond steps from [lastPlayedAt]
+     * (legacy rows written before the timestamp list existed).
+     */
+    fun playTimestampsForSubmission(): List<Long> {
+        playTimestamps?.takeIf { it.isNotEmpty() }?.let { return it }
+        val delta = playCountDelta ?: return emptyList()
+        if (delta <= 0) return emptyList()
+        return lastPlayedAt?.let { start -> List(delta) { offset -> start + offset } }.orEmpty()
+    }
+
+    /**
+     * Removes at most as many occurrences of each timestamp in [submitted] as
+     * the drain actually reported, then recomputes the play fields from what
+     * remains. Timestamps enqueued while the submission was in flight are
+     * therefore kept, and the row is empty only when nothing is left.
+     */
+    fun afterSubmitting(submitted: List<Long>): OutboxActionPayload {
+        val remaining = playTimestampsForSubmission().withoutConsumed(submitted)
+        return copy(
+            playCountDelta = remaining.size.takeIf { it > 0 },
+            lastPlayedAt = remaining.firstOrNull(),
+            playTimestamps = remaining.takeIf { it.isNotEmpty() },
+        )
+    }
+
+    private fun List<Long>.withoutConsumed(consumed: List<Long>): List<Long> {
+        if (consumed.isEmpty()) return this
+        val budget = consumed.groupingBy { it }.eachCount().toMutableMap()
+        return filter { timestamp ->
+            val left = budget[timestamp] ?: 0
+            if (left == 0) {
+                true
+            } else {
+                budget[timestamp] = left - 1
+                false
+            }
+        }
+    }
+}
 
 /**
  * Action vocabulary shared by the enqueue side and the drainer. The Room
@@ -46,11 +88,52 @@ object OutboxActions {
     fun orderOf(action: String): Int = ITEM_ORDER.indexOf(action).let { if (it < 0) ITEM_ORDER.size else it }
 }
 
+/** Result of a completion that is conditional on the payload actually submitted. */
+sealed interface OutboxCompletion {
+    /** The stored payload was still the submitted one; the row is deleted. */
+    data object Deleted : OutboxCompletion
+
+    /** A concurrent enqueue replaced the payload; the newer row is untouched. */
+    data object Superseded : OutboxCompletion
+
+    /** The row is already gone, e.g. another drain completed it. */
+    data object Missing : OutboxCompletion
+}
+
+/** Result of removing the play timestamps a drain submitted from the stored row. */
+sealed interface OutboxProgress {
+    /** Every submitted timestamp was consumed; the row is deleted. */
+    data object Cleared : OutboxProgress
+
+    /** The row still carries [remainingTimestamps] play timestamps. */
+    data class Retained(val remainingTimestamps: Int) : OutboxProgress
+
+    /** The stored payload cannot be decoded; the row is left untouched. */
+    data object Unreadable : OutboxProgress
+}
+
 interface OutboxStore {
     suspend fun dueTasks(now: Long, providerId: Long?): List<OutboxTask>
-    suspend fun complete(id: Long)
+
+    /**
+     * Deletes [task] only while the stored row still carries the payload this
+     * drain read and submitted. An enqueue that landed during the submission
+     * makes the delete affect zero rows; the newer payload then survives.
+     */
+    suspend fun complete(task: OutboxTask): OutboxCompletion
+
     suspend fun fail(id: Long, attempts: Int, nextAttemptAt: Long, lastError: String)
-    suspend fun progress(id: Long, payloadJson: String?, nextAttemptAt: Long)
+
+    /**
+     * Transactionally removes the play timestamps this drain submitted from
+     * the row's current payload. Timestamps enqueued during the submission are
+     * preserved and the row is deleted only when no timestamp remains.
+     */
+    suspend fun progress(
+        task: OutboxTask,
+        submittedTimestamps: List<Long>,
+        nextAttemptAt: Long,
+    ): OutboxProgress
 }
 
 class OutboxDrainer(
@@ -59,6 +142,10 @@ class OutboxDrainer(
     private val clock: () -> Long = System::currentTimeMillis,
     private val runGate: ProviderRunGate = AllowAllRunGate,
     private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),
+    /** Reports a typed server authentication rejection to the status tracker. */
+    private val onAuthFailed: suspend (Long) -> Unit = {},
+    /** Reports a successful provider call so a stale auth failure can clear. */
+    private val onAuthSucceeded: suspend (Long) -> Unit = {},
 ) {
     data class DrainReport(
         val completed: Int,
@@ -81,6 +168,7 @@ class OutboxDrainer(
         var completed = 0
         var progressed = 0
         var deferred = 0
+        val authFailedProviders = mutableSetOf<Long>()
         val due = store.dueTasks(clock(), providerId)
         // Per-item action order: for the same (provider, type, id), play_count
         // runs before favorite/user_rating before resume_point. Item groups
@@ -89,6 +177,10 @@ class OutboxDrainer(
             .groupBy { Triple(it.providerId, it.mediaType, it.externalId) }
             .flatMap { (_, tasks) -> tasks.sortedBy { OutboxActions.orderOf(it.action) } }
         for (task in ordered) {
+            if (task.providerId in authFailedProviders) {
+                logger.debug(TAG, "outbox task ${task.id} stays due; provider ${task.providerId} rejected authentication")
+                continue
+            }
             if (providerId == null && runGate.check(task.providerId) != ProviderStatus.OK) {
                 logger.debug(TAG, "outbox task ${task.id} stays due; provider ${task.providerId} is blocked by the run gate")
                 continue
@@ -99,31 +191,65 @@ class OutboxDrainer(
                 deferred++
                 continue
             }
-            if (task.action == OutboxActions.PLAY_COUNT) probeOnce(task.providerId, provider)
-            val outcome = runCatchingCancellable { execute(task, provider) }
-                .getOrElse { error ->
+            val outcome = runCatchingCancellable {
+                if (task.action == OutboxActions.PLAY_COUNT) probeOnce(task.providerId, provider)
+                execute(task, provider)
+            }.getOrElse { error ->
+                if (error is ProviderAuthException) {
+                    authFailedProviders += task.providerId
+                    logger.error(TAG, "outbox task ${task.id} failed authentication", error)
+                    runCatchingCancellable { onAuthFailed(task.providerId) }
+                } else {
                     logger.error(TAG, "outbox task ${task.id} failed", error)
                     store.fail(task.id, task.attempts + 1, clock() + backoffMs(task.attempts + 1), error.message ?: error.javaClass.simpleName)
-                    null
                 }
+                null
+            }
+            if (outcome != null) runCatchingCancellable { onAuthSucceeded(task.providerId) }
             when (outcome) {
-                is TaskOutcome.Completed -> {
-                    store.complete(task.id)
-                    completed++
+                is TaskOutcome.Submitted -> when (store.complete(task)) {
+                    OutboxCompletion.Deleted, OutboxCompletion.Missing -> completed++
+                    OutboxCompletion.Superseded -> {
+                        if (settleSuperseded(task, outcome.submittedTimestamps)) progressed++ else completed++
+                    }
                 }
-                is TaskOutcome.Progressed -> progressed++
+                TaskOutcome.Finished -> completed++
+                TaskOutcome.Progressed -> progressed++
                 null, TaskOutcome.Deferred -> deferred++
             }
         }
         return DrainReport(completed, progressed, deferred)
     }
 
-    /** Probes a provider once per drainer instance before its first play-count task. */
+    /**
+     * A concurrent enqueue replaced the payload after [task] was read. A play
+     * count drops only the timestamps this drain submitted, keeping timestamps
+     * that landed meanwhile. Favorite, rating and resume rows already carry
+     * the newer value, so they are left for the next drain. Returns true when
+     * the row still has work (reported as progressed), false when it is gone.
+     */
+    private suspend fun settleSuperseded(task: OutboxTask, submittedTimestamps: List<Long>?): Boolean {
+        if (submittedTimestamps == null) {
+            logger.debug(TAG, "outbox task ${task.id} was re-enqueued while submitting; keeping the newer payload")
+            return true
+        }
+        return when (store.progress(task, submittedTimestamps, clock())) {
+            OutboxProgress.Cleared -> false
+            is OutboxProgress.Retained, OutboxProgress.Unreadable -> true
+        }
+    }
+
+    /**
+     * Probes a provider before its first play-count task. Only a successful
+     * probe marks the provider done, so a failed probe is retried on the next
+     * drain instead of disabling capability discovery for the drainer lifetime.
+     */
     private suspend fun probeOnce(providerId: Long, provider: MediaProvider) {
         if (providerId in probedProviders) return
-        probedProviders += providerId
         runCatchingCancellable { provider.probe() }
+            .onSuccess { probedProviders += providerId }
             .onFailure { failure ->
+                if (failure is ProviderAuthException) throw failure
                 logger.warn(TAG, "capability probe failed for provider $providerId: ${failure.message}")
             }
     }
@@ -142,14 +268,14 @@ class OutboxDrainer(
             }
 
             OutboxActions.RESUME_POINT -> handleSimple(task) {
-                payload.resumePointMs?.let { position ->
+                payload.resumeMs?.let { position ->
                     if (position > 0) provider.saveBookmark(task.externalId, position) else provider.deleteBookmark(task.externalId)
                 }
             }
 
             else -> {
                 logger.warn(TAG, "outbox task ${task.id} has unknown action ${task.action}; dropping")
-                TaskOutcome.Completed
+                TaskOutcome.Submitted()
             }
         }
     }
@@ -159,44 +285,41 @@ class OutboxDrainer(
         if (delta == null || delta <= 0) {
             return parkEmptyPayload(task)
         }
-        val timestamps = payload.playTimestamps
-            ?.takeIf { it.isNotEmpty() }
-            ?: payload.lastPlayedAt?.let { lastPlayedAt -> List(delta) { index -> lastPlayedAt + index } }
-            ?: emptyList()
+        val timestamps = payload.playTimestampsForSubmission()
         if (timestamps.isEmpty()) {
             return parkEmptyPayload(task)
         }
-        val submitted = provider.submitPlays(task.externalId, timestamps)
-        return when {
-            submitted >= timestamps.size -> TaskOutcome.Completed
-            submitted > 0 -> {
-                val remaining = timestamps.drop(submitted)
-                store.progress(
-                    task.id,
-                    payloadAdapter.toJson(
-                        OutboxActionPayload(
-                            playCountDelta = remaining.size,
-                            lastPlayedAt = remaining.firstOrNull(),
-                            playTimestamps = remaining,
-                        ),
-                    ),
-                    clock(),
-                )
-                TaskOutcome.Progressed
+        var acceptedEarlier = false
+        for (chunk in timestamps.chunked(PLAY_SUBMISSION_CHUNK_SIZE)) {
+            val accepted = provider.submitPlays(task.externalId, chunk)
+            if (accepted < chunk.size) {
+                val acceptedTimestamps = chunk.take(accepted)
+                if (acceptedTimestamps.isEmpty()) {
+                    store.fail(task.id, task.attempts + 1, clock() + backoffMs(task.attempts + 1), "server accepted no submissions")
+                    return if (acceptedEarlier) TaskOutcome.Progressed else TaskOutcome.Deferred
+                }
+                return recordPlayProgress(task, acceptedTimestamps)
             }
-
-            else -> {
-                store.fail(task.id, task.attempts + 1, clock() + backoffMs(task.attempts + 1), "server accepted no submissions")
-                TaskOutcome.Deferred
+            when (store.progress(task, chunk, clock())) {
+                OutboxProgress.Cleared -> return TaskOutcome.Finished
+                is OutboxProgress.Retained -> acceptedEarlier = true
+                OutboxProgress.Unreadable -> return TaskOutcome.Progressed
             }
         }
+        return TaskOutcome.Progressed
     }
+
+    private suspend fun recordPlayProgress(task: OutboxTask, submitted: List<Long>): TaskOutcome =
+        when (store.progress(task, submitted, clock())) {
+            OutboxProgress.Cleared -> TaskOutcome.Finished
+            is OutboxProgress.Retained, OutboxProgress.Unreadable -> TaskOutcome.Progressed
+        }
 
     private suspend fun handleSimple(task: OutboxTask, action: suspend () -> Boolean?): TaskOutcome =
         when (val applied = action.invoke()) {
             null -> parkEmptyPayload(task)
 
-            true -> TaskOutcome.Completed
+            true -> TaskOutcome.Submitted()
 
             false -> {
                 store.fail(task.id, task.attempts + 1, clock() + backoffMs(task.attempts + 1), "provider rejected the change")
@@ -238,8 +361,19 @@ class OutboxDrainer(
     private val payloadAdapter = moshi.adapter(OutboxActionPayload::class.java)
 
     private sealed interface TaskOutcome {
-        data object Completed : TaskOutcome
+        /**
+         * The provider accepted the payload; [submittedTimestamps] carries the
+         * play timestamps the drain sent, or null for single-value actions.
+         * The row is deleted only if its payload is still the submitted one.
+         */
+        data class Submitted(val submittedTimestamps: List<Long>? = null) : TaskOutcome
+
+        /** Work remains queued in the row. */
         data object Progressed : TaskOutcome
+
+        /** The row was deleted; everything the payload carried is consumed. */
+        data object Finished : TaskOutcome
+
         data object Deferred : TaskOutcome
     }
 
@@ -248,6 +382,9 @@ class OutboxDrainer(
     companion object {
         private const val TAG = "OutboxDrainer"
         const val EMPTY_PAYLOAD_ERROR = "empty payload"
+
+        /** Each accepted chunk is persisted before the next one is submitted. */
+        const val PLAY_SUBMISSION_CHUNK_SIZE = 100
         const val BACKOFF_BASE_MS = 15_000L
         const val BACKOFF_MAX_MS = 3_600_000L
         private const val MIN_BACKOFF_MULTIPLIER = 1L
