@@ -81,6 +81,12 @@ Links: `README.md` (documentation map); individual topic docs per section.
 | One queued play = one timestamp; submissions carry strictly increasing times (+1 ms on ties); the drainer probes capabilities once before its first play-count task | 2026-10-31 | N offline plays must reach the server as N correctly backdated scrobbles, also on a cold start | `protocol/scrobble-timestamps.md` |
 | Play-count payloads keep `playCountDelta == playTimestamps.size`; the drainer submits timestamps chronologically in 100-play chunks and records progress after each accepted chunk | 2026-11-05 | An uncapped delta with a capped timestamp list silently dropped plays; chunk progress bounds a failure to the current chunk while preserving the FIX-03 accepted-prefix contract | `storage/outbox-contract.md`, `protocol/scrobble-timestamps.md` |
 
+## Shell and onboarding
+
+| Decision | Date | Rationale (short) | Detail |
+|---|---|---|---|
+| First-run landing: fresh installs land on **provider setup**, then **home**; every later launch lands on **home** directly | 2026-11-07 | A library app without a provider is an empty shell — the first-run gate mirrors the studied app's behavior (a `first.run` bool picks its Welcome/setup destination over the main screen, StartActivity.java:214-216), but with Omnisonic names and mechanics | The gate is an **ordered onboarding-steps list** (today: `[providerSetup]`) in the shell, not a hardcoded branch: a tutorial or any future step inserts between setup and home without touching the gate logic, and `onboardingComplete` (shell preferences DataStore) is set only when the list is exhausted. Task 2 ships the gate + flag + a placeholder; the provider-setup screen itself is task 2b (add-connection form over the Phase 3 provider/credential machinery + initial sync trigger + set flag + navigate home). Route: `providerSetup` (UI route table, UI_SCREENS.md §5). Open sub-question for 2b: whether to offer a "continue without a server" skip (not decided; v1 default = setup completes). Naming: Omnisonic coinage only (`onboardingComplete`, `providerSetup`) — never the studied key/destination spellings |
+
 ## Toolchain
 
 | Decision | Date | Rationale (short) | Detail |
