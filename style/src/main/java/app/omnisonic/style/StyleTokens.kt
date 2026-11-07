@@ -89,38 +89,40 @@ data class TypeToken(
 
 @Immutable
 data class TypographyTokens(
-    val display: TypeToken,
-    val headline: TypeToken,
-    val title: TypeToken,
-    val body: TypeToken,
-    val label: TypeToken,
+    val displayLarge: TypeToken,
+    val displayMedium: TypeToken,
+    val displaySmall: TypeToken,
+    val headlineLarge: TypeToken,
+    val headlineMedium: TypeToken,
+    val headlineSmall: TypeToken,
+    val titleLarge: TypeToken,
+    val titleMedium: TypeToken,
+    val titleSmall: TypeToken,
+    val bodyLarge: TypeToken,
+    val bodyMedium: TypeToken,
+    val bodySmall: TypeToken,
+    val labelLarge: TypeToken,
+    val labelMedium: TypeToken,
+    val labelSmall: TypeToken,
     val caption: TypeToken,
 ) {
-    fun toTypography(): Typography {
-        val display = display.toTextStyle()
-        val headline = headline.toTextStyle()
-        val title = title.toTextStyle()
-        val body = body.toTextStyle()
-        val label = label.toTextStyle()
-        val caption = caption.toTextStyle()
-        return Typography(
-            displayLarge = display,
-            displayMedium = display,
-            displaySmall = display,
-            headlineLarge = headline,
-            headlineMedium = headline,
-            headlineSmall = headline,
-            titleLarge = title,
-            titleMedium = title,
-            titleSmall = title,
-            bodyLarge = body,
-            bodyMedium = body,
-            bodySmall = caption,
-            labelLarge = label,
-            labelMedium = label,
-            labelSmall = label,
-        )
-    }
+    fun toTypography(): Typography = Typography(
+        displayLarge = displayLarge.toTextStyle(),
+        displayMedium = displayMedium.toTextStyle(),
+        displaySmall = displaySmall.toTextStyle(),
+        headlineLarge = headlineLarge.toTextStyle(),
+        headlineMedium = headlineMedium.toTextStyle(),
+        headlineSmall = headlineSmall.toTextStyle(),
+        titleLarge = titleLarge.toTextStyle(),
+        titleMedium = titleMedium.toTextStyle(),
+        titleSmall = titleSmall.toTextStyle(),
+        bodyLarge = bodyLarge.toTextStyle(),
+        bodyMedium = bodyMedium.toTextStyle(),
+        bodySmall = bodySmall.toTextStyle(),
+        labelLarge = labelLarge.toTextStyle(),
+        labelMedium = labelMedium.toTextStyle(),
+        labelSmall = labelSmall.toTextStyle(),
+    )
 }
 
 @Immutable
@@ -134,22 +136,46 @@ data class SpacingTokens(
     val xxl: Dp = 32.dp,
 )
 
+/** Four roundness stops; `level` is the Phase 9 JSON encoding (0-3). */
+enum class CornerScale(
+    val level: Int,
+    val small: Dp,
+    val medium: Dp,
+    val large: Dp,
+    val extraLarge: Dp,
+) {
+    DEFAULT(0, 4.dp, 8.dp, 16.dp, 24.dp),
+    MEDIUM(1, 6.dp, 12.dp, 22.dp, 32.dp),
+    LARGE(2, 10.dp, 18.dp, 30.dp, 42.dp),
+    EXTRA_LARGE(3, 14.dp, 24.dp, 38.dp, 56.dp);
+
+    companion object {
+        fun fromLevel(level: Int): CornerScale = entries.firstOrNull { it.level == level } ?: DEFAULT
+    }
+}
+
 @Immutable
 data class ShapeTokens(
-    val small: Dp = 4.dp,
-    val medium: Dp = 8.dp,
-    val large: Dp = 16.dp,
-    val extraLarge: Dp = 24.dp,
+    val cornerScale: CornerScale = CornerScale.DEFAULT,
     val cover: Dp = 8.dp,
     val pill: Dp = 50.dp,
-)
+) {
+    val small: Dp get() = cornerScale.small
+    val medium: Dp get() = cornerScale.medium
+    val large: Dp get() = cornerScale.large
+    val extraLarge: Dp get() = cornerScale.extraLarge
+}
 
 enum class NavigationLayout { BOTTOM_BAR, RAIL }
+
+enum class NavigationLabelMode { ALL, SELECTED_ONLY, NONE }
 
 @Immutable
 data class LayoutTokens(
     val portraitNavigation: NavigationLayout = NavigationLayout.BOTTOM_BAR,
     val landscapeNavigation: NavigationLayout = NavigationLayout.RAIL,
+    val portraitLabelMode: NavigationLabelMode = NavigationLabelMode.ALL,
+    val landscapeLabelMode: NavigationLabelMode = NavigationLabelMode.ALL,
     val bottomBarHeight: Dp = 64.dp,
     val railWidth: Dp = 80.dp,
     val gridColumnsPortrait: Int = 3,
@@ -165,6 +191,9 @@ data class LayoutTokens(
 ) {
     fun navigationFor(isLandscape: Boolean): NavigationLayout =
         if (isLandscape) landscapeNavigation else portraitNavigation
+
+    fun labelModeFor(isLandscape: Boolean): NavigationLabelMode =
+        if (isLandscape) landscapeLabelMode else portraitLabelMode
 
     fun gridColumnsFor(isLandscape: Boolean): Int =
         if (isLandscape) gridColumnsLandscape else gridColumnsPortrait
@@ -225,11 +254,21 @@ val DefaultStyleTokens: StyleTokens = StyleTokens(
         selectedIndicator = Color(0xFF7CC4FF),
     ),
     typography = TypographyTokens(
-        display = TypeToken(size = 28.sp, lineHeight = 34.sp, weight = FontWeight.Bold),
-        headline = TypeToken(size = 22.sp, lineHeight = 28.sp, weight = FontWeight.SemiBold),
-        title = TypeToken(size = 16.sp, lineHeight = 22.sp, weight = FontWeight.Medium),
-        body = TypeToken(size = 14.sp, lineHeight = 20.sp, weight = FontWeight.Normal),
-        label = TypeToken(size = 12.sp, lineHeight = 16.sp, weight = FontWeight.Medium),
+        displayLarge = TypeToken(size = 32.sp, lineHeight = 40.sp, weight = FontWeight.Bold),
+        displayMedium = TypeToken(size = 28.sp, lineHeight = 36.sp, weight = FontWeight.Bold),
+        displaySmall = TypeToken(size = 24.sp, lineHeight = 32.sp, weight = FontWeight.Bold),
+        headlineLarge = TypeToken(size = 24.sp, lineHeight = 32.sp, weight = FontWeight.SemiBold),
+        headlineMedium = TypeToken(size = 22.sp, lineHeight = 28.sp, weight = FontWeight.SemiBold),
+        headlineSmall = TypeToken(size = 20.sp, lineHeight = 26.sp, weight = FontWeight.SemiBold),
+        titleLarge = TypeToken(size = 18.sp, lineHeight = 24.sp, weight = FontWeight.Medium),
+        titleMedium = TypeToken(size = 16.sp, lineHeight = 22.sp, weight = FontWeight.Medium),
+        titleSmall = TypeToken(size = 14.sp, lineHeight = 20.sp, weight = FontWeight.Medium),
+        bodyLarge = TypeToken(size = 16.sp, lineHeight = 24.sp, weight = FontWeight.Normal),
+        bodyMedium = TypeToken(size = 14.sp, lineHeight = 20.sp, weight = FontWeight.Normal),
+        bodySmall = TypeToken(size = 12.sp, lineHeight = 16.sp, weight = FontWeight.Normal),
+        labelLarge = TypeToken(size = 14.sp, lineHeight = 20.sp, weight = FontWeight.Medium),
+        labelMedium = TypeToken(size = 12.sp, lineHeight = 16.sp, weight = FontWeight.Medium),
+        labelSmall = TypeToken(size = 11.sp, lineHeight = 16.sp, weight = FontWeight.Medium),
         caption = TypeToken(size = 11.sp, lineHeight = 14.sp, weight = FontWeight.Normal),
     ),
     spacing = SpacingTokens(),
