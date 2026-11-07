@@ -3,9 +3,11 @@ package app.omnisonic.style
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.common.truth.Truth.assertThat
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 class StyleTokensTest {
@@ -46,6 +48,21 @@ class StyleTokensTest {
         val shapes = tokens.shapes
         listOf(shapes.small, shapes.medium, shapes.large, shapes.extraLarge, shapes.cover, shapes.pill)
             .forEach { assertThat(it.value).isAtLeast(0f) }
+
+        assertThat(layout.edgeExclusionDp).isEqualTo(24.dp)
+        assertThat(colors.accentOverrides).isEmpty()
+
+        val surfaces = tokens.surfaces
+        listOf(surfaces.navBar, surfaces.tabBar, surfaces.miniPlayer, surfaces.cards, surfaces.sheets)
+            .forEach { style ->
+                assertThat(style.alpha).isAtLeast(0f)
+                assertThat(style.alpha).isAtMost(1f)
+                assertThat(style.blurRadiusDp.value).isAtLeast(0f)
+                assertThat(style.tintAlpha).isAtLeast(0f)
+                assertThat(style.tintAlpha).isAtMost(1f)
+                assertThat(style.borderAlpha).isAtLeast(0f)
+                assertThat(style.borderAlpha).isAtMost(1f)
+            }
     }
 
     @Test
@@ -200,26 +217,22 @@ class StyleTokensTest {
     fun effectDefaultsAreStableAndGatesDefaultToSafeValues() {
         val effects = DefaultStyleTokens.effects
         assertThat(effects).isEqualTo(EffectTokens())
-        assertThat(effects.backdropPreset).isEqualTo(BackdropPreset.SOLID)
+        assertThat(effects.backdropStack).isSameInstanceAs(DefaultBackdropStacks.SUBTLE)
+        assertThat(effects.backdropOverlayAlpha).isEqualTo(0.4f)
         assertThat(effects.backdropLegibilityShield).isTrue()
         assertThat(effects.progressiveBlur).isEqualTo(ProgressiveBlurMode.AUTO)
-        assertThat(effects.vignetteStrength).isEqualTo(0f)
+        assertThat(effects.effectsQuality).isEqualTo(EffectsQuality.AUTO)
+        assertThat(effects.audioReactive).isFalse()
+        assertThat(effects.artColorFollowing).isFalse()
+        assertThat(effects.tiltParallaxEnabled).isFalse()
+        assertThat(effects.tiltParallaxMaxOffsetDp.value).isAtLeast(0f)
     }
 
     @Test
     fun effectValuesStayWithinRange() {
         val effects = DefaultStyleTokens.effects
-        listOf(
-            effects.backdropStrength,
-            effects.backdropOverlayAlpha,
-            effects.vignetteStrength,
-            effects.navBarAlpha,
-            effects.tabBarAlpha,
-        ).forEach { alpha ->
-            assertThat(alpha).isAtLeast(0f)
-            assertThat(alpha).isAtMost(1f)
-        }
-        assertThat(effects.backdropBlurRadiusDp.value).isAtLeast(0f)
+        assertThat(effects.backdropOverlayAlpha).isAtLeast(0f)
+        assertThat(effects.backdropOverlayAlpha).isAtMost(1f)
 
         ProgressiveBlurMode.entries.forEach { mode ->
             assertThat(mode.active(apiLevel = 33)).isEqualTo(mode != ProgressiveBlurMode.OFF)
@@ -227,24 +240,26 @@ class StyleTokensTest {
             assertThat(mode.active(apiLevel = 29)).isEqualTo(mode == ProgressiveBlurMode.ON)
         }
 
-        assertThat(effects.vignetteRequested(apiLevel = 29)).isFalse()
-        assertThat(effects.vignetteRequested(apiLevel = 40)).isFalse()
-        val vignetteOn = effects.copy(vignetteStrength = 0.3f)
-        assertThat(vignetteOn.vignetteRequested(apiLevel = 32)).isFalse()
-        assertThat(vignetteOn.vignetteRequested(apiLevel = 33)).isTrue()
+        assertThrows(IllegalArgumentException::class.java) {
+            effects.copy(backdropOverlayAlpha = 1.5f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            effects.copy(tiltParallaxMaxOffsetDp = (-4).dp)
+        }
     }
 
     @Test
     fun effectOverridesLeaveOtherTokenGroupsUnchanged() {
         val alternate = DefaultStyleTokens.copy(
-            effects = DefaultStyleTokens.effects.copy(backdropPreset = BackdropPreset.GRADIENT),
+            effects = DefaultStyleTokens.effects.copy(backdropStack = DefaultBackdropStacks.ART_BLURRED),
         )
 
-        assertThat(alternate.effects.backdropPreset).isEqualTo(BackdropPreset.GRADIENT)
+        assertThat(alternate.effects.backdropStack).isSameInstanceAs(DefaultBackdropStacks.ART_BLURRED)
         assertThat(alternate.effects.backdropOverlayAlpha)
             .isEqualTo(DefaultStyleTokens.effects.backdropOverlayAlpha)
         assertThat(alternate.colors).isEqualTo(DefaultStyleTokens.colors)
         assertThat(alternate.layout).isEqualTo(DefaultStyleTokens.layout)
+        assertThat(alternate.surfaces).isEqualTo(DefaultStyleTokens.surfaces)
         assertThat(alternate.motion).isEqualTo(DefaultStyleTokens.motion)
         assertThat(alternate.fonts).isEqualTo(DefaultStyleTokens.fonts)
 
@@ -253,6 +268,15 @@ class StyleTokensTest {
         )
         assertThat(motionOverride.effects).isEqualTo(DefaultStyleTokens.effects)
         assertThat(motionOverride.fonts).isEqualTo(DefaultStyleTokens.fonts)
+
+        val surfaceOverride = DefaultStyleTokens.copy(
+            surfaces = DefaultStyleTokens.surfaces.copy(
+                miniPlayer = DefaultStyleTokens.surfaces.miniPlayer.copy(blurRadiusDp = 12.dp),
+            ),
+        )
+        assertThat(surfaceOverride.effects).isEqualTo(DefaultStyleTokens.effects)
+        assertThat(surfaceOverride.surfaces.navBar).isEqualTo(DefaultStyleTokens.surfaces.navBar)
+        assertThat(surfaceOverride.surfaces.miniPlayer.blurRadiusDp).isEqualTo(12.dp)
     }
 
     @Test
@@ -317,5 +341,219 @@ class StyleTokensTest {
         assertThat(configured.tabSwipeModeFor(isLandscape = true)).isEqualTo(TabSwipeMode.ENABLED)
         assertThat(configured.tabBarStyleFor(isLandscape = false)).isEqualTo(TabBarStyle.HIDDEN)
         assertThat(configured.tabBarStyleFor(isLandscape = true)).isEqualTo(TabBarStyle.VISIBLE)
+    }
+
+    @Test
+    fun namedBackdropStacksAreValidAndBaseOrdered() {
+        val named = listOf(
+            DefaultBackdropStacks.SUBTLE,
+            DefaultBackdropStacks.SOLID,
+            DefaultBackdropStacks.GRADIENT,
+            DefaultBackdropStacks.ART_BLURRED,
+            DefaultBackdropStacks.CARD,
+            DefaultBackdropStacks.FULL_BAR,
+        )
+        named.forEach { stack ->
+            assertThat(stack.layers).isNotEmpty()
+            stack.layers.forEach { layer ->
+                assertThat(layer.alpha).isAtLeast(0f)
+                assertThat(layer.alpha).isAtMost(1f)
+                when (layer) {
+                    is GradientBackdropLayer -> assertThat(layer.artTint).isAtMost(1f)
+                    is GrainBackdropLayer -> assertThat(layer.density).isAtMost(1f)
+                    is VignetteBackdropLayer -> assertThat(layer.strength).isAtMost(1f)
+                    is GradientMeshBackdropLayer -> assertThat(layer.intensity).isAtMost(1f)
+                    is AlbumArtBackdropLayer -> assertThat(layer.scale).isGreaterThan(0f)
+                    is BlurBackdropLayer -> assertThat(layer.radiusDp.value).isAtLeast(0f)
+                    is SolidBackdropLayer -> Unit
+                }
+            }
+        }
+
+        listOf(DefaultBackdropStacks.SUBTLE, DefaultBackdropStacks.SOLID, DefaultBackdropStacks.GRADIENT)
+            .forEach { stack ->
+                assertThat(stack.layers.first().type).isEqualTo(BackdropLayerType.SOLID)
+                assertThat(stack.scope).isEqualTo(BackdropScope.NOW_PLAYING)
+            }
+        val artBlurred = DefaultBackdropStacks.ART_BLURRED.layers.map { it.type }
+        assertThat(artBlurred)
+            .containsExactly(BackdropLayerType.ALBUM_ART, BackdropLayerType.BLUR, BackdropLayerType.SOLID)
+            .inOrder()
+        assertThat(DefaultBackdropStacks.FULL_BAR.scope).isEqualTo(BackdropScope.FULL_SCREEN)
+        assertThat(DefaultBackdropStacks.SUBTLE).isNotEqualTo(DefaultBackdropStacks.SOLID)
+    }
+
+    @Test
+    fun subtleIsTheDefaultLookWithSolidBaseAndSoftArtTintedGradient() {
+        val layers = DefaultBackdropStacks.SUBTLE.layers
+        assertThat(layers).hasSize(2)
+        assertThat(layers.map { it.type })
+            .containsExactly(BackdropLayerType.SOLID, BackdropLayerType.GRADIENT)
+            .inOrder()
+
+        val base = layers[0] as SolidBackdropLayer
+        assertThat(base.colorRole).isEqualTo(BackdropColorRole.BACKGROUND)
+        assertThat(base.alpha).isEqualTo(1f)
+
+        val gradient = layers[1] as GradientBackdropLayer
+        assertThat(gradient.artTint).isGreaterThan(0f)
+        assertThat(gradient.alpha).isAtMost(0.5f)
+    }
+
+    @Test
+    fun qualityTierCapsBlurAndDropsOptionalLayers() {
+        assertThat(EffectsQuality.AUTO.resolveTier()).isEqualTo(EffectsQuality.LOW)
+        assertThat(EffectsQuality.AUTO.resolveTier(EffectsQuality.HIGH)).isEqualTo(EffectsQuality.HIGH)
+        assertThat(EffectsQuality.AUTO.resolveTier(EffectsQuality.LOW)).isEqualTo(EffectsQuality.LOW)
+        assertThat(EffectsQuality.LOW.resolveTier(EffectsQuality.HIGH)).isEqualTo(EffectsQuality.LOW)
+        assertThat(EffectsQuality.HIGH.resolveTier()).isEqualTo(EffectsQuality.HIGH)
+        assertThat(EffectsQuality.LOW.capBlurRadius(32.dp)).isEqualTo(EffectsQuality.LOW_TIER_BLUR_RADIUS_CAP)
+        assertThat(EffectsQuality.LOW.capBlurRadius(8.dp)).isEqualTo(8.dp)
+        assertThat(EffectsQuality.HIGH.capBlurRadius(32.dp)).isEqualTo(32.dp)
+
+        val rich = BackdropStack(
+            layers = listOf(
+                SolidBackdropLayer(),
+                BlurBackdropLayer(radiusDp = 32.dp),
+                GrainBackdropLayer(),
+                VignetteBackdropLayer(),
+                GradientMeshBackdropLayer(),
+            ),
+        )
+
+        val low = rich.effectiveLayers(EffectsQuality.AUTO, apiLevel = 34)
+        assertThat(low.map { it.type })
+            .containsExactly(BackdropLayerType.SOLID, BackdropLayerType.BLUR)
+            .inOrder()
+        assertThat((low[1] as BlurBackdropLayer).radiusDp).isEqualTo(EffectsQuality.LOW_TIER_BLUR_RADIUS_CAP)
+
+        val high = rich.effectiveLayers(EffectsQuality.HIGH, apiLevel = 34)
+        assertThat(high.map { it.type })
+            .containsExactly(
+                BackdropLayerType.SOLID,
+                BackdropLayerType.BLUR,
+                BackdropLayerType.GRAIN,
+                BackdropLayerType.VIGNETTE,
+                BackdropLayerType.GRADIENT_MESH,
+            )
+            .inOrder()
+        assertThat((high[1] as BlurBackdropLayer).radiusDp).isEqualTo(32.dp)
+
+        val belowAgsl = rich.effectiveLayers(EffectsQuality.HIGH, apiLevel = 32)
+        assertThat(belowAgsl.map { it.type })
+            .containsExactly(BackdropLayerType.SOLID, BackdropLayerType.BLUR)
+            .inOrder()
+        assertThat((belowAgsl[1] as BlurBackdropLayer).radiusDp).isEqualTo(32.dp)
+    }
+
+    @Test
+    fun agslLayersDropBelowTheApiFloorWhileBaseLayersSurvive() {
+        val layers: List<BackdropLayer> = listOf(
+            SolidBackdropLayer(),
+            GradientBackdropLayer(),
+            AlbumArtBackdropLayer(),
+            BlurBackdropLayer(),
+            GrainBackdropLayer(),
+            VignetteBackdropLayer(),
+            GradientMeshBackdropLayer(),
+        )
+        val baseTypes = layers.take(3).map { it.type }
+        val withBlur = baseTypes + BackdropLayerType.BLUR
+
+        assertThat(layers.filter { it.supportedOn(29) }.map { it.type }).containsExactlyElementsIn(baseTypes)
+        assertThat(layers.filter { it.supportedOn(30) }.map { it.type }).containsExactlyElementsIn(baseTypes)
+        assertThat(layers.filter { it.supportedOn(31) }.map { it.type }).containsExactlyElementsIn(withBlur)
+        assertThat(layers.filter { it.supportedOn(32) }.map { it.type }).containsExactlyElementsIn(withBlur)
+        assertThat(layers.filter { it.supportedOn(33) }.map { it.type })
+            .containsExactlyElementsIn(layers.map { it.type })
+    }
+
+    @Test
+    fun backdropStacksRejectEmptyLayerListsAndOutOfRangeParams() {
+        assertThrows(IllegalArgumentException::class.java) { BackdropStack(layers = emptyList()) }
+        assertThrows(IllegalArgumentException::class.java) { SolidBackdropLayer(alpha = 1.2f) }
+        assertThrows(IllegalArgumentException::class.java) { GradientBackdropLayer(artTint = 1.5f) }
+        assertThrows(IllegalArgumentException::class.java) { AlbumArtBackdropLayer(scale = 0f) }
+        assertThrows(IllegalArgumentException::class.java) { BlurBackdropLayer(radiusDp = (-1).dp) }
+        assertThrows(IllegalArgumentException::class.java) { GrainBackdropLayer(density = 1.5f) }
+        assertThrows(IllegalArgumentException::class.java) { VignetteBackdropLayer(strength = -0.1f) }
+        assertThrows(IllegalArgumentException::class.java) { GradientMeshBackdropLayer(intensity = 2f) }
+    }
+
+    @Test
+    fun legibilityShieldRaisesScrimUntilContrastPasses() {
+        assertThat(
+            LegibilityShield.scrimAlpha(
+                backdropLuminance = 0.1f,
+                textLuminance = 0.9f,
+                manualScrimAlpha = 0.2f,
+                autoShieldEnabled = true,
+            ),
+        ).isEqualTo(0.2f)
+
+        val raised = LegibilityShield.scrimAlpha(
+            backdropLuminance = 0.5f,
+            textLuminance = 0.9f,
+            manualScrimAlpha = 0.2f,
+            autoShieldEnabled = true,
+        )
+        assertThat(raised).isGreaterThan(0.2f)
+        val composited = 0.5f * (1f - raised)
+        assertThat((0.9f + 0.05f) / (composited + 0.05f)).isAtLeast(LegibilityShield.MIN_CONTRAST_RATIO)
+
+        assertThat(
+            LegibilityShield.scrimAlpha(0.5f, 0.9f, manualScrimAlpha = 0.2f, autoShieldEnabled = false),
+        ).isEqualTo(0.2f)
+        assertThat(
+            LegibilityShield.scrimAlpha(0.1f, 0.05f, manualScrimAlpha = 0.2f, autoShieldEnabled = true),
+        ).isEqualTo(0.2f)
+        assertThat(
+            LegibilityShield.scrimAlpha(0.9f, 1f, 0.2f, autoShieldEnabled = true, minContrast = 40f),
+        ).isEqualTo(1f)
+        assertThat(LegibilityShield.scrimAlpha(0.1f, 0.9f, manualScrimAlpha = 2f, autoShieldEnabled = false))
+            .isEqualTo(1f)
+        assertThat(LegibilityShield.scrimAlpha(0.1f, 0.9f, manualScrimAlpha = -1f, autoShieldEnabled = false))
+            .isEqualTo(0f)
+    }
+
+    @Test
+    fun accentOverridesResolveTheLastPinPerTarget() {
+        val colors = DefaultStyleTokens.colors
+        assertThat(colors.accentFor(AccentTargetType.ALBUM, "album-1")).isNull()
+
+        val pinned = colors.copy(
+            accentOverrides = listOf(
+                AccentOverride(AccentTargetType.ALBUM, "album-1", Color(0xFFFF0000)),
+                AccentOverride(AccentTargetType.ARTIST, "artist-1", Color(0xFF00FF00)),
+                AccentOverride(AccentTargetType.ALBUM, "album-1", Color(0xFF0000FF)),
+            ),
+        )
+        assertThat(pinned.accentFor(AccentTargetType.ALBUM, "album-1")).isEqualTo(Color(0xFF0000FF))
+        assertThat(pinned.accentFor(AccentTargetType.ARTIST, "artist-1")).isEqualTo(Color(0xFF00FF00))
+        assertThat(pinned.accentFor(AccentTargetType.ARTIST, "album-1")).isNull()
+        assertThat(pinned.primary).isEqualTo(colors.primary)
+    }
+
+    @Test
+    fun surfaceStylesAreIndependentAndStayInRange() {
+        val surfaces = DefaultStyleTokens.surfaces
+        assertThat(surfaces).isEqualTo(SurfaceStyleTokens())
+        assertThat(surfaces.navBar.alpha).isEqualTo(1f)
+        assertThat(surfaces.tabBar.alpha).isEqualTo(1f)
+        assertThat(surfaces.cards.alpha).isEqualTo(1f)
+
+        val styled = surfaces.copy(
+            miniPlayer = surfaces.miniPlayer.copy(blurRadiusDp = 12.dp, tintAlpha = 0.3f),
+        )
+        assertThat(styled.miniPlayer.blurRadiusDp).isEqualTo(12.dp)
+        assertThat(styled.miniPlayer.tintAlpha).isEqualTo(0.3f)
+        assertThat(styled.cards).isEqualTo(surfaces.cards)
+        assertThat(styled.navBar).isEqualTo(surfaces.navBar)
+        assertThat(styled.sheets).isEqualTo(surfaces.sheets)
+
+        assertThrows(IllegalArgumentException::class.java) { SurfaceStyle(alpha = 1.5f) }
+        assertThrows(IllegalArgumentException::class.java) { SurfaceStyle(tintAlpha = -0.1f) }
+        assertThrows(IllegalArgumentException::class.java) { SurfaceStyle(borderAlpha = 2f) }
+        assertThrows(IllegalArgumentException::class.java) { SurfaceStyle(blurRadiusDp = (-2).dp) }
     }
 }

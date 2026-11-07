@@ -26,6 +26,7 @@ data class StyleTokens(
     val shapes: ShapeTokens,
     val layout: LayoutTokens,
     val imagery: ImageryTokens,
+    val surfaces: SurfaceStyleTokens,
     val effects: EffectTokens,
     val motion: MotionTokens,
     val fonts: FontTokens,
@@ -75,7 +76,21 @@ data class ColorTokens(
     val progressActive: Color,
     val nowPlayingBackground: Color,
     val selectedIndicator: Color,
+    val accentOverrides: List<AccentOverride> = emptyList(),
 )
+
+enum class AccentTargetType { ALBUM, ARTIST }
+
+/** Per-album/artist accent pin (D-13); Phase 9 owns the stored map, this list is the resolved view. */
+@Immutable
+data class AccentOverride(
+    val targetType: AccentTargetType,
+    val externalId: String,
+    val accent: Color,
+)
+
+fun ColorTokens.accentFor(targetType: AccentTargetType, externalId: String): Color? =
+    accentOverrides.lastOrNull { it.targetType == targetType && it.externalId == externalId }?.accent
 
 @Immutable
 data class TypeToken(
@@ -201,6 +216,7 @@ data class LayoutTokens(
     val playerArtSize: Dp = 320.dp,
     val maxContentWidth: Dp = 840.dp,
     val sectionSpacing: Dp = 24.dp,
+    val edgeExclusionDp: Dp = 24.dp,
 ) {
     fun navigationFor(isLandscape: Boolean): NavigationLayout =
         if (isLandscape) landscapeNavigation else portraitNavigation
@@ -228,39 +244,85 @@ data class ImageryTokens(
 )
 
 /**
- * Visual-effect values. Every entry must survive its platform floor
- * (reference/docs/GESTURES.md §3): blur no-ops below API 31, progressive blur
- * and the vignette below API 33. Text legibility never depends on an effect —
- * [backdropOverlayAlpha] and [backdropLegibilityShield] carry legibility when
- * an effect falls back.
+ * Per-surface treatment (D-13). Tint draws over the `surfaceTint` color token,
+ * border over `outlineVariant`; blur rides the same quality-tier caps as the
+ * backdrop (`EffectsQuality.capBlurRadius`).
  */
 @Immutable
-data class EffectTokens(
-    val backdropPreset: BackdropPreset = BackdropPreset.SOLID,
-    val backdropGradientAnchor: BackdropGradientAnchor = BackdropGradientAnchor.TOP,
-    val backdropStrength: Float = 0.5f,
-    val backdropOverlayAlpha: Float = 0.4f,
-    val backdropLegibilityShield: Boolean = true,
-    val backdropBlurRadiusDp: Dp = 24.dp,
-    val backdropBlurScope: BackdropBlurScope = BackdropBlurScope.NOW_PLAYING,
-    val progressiveBlur: ProgressiveBlurMode = ProgressiveBlurMode.AUTO,
-    val vignetteStrength: Float = 0f,
-    val navBarAlpha: Float = 1f,
-    val tabBarAlpha: Float = 1f,
+data class SurfaceStyle(
+    val alpha: Float = 1f,
+    val blurRadiusDp: Dp = 0.dp,
+    val tintAlpha: Float = 0f,
+    val borderAlpha: Float = 0f,
 ) {
-    fun vignetteRequested(apiLevel: Int): Boolean =
-        vignetteStrength > 0f && apiLevel >= VIGNETTE_MIN_API
-
-    companion object {
-        const val VIGNETTE_MIN_API = 33
+    init {
+        require(alpha in BackdropLayer.VALID_ALPHA) { "alpha must be within 0..1 (was $alpha)" }
+        require(tintAlpha in BackdropLayer.VALID_ALPHA) { "tintAlpha must be within 0..1 (was $tintAlpha)" }
+        require(borderAlpha in BackdropLayer.VALID_ALPHA) { "borderAlpha must be within 0..1 (was $borderAlpha)" }
+        require(blurRadiusDp.value >= 0f) { "blur radius must be non-negative (was $blurRadiusDp)" }
     }
 }
 
-enum class BackdropPreset { SOLID, GRADIENT, ART_BLURRED, CARD, FULL_BAR }
+@Immutable
+data class SurfaceStyleTokens(
+    val navBar: SurfaceStyle = SurfaceStyle(),
+    val tabBar: SurfaceStyle = SurfaceStyle(),
+    val miniPlayer: SurfaceStyle = SurfaceStyle(alpha = 0.92f, borderAlpha = 0.15f),
+    val cards: SurfaceStyle = SurfaceStyle(),
+    val sheets: SurfaceStyle = SurfaceStyle(),
+)
 
-enum class BackdropGradientAnchor { TOP, BOTTOM, TOP_AND_BOTTOM, START, END, START_AND_END }
+/**
+ * Visual-effect values. Every entry must survive its platform floor
+ * (reference/docs/GESTURES.md §3): blur drops below API 31, the AGSL layers
+ * (grain, vignette, gradient mesh, progressive blur) drop below API 33. Text
+ * legibility never depends on an effect — [backdropOverlayAlpha] and
+ * [backdropLegibilityShield] carry legibility when an effect falls back.
+ */
+@Immutable
+data class EffectTokens(
+    val backdropStack: BackdropStack = DefaultBackdropStacks.SUBTLE,
+    val backdropOverlayAlpha: Float = 0.4f,
+    val backdropLegibilityShield: Boolean = true,
+    val progressiveBlur: ProgressiveBlurMode = ProgressiveBlurMode.AUTO,
+    val effectsQuality: EffectsQuality = EffectsQuality.AUTO,
+    val audioReactive: Boolean = false,
+    val artColorFollowing: Boolean = false,
+    val tiltParallaxEnabled: Boolean = false,
+    val tiltParallaxMaxOffsetDp: Dp = 12.dp,
+) {
+    init {
+        require(backdropOverlayAlpha in BackdropLayer.VALID_ALPHA) {
+            "backdropOverlayAlpha must be within 0..1 (was $backdropOverlayAlpha)"
+        }
+        require(tiltParallaxMaxOffsetDp.value >= 0f) {
+            "tiltParallaxMaxOffsetDp must be non-negative (was $tiltParallaxMaxOffsetDp)"
+        }
+    }
+}
 
-enum class BackdropBlurScope { NOW_PLAYING, NAV_BAR, FULL_SCREEN }
+/**
+ * Device capability tier for effects (D-13). AUTO defers to a first-run
+ * classification that does not exist yet — until then it behaves as LOW
+ * (conservative default, reference/docs/UI_SPEC.md §4); LOW caps blur radius
+ * and drops the API-33-only layers; HIGH draws everything the platform allows.
+ */
+enum class EffectsQuality {
+    AUTO, LOW, HIGH;
+
+    fun resolveTier(classifiedTier: EffectsQuality? = null): EffectsQuality = when {
+        this != AUTO -> this
+        classifiedTier == HIGH -> HIGH
+        else -> LOW
+    }
+
+    fun capBlurRadius(radiusDp: Dp): Dp =
+        if (resolveTier() == LOW) minOf(radiusDp, LOW_TIER_BLUR_RADIUS_CAP) else radiusDp
+
+    companion object {
+        val LOW_TIER_BLUR_RADIUS_CAP: Dp = 16.dp
+    }
+}
 
 enum class ProgressiveBlurMode {
     AUTO, ON, OFF;
@@ -268,12 +330,8 @@ enum class ProgressiveBlurMode {
     /** True when the renderer should attempt progressive blur; below the API floor it no-ops. */
     fun active(apiLevel: Int): Boolean = when (this) {
         OFF -> false
-        AUTO -> apiLevel >= PROGRESSIVE_BLUR_MIN_API
+        AUTO -> apiLevel >= AGSL_MIN_API
         ON -> true
-    }
-
-    companion object {
-        const val PROGRESSIVE_BLUR_MIN_API = 33
     }
 }
 
@@ -398,6 +456,7 @@ val DefaultStyleTokens: StyleTokens = StyleTokens(
     shapes = ShapeTokens(),
     layout = LayoutTokens(),
     imagery = ImageryTokens(),
+    surfaces = SurfaceStyleTokens(),
     effects = EffectTokens(),
     motion = MotionTokens(),
     fonts = FontTokens(),
