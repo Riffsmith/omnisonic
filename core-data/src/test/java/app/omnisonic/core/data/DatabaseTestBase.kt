@@ -23,6 +23,7 @@ import app.omnisonic.core.data.db.dao.PlaylistEntryDao
 import app.omnisonic.core.data.db.dao.ProviderDao
 import app.omnisonic.core.data.db.dao.QueueDao
 import app.omnisonic.core.data.db.dao.SavedFilterDao
+import app.omnisonic.core.data.db.dao.SearchDao
 import app.omnisonic.core.data.db.dao.SongArtistDao
 import app.omnisonic.core.data.db.dao.SongDao
 import app.omnisonic.core.data.db.dao.SyncStatusDao
@@ -77,6 +78,7 @@ abstract class DatabaseTestBase {
     protected val savedFilterDao: SavedFilterDao get() = db.savedFilterDao()
     protected val syncStatusDao: SyncStatusDao get() = db.syncStatusDao()
     protected val aggregateDao: AggregateDao get() = db.aggregateDao()
+    protected val searchDao: SearchDao get() = db.searchDao()
 
     protected fun runDbTest(block: suspend () -> Unit): Unit = runTest {
         db = OmnisonicDatabaseFactory(appContext).openInMemory()

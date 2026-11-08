@@ -20,6 +20,7 @@ import app.omnisonic.core.data.db.dao.PlayEventDao
 import app.omnisonic.core.data.db.dao.ProviderDao
 import app.omnisonic.core.data.db.dao.QueueDao
 import app.omnisonic.core.data.db.dao.SavedFilterDao
+import app.omnisonic.core.data.db.dao.SearchDao
 import app.omnisonic.core.data.db.dao.SongArtistDao
 import app.omnisonic.core.data.db.dao.SongDao
 import app.omnisonic.core.data.db.dao.SyncStatusDao
@@ -94,6 +95,7 @@ abstract class OmnisonicDatabase : RoomDatabase() {
     abstract fun syncStatusDao(): SyncStatusDao
     abstract fun queueDao(): QueueDao
     abstract fun aggregateDao(): AggregateDao
+    abstract fun searchDao(): SearchDao
 
     companion object {
         /**
