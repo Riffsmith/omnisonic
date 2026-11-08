@@ -16,7 +16,7 @@ test or checked against cited sources), `[INFERRED]` (basis stated), or
 | **Network & protocol** | `network/client-profiles.md` (API vs MEDIA OkHttp profiles) · `network/cleartext-policy.md` (cleartext policy + private-host warning) · `protocol/subsonic-auth.md` (auth parameters) · `protocol/scrobble-timestamps.md` (backdating policy) · `protocol/cancellation-contract.md` (coroutine cancellation rule) |
 | **Providers & sync** | `providers/provider-connections.md` (kinds, endpoints, capability traits, availability gate, mTLS, downloads) · `providers/client-lifecycle.md` (client caching + connection-block failover) · `providers/credential-handling.md` (secrets, unreadable credentials, log redaction, backup exclusions) · `providers/local-mediastore.md` (device library access) |
 | **Toolchain & build** | `toolchain/build-stack.md` (pinned versions, release minification, media3 upgrade notes) |
-| **UI** | `ui/style-tokens.md` (StyleTokens: the single source of colors/sizes/layout and the Phase 9 source seam) |
+| **UI** | `ui/style-tokens.md` (StyleTokens: the single source of colors/sizes/layout and the Phase 9 source seam) · `ui/gesture-contract.md` (SwipeZone ownership rules, tab+pager pairing, edge exclusion, button-twin audit) |
 
 ## Development guidance
 

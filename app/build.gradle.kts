@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
     alias(libs.plugins.baselineProfile)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -50,7 +51,14 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
-            all { it.useJUnitPlatform() }
+            all { test ->
+                test.useJUnitPlatform()
+                if (test.name.endsWith("ReleaseUnitTest")) {
+                    // Compose-rule tests need the debug-only host activity
+                    // (app/src/debug/AndroidManifest.xml); the release variant has none.
+                    test.exclude("**/shell/**")
+                }
+            }
         }
     }
 }
@@ -79,8 +87,12 @@ dependencies {
     implementation(libs.androidx.compose.navigation)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.hilt.android)
     implementation(libs.kotlinx.coroutines.android)
+    // core-data keeps room as `implementation`; referencing the database type
+    // from app code (shell provider probe) needs the supertype on the classpath.
+    implementation(libs.room.runtime)
     implementation(libs.moshi)
     implementation(libs.coil)
     implementation(libs.coil.compose)
@@ -95,6 +107,9 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.mockk)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.compose.ui.test.manifest)
+    testImplementation(libs.roborazzi)
     // core-data keeps room as `implementation`; the wiring test opens the DB.
     testImplementation(libs.room.runtime)
     testImplementation(libs.hilt.android.testing)

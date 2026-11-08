@@ -1,0 +1,19 @@
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="settings_group_appearance">Appearance</string>
+    <string name="settings_nav_portrait">Navigation (portrait)</string>
+    <string name="settings_nav_landscape">Navigation (landscape)</string>
+    <string name="settings_nav_bottom_bar">Bottom bar</string>
+    <string name="settings_nav_rail">Rail</string>
+    <string name="settings_group_tabs">Tabs</string>
+    <string name="settings_tab_move_up">Move up</string>
+    <string name="settings_tab_move_down">Move down</string>
+    <string name="settings_group_providers">Providers</string>
+    <string name="settings_manage_providers">Manage providers</string>
+    <string name="settings_group_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="tab_home">Home</string>
+    <string name="tab_library">Library</string>
+    <string name="tab_search">Search</string>
+    <string name="tab_settings">Settings</string>
+</resources>
