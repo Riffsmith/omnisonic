@@ -3,7 +3,5 @@
     <string name="home_empty_body">Your library lives here once a provider is connected.</string>
     <string name="home_empty_action">Set up a provider</string>
     <string name="a11y_go_to_tab">Go to %1$s</string>
-    <string name="provider_setup_title">Provider setup</string>
-    <string name="provider_setup_in_progress">Provider setup lands with the next task.</string>
     <string name="placeholder_screen_body">This screen lands in a later phase.</string>
 </resources>

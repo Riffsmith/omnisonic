@@ -63,6 +63,17 @@ class ProviderClientRegistry(
     }
 
     /**
+     * Builds a provider for a connection that is not persisted yet (provider
+     * setup connection test). The provider and its client are not cached; the
+     * registry's spec rules (timeouts, headers, mTLS, trust anchors) and its
+     * factories still apply, so a probe rides the same code the saved row will.
+     */
+    fun buildTransientProvider(apiType: String, connection: ProviderConnection): MediaProvider? {
+        val spec = specFor(connection, ClientProfile.API) ?: return null
+        return providerRegistry.create(apiType, connection, apiClientFactory(spec))
+    }
+
+    /**
      * API-profile client of the provider row owning this URL (scheme/host/port
      * match on the primary or secondary block); used by the image loader so
      * cover requests ride the provider's headers, identity and trust anchors.

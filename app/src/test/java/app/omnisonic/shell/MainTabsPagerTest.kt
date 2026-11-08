@@ -88,11 +88,13 @@ class MainTabsPagerTest {
     ): NavHostController {
         lateinit var nav: NavHostController
         val settingsViewModel = ShellSettingsViewModel(preferencesStore("pager"))
+        val providerSetupViewModel = testProviderSetupViewModel()
         composeRule.setContent {
             OmnisonicTheme(tokens = tokens) {
                 OmnisonicShell(
                     state = state,
                     settingsViewModel = settingsViewModel,
+                    providerSetupViewModel = providerSetupViewModel,
                     navController = rememberNavController().also { nav = it },
                 )
             }

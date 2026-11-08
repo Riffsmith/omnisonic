@@ -45,5 +45,9 @@ dependencies {
     testImplementation(libs.truth)
     testImplementation(libs.robolectric)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
+    testImplementation(libs.mockk.agent)
+    testImplementation(libs.kotlin.reflect)
+    testImplementation(project(":provider-api"))
     ksp(libs.hilt.compiler)
 }

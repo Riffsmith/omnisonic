@@ -71,6 +71,7 @@ class ShellNavHostTest {
         val settingsViewModel = ShellSettingsViewModel(
             ShellPreferencesStore.createAt(File("/tmp/opencode", "navhost-${System.nanoTime()}.preferences_pb")),
         )
+        val providerSetupViewModel = testProviderSetupViewModel()
         composeRule.setContent {
             OmnisonicTheme {
                 ShellNavHost(
@@ -78,6 +79,7 @@ class ShellNavHostTest {
                     startRoute = startRoute,
                     hasProvider = true,
                     settingsViewModel = settingsViewModel,
+                    providerSetupViewModel = providerSetupViewModel,
                     modifier = Modifier,
                 )
             }
@@ -115,9 +117,14 @@ class ShellTabNavigationTest {
         val settingsViewModel = ShellSettingsViewModel(
             ShellPreferencesStore.createAt(File("/tmp/opencode", "tabnav-${System.nanoTime()}.preferences_pb")),
         )
+        val providerSetupViewModel = testProviderSetupViewModel()
         composeRule.setContent {
             OmnisonicTheme {
-                OmnisonicShell(state = fixedShellState(hasProvider = hasProvider), settingsViewModel = settingsViewModel)
+                OmnisonicShell(
+                    state = fixedShellState(hasProvider = hasProvider),
+                    settingsViewModel = settingsViewModel,
+                    providerSetupViewModel = providerSetupViewModel,
+                )
             }
         }
         composeRule.waitForIdle()

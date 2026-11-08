@@ -2,6 +2,8 @@ package app.omnisonic.di
 
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.network.ProviderStatusTracker
+import app.omnisonic.core.data.providers.InitialLibrarySync
+import app.omnisonic.core.data.providers.LibrarySyncLauncher
 import app.omnisonic.core.data.providers.ProviderBlockPreferenceStore
 import app.omnisonic.core.data.providers.ProviderClientRegistry
 import app.omnisonic.core.data.providers.ProviderConfigMapper
@@ -19,6 +21,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /** Wiring for the provider client registry (T12/T21) and its first production consumer. */
 @Module
@@ -84,5 +89,30 @@ object ProviderWiringModule {
             onCredentialsUnreadable = { providerId ->
                 statusTracker.markCredentialsUnreadable(providerId)
             },
+        )
+
+    /**
+     * First library walk after setup. Runs on its own process-scoped coroutine
+     * scope so leaving the setup screen cannot cancel it; failures are logged
+     * and auth outcomes feed the status tracker's run gate.
+     */
+    @Provides
+    @Singleton
+    fun initialLibrarySync(
+        database: OmnisonicDatabase,
+        clients: ProviderClientRegistry,
+        providerRegistry: ProviderRegistry,
+        statusTracker: ProviderStatusTracker,
+        logger: OmnisonicLogger,
+    ): InitialLibrarySync =
+        LibrarySyncLauncher(
+            database = database,
+            clients = clients,
+            traitsFor = providerRegistry::traitsFor,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+            logger = logger,
+            runGate = statusTracker.runGate,
+            onAuthFailed = statusTracker::markAuthFailed,
+            onAuthSucceeded = statusTracker::clearAuthFailed,
         )
 }

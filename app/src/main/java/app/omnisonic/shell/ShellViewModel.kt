@@ -24,6 +24,7 @@ data class ShellUiState(
     val landscapeNavOverride: NavigationLayout?,
 )
 
+@HiltViewModel
 class ShellViewModel @Inject constructor(
     shellPreferences: ShellPreferencesStore,
     database: OmnisonicDatabase,

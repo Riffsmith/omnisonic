@@ -49,6 +49,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.omnisonic.BuildConfig
 import app.omnisonic.R
+import app.omnisonic.feature.settings.providers.ProviderSetupRoute
+import app.omnisonic.feature.settings.providers.ProviderSetupViewModel
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellNavigationResolver
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
@@ -61,7 +63,10 @@ import app.omnisonic.style.TabSwipeMode
 import kotlinx.coroutines.launch
 
 @Composable
-fun OmnisonicApp(viewModel: ShellViewModel = hiltViewModel()) {
+fun OmnisonicApp(
+    viewModel: ShellViewModel = hiltViewModel(),
+    providerSetupViewModel: ProviderSetupViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     OmnisonicTheme {
         val shell = state
@@ -71,7 +76,11 @@ fun OmnisonicApp(viewModel: ShellViewModel = hiltViewModel()) {
                 color = MaterialTheme.colorScheme.background,
             ) {}
         } else {
-            OmnisonicShell(state = shell, settingsViewModel = hiltViewModel())
+            OmnisonicShell(
+                state = shell,
+                settingsViewModel = hiltViewModel(),
+                providerSetupViewModel = providerSetupViewModel,
+            )
         }
     }
 }
@@ -88,6 +97,7 @@ fun OmnisonicApp(viewModel: ShellViewModel = hiltViewModel()) {
 fun OmnisonicShell(
     state: ShellUiState,
     settingsViewModel: ShellSettingsViewModel,
+    providerSetupViewModel: ProviderSetupViewModel,
     navController: NavHostController? = null,
 ) {
     val controller = navController ?: rememberNavController()
@@ -167,6 +177,7 @@ fun OmnisonicShell(
                 showingTabs = showingTabs,
                 navController = controller,
                 settingsViewModel = settingsViewModel,
+                providerSetupViewModel = providerSetupViewModel,
                 onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                 onTabTapped = onTabTapped,
                 modifier = Modifier.weight(1f),
@@ -181,6 +192,7 @@ fun OmnisonicShell(
                 showingTabs = showingTabs,
                 navController = controller,
                 settingsViewModel = settingsViewModel,
+                providerSetupViewModel = providerSetupViewModel,
                 onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                 onTabTapped = onTabTapped,
                 modifier = Modifier.weight(1f),
@@ -212,6 +224,7 @@ private fun ShellContentArea(
     showingTabs: Boolean,
     navController: NavHostController,
     settingsViewModel: ShellSettingsViewModel,
+    providerSetupViewModel: ProviderSetupViewModel,
     onOpenSetup: () -> Unit,
     onTabTapped: (MainTab) -> Unit,
     modifier: Modifier = Modifier,
@@ -222,6 +235,7 @@ private fun ShellContentArea(
             startRoute = state.startRoute,
             hasProvider = state.hasProvider,
             settingsViewModel = settingsViewModel,
+            providerSetupViewModel = providerSetupViewModel,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 0f else 1f)
@@ -328,6 +342,7 @@ internal fun ShellNavHost(
     startRoute: String,
     hasProvider: Boolean,
     settingsViewModel: ShellSettingsViewModel,
+    providerSetupViewModel: ProviderSetupViewModel,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -354,7 +369,20 @@ internal fun ShellNavHost(
             TabRouteSlot()
         }
         composable(ShellRoutes.PROVIDER_SETUP) {
-            ProviderSetupPlaceholder()
+            ProviderSetupRoute(
+                viewModel = providerSetupViewModel,
+                onComplete = {
+                    navController.navigate(ShellRoutes.HOME) {
+                        popUpTo(ShellRoutes.PROVIDER_SETUP) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                },
+                onCancel = if (navController.previousBackStackEntry != null) {
+                    { navController.popBackStack() }
+                } else {
+                    null
+                },
+            )
         }
         composable(
             ShellRoutes.ALBUM,

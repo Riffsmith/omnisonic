@@ -16,8 +16,9 @@ data class ConnectionBlock(
 ) {
     /** Base URL including an optional origin path, without trailing slash. */
     fun baseUrl(): String {
+        val bracketableHost = if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
         val suffix = path?.trim()?.trim('/')?.let { "/$it" } ?: ""
-        return "$scheme://$host:$port$suffix"
+        return "$scheme://$bracketableHost:$port$suffix"
     }
 }
 
