@@ -1,8 +1,8 @@
 package app.omnisonic.image
 
 import android.content.Context
-import app.omnisonic.playback.cache.CoverImageKey
 import app.omnisonic.playback.cache.CoverKeyer
+import app.omnisonic.provider.api.CoverImageKey
 import coil3.ImageLoader
 import coil3.Uri
 import coil3.decode.Decoder

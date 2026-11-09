@@ -95,6 +95,7 @@ class MainTabsPagerTest {
                     state = state,
                     settingsViewModel = settingsViewModel,
                     providerSetupViewModel = providerSetupViewModel,
+                    browseViewModel = testBrowseViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )
             }

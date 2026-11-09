@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.db.entity.ArtistEntity
 
 @Dao
@@ -88,6 +89,31 @@ interface ArtistDao {
 
     @Query("SELECT * FROM artists ORDER BY id")
     suspend fun selectAll(): List<ArtistEntity>
+
+    /** Alphabetical browse page (ProfileScope convention — `ProfileScopeQueryTest`). */
+    @Query(
+        """
+        SELECT * FROM artists
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+        ORDER BY COALESCE(sortTitle, title) COLLATE NOCASE, title COLLATE NOCASE, id
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun browseArtistsRaw(excludedProviderIdsCsv: String, limit: Int, offset: Int): List<ArtistEntity>
+
+    suspend fun browseArtists(scope: ProfileScope, limit: Int, offset: Int): List<ArtistEntity> =
+        browseArtistsRaw(scope.excludedProviderIds.joinToString(","), limit, offset)
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM artists
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+        """,
+    )
+    suspend fun countArtistsRaw(excludedProviderIdsCsv: String): Int
+
+    suspend fun countArtists(scope: ProfileScope): Int =
+        countArtistsRaw(scope.excludedProviderIds.joinToString(","))
 
     @Query("SELECT * FROM artists WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<ArtistEntity>

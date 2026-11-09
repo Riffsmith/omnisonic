@@ -217,6 +217,7 @@ data class LayoutTokens(
     val maxContentWidth: Dp = 840.dp,
     val sectionSpacing: Dp = 24.dp,
     val edgeExclusionDp: Dp = 24.dp,
+    val hubEntryAspectRatio: Float = 1.4f,
 ) {
     fun navigationFor(isLandscape: Boolean): NavigationLayout =
         if (isLandscape) landscapeNavigation else portraitNavigation
@@ -241,6 +242,7 @@ data class ImageryTokens(
     val detailArtSize: Dp = 192.dp,
     val nowPlayingArtSize: Dp = 320.dp,
     val placeholderTintAlpha: Float = 0.6f,
+    val uiIconSize: Dp = 24.dp,
 )
 
 /**

@@ -40,6 +40,7 @@ class ShellGoldenTest {
                     state = fixedShellState(hasProvider = false),
                     settingsViewModel = settingsViewModel,
                     providerSetupViewModel = providerSetupViewModel,
+                    browseViewModel = testBrowseViewModel(),
                 )
             }
         }

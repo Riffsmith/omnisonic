@@ -61,6 +61,7 @@ class ProviderSetupNavigationTest {
                         ),
                     ),
                     providerSetupViewModel = setupViewModel,
+                    browseViewModel = testBrowseViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )
             }

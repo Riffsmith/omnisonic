@@ -2,7 +2,7 @@ package app.omnisonic.image
 
 import android.content.Context
 import app.omnisonic.core.data.providers.ProviderClientRegistry
-import app.omnisonic.playback.cache.CoverImageKey
+import app.omnisonic.provider.api.CoverImageKey
 import coil3.ImageLoader
 import dagger.Module
 import dagger.Provides

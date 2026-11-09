@@ -11,6 +11,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import app.omnisonic.BuildConfig
 import app.omnisonic.R
+import app.omnisonic.feature.library.browse.LibrarySection
+import app.omnisonic.feature.library.ui.LibraryHubScreen
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
@@ -38,6 +40,7 @@ internal fun MainTabsPager(
     settingsViewModel: ShellSettingsViewModel,
     onOpenSetup: () -> Unit,
     onSelectTab: (MainTab) -> Unit,
+    onOpenSection: (LibrarySection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
@@ -60,7 +63,7 @@ internal fun MainTabsPager(
     ) { page ->
         when (val tab = tabs[page]) {
             MainTab.HOME -> HomePlaceholder(hasProvider = hasProvider, onSetup = onOpenSetup)
-            MainTab.LIBRARY -> PlaceholderPane(tab.label())
+            MainTab.LIBRARY -> LibraryHubScreen(onOpenSection = onOpenSection)
             MainTab.SEARCH -> PlaceholderPane(tab.label())
             MainTab.SETTINGS -> ShellSettingsScreen(
                 appVersion = BuildConfig.VERSION_NAME,

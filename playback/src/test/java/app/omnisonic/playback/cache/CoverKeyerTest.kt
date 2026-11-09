@@ -2,6 +2,7 @@ package app.omnisonic.playback.cache
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import app.omnisonic.provider.api.CoverImageKey
 import coil3.request.Options
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test

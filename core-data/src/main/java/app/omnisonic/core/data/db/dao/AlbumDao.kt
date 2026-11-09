@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.db.entity.AlbumEntity
 
 @Dao
@@ -97,6 +98,34 @@ interface AlbumDao {
 
     @Query("SELECT * FROM albums ORDER BY id")
     suspend fun selectAll(): List<AlbumEntity>
+
+    /**
+     * Alphabetical browse page (ProfileScope convention: `*Raw` query plus a
+     * scope-taking wrapper — `ProfileScopeQueryTest`).
+     */
+    @Query(
+        """
+        SELECT * FROM albums
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+        ORDER BY COALESCE(sortTitle, title) COLLATE NOCASE, title COLLATE NOCASE, id
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun browseAlbumsRaw(excludedProviderIdsCsv: String, limit: Int, offset: Int): List<AlbumEntity>
+
+    suspend fun browseAlbums(scope: ProfileScope, limit: Int, offset: Int): List<AlbumEntity> =
+        browseAlbumsRaw(scope.excludedProviderIds.joinToString(","), limit, offset)
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM albums
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+        """,
+    )
+    suspend fun countAlbumsRaw(excludedProviderIdsCsv: String): Int
+
+    suspend fun countAlbums(scope: ProfileScope): Int =
+        countAlbumsRaw(scope.excludedProviderIds.joinToString(","))
 
     @Query("SELECT * FROM albums WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<AlbumEntity>

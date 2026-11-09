@@ -1,0 +1,17 @@
+<resources>
+    <string name="library_section_albums">Albums</string>
+    <string name="library_section_artists">Artists</string>
+    <string name="library_section_genres">Genres</string>
+    <string name="library_section_songs">Songs</string>
+    <string name="library_section_playlists">Playlists</string>
+
+    <string name="library_empty_albums">No albums here yet. Sync a provider to fill your library.</string>
+    <string name="library_empty_artists">No artists here yet. Sync a provider to fill your library.</string>
+    <string name="library_empty_genres">No genres here yet. Sync a provider to fill your library.</string>
+    <string name="library_empty_songs">No songs here yet. Sync a provider to fill your library.</string>
+    <string name="library_empty_playlists">No playlists here yet. Sync a provider to fill your library.</string>
+
+    <string name="library_error_body">This section could not be loaded.</string>
+    <string name="library_retry">Retry</string>
+    <string name="library_load_more_failed">Some items could not be loaded.</string>
+</resources>

@@ -80,6 +80,7 @@ class ShellNavHostTest {
                     hasProvider = true,
                     settingsViewModel = settingsViewModel,
                     providerSetupViewModel = providerSetupViewModel,
+                    browseViewModel = testBrowseViewModel(),
                     modifier = Modifier,
                 )
             }
@@ -113,21 +114,25 @@ class ShellTabNavigationTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun setContent(hasProvider: Boolean = true) {
+    private fun setContent(hasProvider: Boolean = true): NavHostController {
         val settingsViewModel = ShellSettingsViewModel(
             ShellPreferencesStore.createAt(File("/tmp/opencode", "tabnav-${System.nanoTime()}.preferences_pb")),
         )
         val providerSetupViewModel = testProviderSetupViewModel()
+        lateinit var nav: NavHostController
         composeRule.setContent {
             OmnisonicTheme {
                 OmnisonicShell(
                     state = fixedShellState(hasProvider = hasProvider),
                     settingsViewModel = settingsViewModel,
                     providerSetupViewModel = providerSetupViewModel,
+                    browseViewModel = testBrowseViewModel(),
+                    navController = rememberNavController().also { nav = it },
                 )
             }
         }
         composeRule.waitForIdle()
+        return nav
     }
 
     @Test
@@ -152,5 +157,17 @@ class ShellTabNavigationTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("Set up a provider").assertExists()
+    }
+
+    @Test
+    fun libraryHubEntryOpensTheSectionRoute() {
+        val nav = setContent()
+
+        composeRule.onNode(tabItem("Library")).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Albums").performClick()
+        composeRule.waitForIdle()
+
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.SECTION)
     }
 }

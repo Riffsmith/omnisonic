@@ -49,6 +49,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.omnisonic.BuildConfig
 import app.omnisonic.R
+import app.omnisonic.feature.library.browse.LibraryBrowseViewModel
+import app.omnisonic.feature.library.browse.LibrarySection
+import app.omnisonic.feature.library.ui.LibrarySectionRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupViewModel
 import app.omnisonic.feature.settings.shell.MainTab
@@ -80,6 +83,7 @@ fun OmnisonicApp(
                 state = shell,
                 settingsViewModel = hiltViewModel(),
                 providerSetupViewModel = providerSetupViewModel,
+                browseViewModel = hiltViewModel(),
             )
         }
     }
@@ -98,6 +102,7 @@ fun OmnisonicShell(
     state: ShellUiState,
     settingsViewModel: ShellSettingsViewModel,
     providerSetupViewModel: ProviderSetupViewModel,
+    browseViewModel: LibraryBrowseViewModel,
     navController: NavHostController? = null,
 ) {
     val controller = navController ?: rememberNavController()
@@ -178,8 +183,10 @@ fun OmnisonicShell(
                 navController = controller,
                 settingsViewModel = settingsViewModel,
                 providerSetupViewModel = providerSetupViewModel,
+                browseViewModel = browseViewModel,
                 onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                 onTabTapped = onTabTapped,
+                onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
                 modifier = Modifier.weight(1f),
             )
         }
@@ -193,8 +200,10 @@ fun OmnisonicShell(
                 navController = controller,
                 settingsViewModel = settingsViewModel,
                 providerSetupViewModel = providerSetupViewModel,
+                browseViewModel = browseViewModel,
                 onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                 onTabTapped = onTabTapped,
+                onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
                 modifier = Modifier.weight(1f),
             )
             if (navLayout == NavigationLayout.BOTTOM_BAR) {
@@ -225,8 +234,10 @@ private fun ShellContentArea(
     navController: NavHostController,
     settingsViewModel: ShellSettingsViewModel,
     providerSetupViewModel: ProviderSetupViewModel,
+    browseViewModel: LibraryBrowseViewModel,
     onOpenSetup: () -> Unit,
     onTabTapped: (MainTab) -> Unit,
+    onOpenSection: (LibrarySection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier) {
@@ -236,6 +247,7 @@ private fun ShellContentArea(
             hasProvider = state.hasProvider,
             settingsViewModel = settingsViewModel,
             providerSetupViewModel = providerSetupViewModel,
+            browseViewModel = browseViewModel,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 0f else 1f)
@@ -250,6 +262,7 @@ private fun ShellContentArea(
             settingsViewModel = settingsViewModel,
             onOpenSetup = onOpenSetup,
             onSelectTab = onTabTapped,
+            onOpenSection = onOpenSection,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 1f else 0f),
@@ -343,6 +356,7 @@ internal fun ShellNavHost(
     hasProvider: Boolean,
     settingsViewModel: ShellSettingsViewModel,
     providerSetupViewModel: ProviderSetupViewModel,
+    browseViewModel: LibraryBrowseViewModel,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -359,8 +373,22 @@ internal fun ShellNavHost(
         composable(
             ShellRoutes.SECTION,
             arguments = listOf(navArgument(ShellRoutes.ARG_SECTION) { type = NavType.StringType }),
-        ) {
-            PlaceholderPane(MainTab.LIBRARY.label())
+        ) { entry ->
+            val section = LibrarySection.fromId(
+                entry.arguments?.getString(ShellRoutes.ARG_SECTION).orEmpty(),
+            )
+            if (section == null) {
+                PlaceholderPane(MainTab.LIBRARY.label())
+            } else {
+                LibrarySectionRoute(
+                    section = section,
+                    viewModel = browseViewModel,
+                    onOpenAlbum = { id -> navController.navigateTo(ShellRoutes.album(id)) },
+                    onOpenArtist = { id -> navController.navigateTo(ShellRoutes.artist(id)) },
+                    onOpenGenre = { id -> navController.navigateTo(ShellRoutes.genre(id)) },
+                    onOpenPlaylist = { id -> navController.navigateTo(ShellRoutes.playlist(id)) },
+                )
+            }
         }
         composable(ShellRoutes.SEARCH) {
             TabRouteSlot()

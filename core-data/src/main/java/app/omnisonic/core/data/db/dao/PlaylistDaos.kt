@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 
@@ -35,6 +36,33 @@ interface PlaylistDao {
 
     @Query("SELECT * FROM playlists ORDER BY id")
     suspend fun selectAll(): List<PlaylistEntity>
+
+    /** Alphabetical browse page; hidden playlists never surface (ProfileScope convention). */
+    @Query(
+        """
+        SELECT * FROM playlists
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+            AND hidden = 0
+        ORDER BY title COLLATE NOCASE, id
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun browsePlaylistsRaw(excludedProviderIdsCsv: String, limit: Int, offset: Int): List<PlaylistEntity>
+
+    suspend fun browsePlaylists(scope: ProfileScope, limit: Int, offset: Int): List<PlaylistEntity> =
+        browsePlaylistsRaw(scope.excludedProviderIds.joinToString(","), limit, offset)
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM playlists
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+            AND hidden = 0
+        """,
+    )
+    suspend fun countPlaylistsRaw(excludedProviderIdsCsv: String): Int
+
+    suspend fun countPlaylists(scope: ProfileScope): Int =
+        countPlaylistsRaw(scope.excludedProviderIds.joinToString(","))
 
     @Query("SELECT * FROM playlists WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<PlaylistEntity>
