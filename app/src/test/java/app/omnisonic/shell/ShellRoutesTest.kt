@@ -1,6 +1,7 @@
 package app.omnisonic.shell
 
 import app.omnisonic.feature.settings.shell.MainTab
+import app.omnisonic.feature.settings.shell.ShellPreferencesStore
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
 
@@ -19,6 +20,7 @@ class ShellRoutesTest {
             "search",
             "settings",
             "providerSetup",
+            "librarySync",
             "album/{albumId}",
             "artist/{artistId}",
             "genre/{genreId}",
@@ -41,6 +43,13 @@ class ShellRoutesTest {
     fun `tab ids are their own routes so the persisted tab list routes directly`() {
         MainTab.entries.forEach { tab ->
             assertThat(ShellRoutes.ALL).contains(tab.id)
+        }
+    }
+
+    @Test
+    fun `every onboarding step routes to a registered route`() {
+        ShellPreferencesStore.DEFAULT_ONBOARDING_STEPS.forEach { step ->
+            assertThat(ShellRoutes.ALL).contains(step)
         }
     }
 }

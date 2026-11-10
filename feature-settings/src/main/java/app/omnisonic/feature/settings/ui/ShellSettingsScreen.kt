@@ -32,6 +32,8 @@ import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellNavigationResolver
 import app.omnisonic.feature.settings.shell.ShellPreferences
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
+import app.omnisonic.feature.settings.sync.LibrarySyncManagerSection
+import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.style.NavigationLayout
 import app.omnisonic.style.OmnisonicTheme
 
@@ -44,6 +46,7 @@ import app.omnisonic.style.OmnisonicTheme
 fun ShellSettingsScreen(
     appVersion: String,
     onOpenProviders: () -> Unit,
+    syncViewModel: LibrarySyncManagerViewModel,
     viewModel: ShellSettingsViewModel = hiltViewModel(),
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
@@ -59,6 +62,7 @@ fun ShellSettingsScreen(
         onMoveTab = viewModel::moveTab,
         onSetNavOverride = viewModel::setNavOverride,
         onOpenProviders = onOpenProviders,
+        syncViewModel = syncViewModel,
     )
 }
 
@@ -70,6 +74,7 @@ private fun ShellSettingsContent(
     onMoveTab: (List<MainTab>, MainTab, Int) -> Unit,
     onSetNavOverride: (Boolean, NavigationLayout?) -> Unit,
     onOpenProviders: () -> Unit,
+    syncViewModel: LibrarySyncManagerViewModel,
 ) {
     val tokens = OmnisonicTheme.tokens
     val spacing = tokens.spacing
@@ -117,6 +122,7 @@ private fun ShellSettingsContent(
         TextButton(onClick = onOpenProviders) {
             Text(stringResource(R.string.settings_manage_providers))
         }
+        LibrarySyncManagerSection(viewModel = syncViewModel)
         SectionHeader(stringResource(R.string.settings_group_about))
         Row(
             modifier = Modifier.fillMaxWidth(),

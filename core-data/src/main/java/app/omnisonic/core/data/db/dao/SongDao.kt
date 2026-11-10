@@ -8,6 +8,8 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.json.JsonText
+import app.omnisonic.core.data.search.SearchQuery
 
 @Dao
 interface SongDao {
@@ -176,6 +178,67 @@ interface SongDao {
 
     @Query("SELECT * FROM songs WHERE albumId = :albumId ORDER BY id")
     suspend fun selectByAlbum(albumId: Long): List<SongEntity>
+
+    /**
+     * Album detail page (ProfileScope convention): disc/track order with
+     * unknown numbers last, then the alphabetical tiebreak.
+     */
+    @Query(
+        """
+        SELECT * FROM songs
+        WHERE albumId = :albumId
+            AND instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+        ORDER BY (discNo IS NULL), discNo, (trackNo IS NULL), trackNo,
+            COALESCE(sortTitle, title) COLLATE NOCASE, id
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun albumTracksRaw(albumId: Long, excludedProviderIdsCsv: String, limit: Int, offset: Int): List<SongEntity>
+
+    suspend fun albumTracks(scope: ProfileScope, albumId: Long, limit: Int, offset: Int): List<SongEntity> =
+        albumTracksRaw(albumId, scope.excludedProviderIds.joinToString(","), limit, offset)
+
+    /**
+     * Artist detail page (ProfileScope convention): songs linked through
+     * `song_artists`, most played first. DISTINCT collapses multi-role
+     * credits into one row.
+     */
+    @Query(
+        """
+        SELECT DISTINCT songs.* FROM songs
+        JOIN song_artists ON song_artists.songId = songs.id AND song_artists.artistId = :artistId
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || songs.providerId || ',') = 0
+        ORDER BY songs.playCount DESC, (songs.lastPlayed IS NULL) ASC, songs.lastPlayed DESC,
+            COALESCE(songs.sortTitle, songs.title) COLLATE NOCASE, songs.id
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun artistTracksRaw(artistId: Long, excludedProviderIdsCsv: String, limit: Int, offset: Int): List<SongEntity>
+
+    suspend fun artistTracks(scope: ProfileScope, artistId: Long, limit: Int, offset: Int): List<SongEntity> =
+        artistTracksRaw(artistId, scope.excludedProviderIds.joinToString(","), limit, offset)
+
+    /**
+     * Genre detail page (ProfileScope convention): [genreJsonPattern] is the
+     * quote-delimited JSON literal of the genre name (built by the wrapper)
+     * matched against the `genresJson` list column, so "Jazz" never matches
+     * "Acid Jazz" or "Jazz Fusion".
+     */
+    @Query(
+        """
+        SELECT * FROM songs
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+            AND genresJson LIKE :genreJsonPattern ESCAPE '\'
+        ORDER BY COALESCE(sortTitle, title) COLLATE NOCASE, title COLLATE NOCASE, id
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun genreTracksRaw(genreJsonPattern: String, excludedProviderIdsCsv: String, limit: Int, offset: Int): List<SongEntity>
+
+    suspend fun genreTracks(scope: ProfileScope, genreTitle: String, limit: Int, offset: Int): List<SongEntity> {
+        val pattern = "%${SearchQuery.escape(JsonText.encodeString(genreTitle))}%"
+        return genreTracksRaw(pattern, scope.excludedProviderIds.joinToString(","), limit, offset)
+    }
 
     @Query("SELECT * FROM songs WHERE providerId = :providerId ORDER BY id")
     suspend fun selectByProvider(providerId: Long): List<SongEntity>

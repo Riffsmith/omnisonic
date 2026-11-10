@@ -149,7 +149,11 @@ class ProviderSetupViewModelTest {
         coVerify(exactly = 1) { service.save(any()) }
         verify(exactly = 1) { service.startInitialSync(42L) }
         assertThat(events).containsExactly(ProviderSetupEvent.Completed)
-        assertThat(store.preferences.first().onboardingComplete).isTrue()
+        // D-16: provider setup is the first of two steps; the flag waits for the
+        // library-sync step.
+        val prefs = store.preferences.first()
+        assertThat(prefs.onboardingComplete).isFalse()
+        assertThat(prefs.onboardingSteps).containsExactly(OnboardingSteps.LIBRARY_SYNC)
         assertThat(viewModel.state.value).isEqualTo(ProviderSetupUiState())
         collector.cancel()
     }
@@ -221,6 +225,7 @@ class ProviderSetupViewModelTest {
         coEvery { service.probe(any()) } returns success()
         coEvery { service.save(any()) } returns ProviderSetupOutcome.Saved(9L)
         store.completeOnboardingStep(OnboardingSteps.PROVIDER_SETUP)
+        store.completeOnboardingStep(OnboardingSteps.LIBRARY_SYNC)
         fillValid()
 
         viewModel.save()

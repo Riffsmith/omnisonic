@@ -3,6 +3,8 @@ package app.omnisonic.shell
 import app.omnisonic.core.data.browse.BrowsePage
 import app.omnisonic.feature.library.browse.LibraryBrowseSource
 import app.omnisonic.feature.library.browse.LibraryBrowseViewModel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * Shell tests only need the browse view model because the nav host holds one;
@@ -10,6 +12,7 @@ import app.omnisonic.feature.library.browse.LibraryBrowseViewModel
  * empty source keeps section destinations on their empty state.
  */
 internal class EmptyBrowseSource : LibraryBrowseSource {
+    override val libraryChanges: Flow<Unit> = emptyFlow()
     override suspend fun albums(offset: Int, limit: Int) = BrowsePage<app.omnisonic.core.data.db.entity.AlbumEntity>(emptyList(), offset, limit, false)
     override suspend fun artists(offset: Int, limit: Int) = BrowsePage<app.omnisonic.core.data.db.entity.ArtistEntity>(emptyList(), offset, limit, false)
     override suspend fun songs(offset: Int, limit: Int) = BrowsePage<app.omnisonic.core.data.db.entity.SongEntity>(emptyList(), offset, limit, false)

@@ -394,50 +394,8 @@ private fun SongRow(song: SongEntity) {
     }
 }
 
-private fun formatDuration(durationMs: Long): String {
-    val totalSeconds = durationMs / 1000
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
-    return "%d:%02d".format(minutes, seconds)
-}
-
 /**
- * Load-more footer: doubles as the paging trigger — when it scrolls into
- * view with more pages pending it requests the next page; a failed append
- * swaps the spinner for an inline retry (UI_SPEC.md §3.4 paging).
+ * Load-more footer shared with the detail bodies (ui/Common.kt) — kept as a
+ * thin local alias so the paging contract stays one implementation.
  */
-@Composable
-private fun LoadMoreFooter(
-    appending: Boolean,
-    appendFailed: Boolean,
-    onLoadMore: () -> Unit,
-) {
-    val tokens = OmnisonicTheme.tokens
-    LaunchedEffect(appending, appendFailed) {
-        if (!appending && !appendFailed) onLoadMore()
-    }
-    Row(
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = tokens.spacing.lg),
-    ) {
-        if (appendFailed) {
-            Text(
-                text = stringResource(R.string.library_load_more_failed),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(tokens.spacing.sm))
-            TextButton(onClick = onLoadMore) {
-                Text(stringResource(R.string.library_retry))
-            }
-        } else {
-            CircularProgressIndicator(
-                modifier = Modifier.size(tokens.imagery.uiIconSize),
-                strokeWidth = tokens.spacing.xs,
-            )
-        }
-    }
-}
+

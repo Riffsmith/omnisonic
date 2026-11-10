@@ -59,6 +59,8 @@ class SubsonicLibrarySyncer(
     private val onAuthFailed: suspend (Long) -> Unit = {},
     /** Reports a completed provider call so a stale auth failure can clear. */
     private val onAuthSucceeded: suspend (Long) -> Unit = {},
+    /** Live per-phase progress for the sync screens (D-16); never persisted. */
+    private val onProgress: (LibrarySyncProgress) -> Unit = {},
 ) {
 
     private val runSequence = AtomicLong(0)
@@ -91,10 +93,30 @@ class SubsonicLibrarySyncer(
     private suspend fun runSync(full: Boolean): Outcome {
         val started = nowMs()
         if (!traits.hasLibrarySync) {
+            publish(
+                LibrarySyncProgress(
+                    providerId = providerId,
+                    phase = LibrarySyncPhase.SKIPPED,
+                    startedAt = started,
+                    finishedAt = nowMs(),
+                    outcome = LibrarySyncOutcome.SKIPPED,
+                    message = "skipped: provider does not report library sync",
+                ),
+            )
             return Outcome(0, nowMs() - started, "skipped: provider does not report library sync", skippedNoLibrarySync = true)
         }
         val gate = runGate.check(providerId)
         if (gate != ProviderStatus.OK) {
+            publish(
+                LibrarySyncProgress(
+                    providerId = providerId,
+                    phase = LibrarySyncPhase.BLOCKED,
+                    startedAt = started,
+                    finishedAt = nowMs(),
+                    outcome = LibrarySyncOutcome.BLOCKED,
+                    message = "blocked: $gate",
+                ),
+            )
             return Outcome(0, nowMs() - started, "blocked: $gate", blockedBy = gate)
         }
         return try {
@@ -103,14 +125,21 @@ class SubsonicLibrarySyncer(
             val knownSongCount = if (full) database.songDao().selectCountByProvider(providerId) else 0
             val seen = WalkSeen()
             val watermark = if (full) null else diffWatermark()
+            publishPhase(LibrarySyncPhase.ARTISTS, started)
             syncArtists(runId)
-            albumsProcessed = syncAlbumsAndSongs(watermark, runId, seen)
+            publishPhase(LibrarySyncPhase.ALBUMS_SONGS, started)
+            albumsProcessed = syncAlbumsAndSongs(watermark, runId, seen, started)
+            publishPhase(LibrarySyncPhase.GENRES, started)
             syncGenres()
+            publishPhase(LibrarySyncPhase.RADIOS, started)
             syncRadios()
+            publishPhase(LibrarySyncPhase.PLAYLISTS, started)
             syncPlaylists(runId)
+            publishPhase(LibrarySyncPhase.BOOKMARKS, started)
             syncBookmarks()
             var pruneSkippedReason: String? = null
             if (full) {
+                publishPhase(LibrarySyncPhase.PRUNE, started)
                 pruneSkippedReason = prune(knownSongCount, seen, runId)
             }
             val message = pruneSkippedReason?.let { "prune skipped: $it" }
@@ -118,35 +147,64 @@ class SubsonicLibrarySyncer(
                 recordStatus(full, started, albumsProcessed, resultOk = true, message = message)
             }
             runCatchingCancellable { onAuthSucceeded(providerId) }
+            publish(
+                LibrarySyncProgress(
+                    providerId = providerId,
+                    phase = LibrarySyncPhase.DONE,
+                    startedAt = started,
+                    itemsDone = albumsProcessed,
+                    itemsTotal = albumsProcessed,
+                    finishedAt = nowMs(),
+                    outcome = LibrarySyncOutcome.COMPLETED,
+                    message = message ?: "ok",
+                ),
+            )
             Outcome(albumsProcessed, nowMs() - started, message ?: "ok")
         } catch (cancellation: CancellationException) {
             // Cancellation is not a sync failure: no status row is recorded.
             throw cancellation
         } catch (authFailure: ProviderAuthException) {
+            val message = authFailure.message ?: authFailure.javaClass.simpleName
             database.withTransaction {
-                recordStatus(
-                    full,
-                    started,
-                    0,
-                    resultOk = false,
-                    message = authFailure.message ?: authFailure.javaClass.simpleName,
-                )
+                recordStatus(full, started, 0, resultOk = false, message = message)
             }
             runCatchingCancellable { onAuthFailed(providerId) }
+            publishFailure(started, message)
             throw authFailure
         } catch (failure: Exception) {
+            val message = failure.message ?: failure.javaClass.simpleName
             database.withTransaction {
-                recordStatus(
-                    full,
-                    started,
-                    0,
-                    resultOk = false,
-                    message = failure.message ?: failure.javaClass.simpleName,
-                )
+                recordStatus(full, started, 0, resultOk = false, message = message)
             }
+            publishFailure(started, message)
             throw failure
         }
     }
+
+    private fun publishPhase(phase: LibrarySyncPhase, startedAt: Long) {
+        publish(
+            LibrarySyncProgress(
+                providerId = providerId,
+                phase = phase,
+                startedAt = startedAt,
+            ),
+        )
+    }
+
+    private fun publishFailure(startedAt: Long, message: String) {
+        publish(
+            LibrarySyncProgress(
+                providerId = providerId,
+                phase = LibrarySyncPhase.FAILED,
+                startedAt = startedAt,
+                finishedAt = nowMs(),
+                outcome = LibrarySyncOutcome.FAILED,
+                message = message,
+            ),
+        )
+    }
+
+    private fun publish(progress: LibrarySyncProgress) = onProgress(progress)
 
     private suspend fun diffWatermark(): Long? {
         val status = database.syncStatusDao().selectByProvider(providerId) ?: return null
@@ -206,8 +264,11 @@ class SubsonicLibrarySyncer(
         watermarkMs: Long?,
         runId: Long,
         seen: WalkSeen,
+        startedAt: Long,
     ): Int {
         var processed = 0
+        var attempted = 0
+        var queued = 0
         var offset = 0
         val pageSize = ProviderAlbumRequest.DEFAULT_PAGE_SIZE
         while (true) {
@@ -227,8 +288,28 @@ class SubsonicLibrarySyncer(
                     created == null || created >= watermarkMs
                 }
             }
+            queued += candidates.size
+            publish(
+                LibrarySyncProgress(
+                    providerId = providerId,
+                    phase = LibrarySyncPhase.ALBUMS_SONGS,
+                    startedAt = startedAt,
+                    itemsDone = attempted,
+                    itemsTotal = queued,
+                ),
+            )
             candidates.forEach { listed ->
+                attempted += 1
                 if (syncAlbumWithSongs(listed.externalId, runId, seen)) processed += 1
+                publish(
+                    LibrarySyncProgress(
+                        providerId = providerId,
+                        phase = LibrarySyncPhase.ALBUMS_SONGS,
+                        startedAt = startedAt,
+                        itemsDone = attempted,
+                        itemsTotal = queued,
+                    ),
+                )
             }
             if (watermarkMs != null && page.all { album ->
                     val created = album.createdAtMs

@@ -111,6 +111,36 @@ interface PlaylistEntryDao {
     @Query("SELECT * FROM playlist_items WHERE playlistId = :playlistId ORDER BY position")
     suspend fun selectByPlaylist(playlistId: Long): List<PlaylistEntryEntity>
 
+    /**
+     * Playlist detail page (ProfileScope convention): `position` order, the
+     * entry sequence as the server reports it.
+     */
+    @Query(
+        """
+        SELECT * FROM playlist_items
+        WHERE playlistId = :playlistId
+            AND instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+        ORDER BY position, id
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun detailEntriesRaw(playlistId: Long, excludedProviderIdsCsv: String, limit: Int, offset: Int): List<PlaylistEntryEntity>
+
+    suspend fun detailEntries(scope: ProfileScope, playlistId: Long, limit: Int, offset: Int): List<PlaylistEntryEntity> =
+        detailEntriesRaw(playlistId, scope.excludedProviderIds.joinToString(","), limit, offset)
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM playlist_items
+        WHERE playlistId = :playlistId
+            AND instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+        """,
+    )
+    suspend fun detailEntryCountRaw(playlistId: Long, excludedProviderIdsCsv: String): Int
+
+    suspend fun detailEntryCount(scope: ProfileScope, playlistId: Long): Int =
+        detailEntryCountRaw(playlistId, scope.excludedProviderIds.joinToString(","))
+
     @Query("SELECT COUNT(*) FROM playlist_items WHERE playlistId = :playlistId")
     suspend fun countByPlaylist(playlistId: Long): Int
 

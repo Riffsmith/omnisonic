@@ -15,6 +15,7 @@ object ShellRoutes {
     const val SEARCH = "search"
     const val SETTINGS = "settings"
     const val PROVIDER_SETUP = "providerSetup"
+    const val LIBRARY_SYNC = "librarySync"
     const val ALBUM = "album/{albumId}"
     const val ARTIST = "artist/{artistId}"
     const val GENRE = "genre/{genreId}"
@@ -42,6 +43,7 @@ object ShellRoutes {
         SEARCH,
         SETTINGS,
         PROVIDER_SETUP,
+        LIBRARY_SYNC,
         ALBUM,
         ARTIST,
         GENRE,

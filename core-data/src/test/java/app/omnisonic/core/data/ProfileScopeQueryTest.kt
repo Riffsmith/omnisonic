@@ -115,6 +115,7 @@ class ProfileScopeQueryTest {
                 "selectIdByProviderAndExternal",
                 "selectAll",
                 "selectByProvider",
+                "selectById",
                 "selectByProviderAndExternal",
             ),
             "PlaylistDaos.kt" to setOf(

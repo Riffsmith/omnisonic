@@ -3,12 +3,16 @@ package app.omnisonic.feature.library.browse
 import app.omnisonic.core.data.browse.BrowseRepository
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.Flow
 
 /** Production [LibraryBrowseSource] over the default (unrestricted) scope. */
 @Singleton
 class RepositoryBrowseSource @Inject constructor(
     private val repository: BrowseRepository,
 ) : LibraryBrowseSource {
+
+    override val libraryChanges: Flow<Unit>
+        get() = repository.libraryChanges
 
     override suspend fun albums(offset: Int, limit: Int) =
         repository.albums(offset = offset, limit = limit)

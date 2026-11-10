@@ -18,6 +18,25 @@ android {
         versionCode = 1
         versionName = "1.0.0"
     }
+
+    /**
+     * Temporary local-release signing for sideloaded device tests: reuses the
+     * debug keystore (the key already on the test phone) because apksigner is
+     * not installed here and targetSdk 36 rejects v1-only signatures. Inert
+     * unless `-Pomnisonic.tmpReleaseSign=true`; production release signing
+     * stays a deliberate later-phase decision.
+     */
+    signingConfigs {
+        create("tmpLocal") {
+            storeFile = file(
+                System.getenv("OMNISONIC_TMP_KEYSTORE")
+                    ?: "${System.getProperty("user.home")}/.android/debug.keystore",
+            )
+            storePassword = System.getenv("OMNISONIC_TMP_STORE_PASSWORD") ?: "android"
+            keyAlias = System.getenv("OMNISONIC_TMP_KEY_ALIAS") ?: "androiddebugkey"
+            keyPassword = System.getenv("OMNISONIC_TMP_KEY_PASSWORD") ?: "android"
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -26,6 +45,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (providers.gradleProperty("omnisonic.tmpReleaseSign").orElse("false").get() == "true") {
+                signingConfig = signingConfigs.getByName("tmpLocal")
+            }
         }
         debug {
             isMinifyEnabled = false

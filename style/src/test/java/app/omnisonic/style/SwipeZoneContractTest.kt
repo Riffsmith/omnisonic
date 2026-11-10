@@ -179,6 +179,74 @@ class SwipeZoneRulesTest {
             ),
         ).isFalse()
     }
+
+    @Test
+    fun edgeExclusionClaimsHorizontalDragsInsideEitherStrip() {
+        assertThat(
+            SwipeZoneRules.edgeExclusionClaims(
+                startX = 12f, containerWidth = 400f, edgeExclusionPx = 24f,
+                dx = 50f, dy = 2f, touchSlopPx = slop,
+            ),
+        ).isTrue()
+        assertThat(
+            SwipeZoneRules.edgeExclusionClaims(
+                startX = 388f, containerWidth = 400f, edgeExclusionPx = 24f,
+                dx = -50f, dy = 2f, touchSlopPx = slop,
+            ),
+        ).isTrue()
+    }
+
+    @Test
+    fun edgeExclusionLeavesMidScreenDragsToThePager() {
+        assertThat(
+            SwipeZoneRules.edgeExclusionClaims(
+                startX = 200f, containerWidth = 400f, edgeExclusionPx = 24f,
+                dx = 50f, dy = 2f, touchSlopPx = slop,
+            ),
+        ).isFalse()
+    }
+
+    @Test
+    fun edgeExclusionNeverClaimsVerticalDrags() {
+        assertThat(
+            SwipeZoneRules.edgeExclusionClaims(
+                startX = 12f, containerWidth = 400f, edgeExclusionPx = 24f,
+                dx = 2f, dy = 50f, touchSlopPx = slop,
+            ),
+        ).isFalse()
+        assertThat(
+            SwipeZoneRules.edgeExclusionClaims(
+                startX = 200f, containerWidth = 400f, edgeExclusionPx = 24f,
+                dx = 2f, dy = 50f, touchSlopPx = slop,
+            ),
+        ).isFalse()
+    }
+
+    @Test
+    fun edgeExclusionWaitsForTouchSlop() {
+        assertThat(
+            SwipeZoneRules.edgeExclusionClaims(
+                startX = 12f, containerWidth = 400f, edgeExclusionPx = 24f,
+                dx = 9f, dy = 0f, touchSlopPx = slop,
+            ),
+        ).isFalse()
+    }
+
+    @Test
+    fun edgeExclusionIsInertWithoutAStripOrContainer() {
+        assertThat(
+            SwipeZoneRules.edgeExclusionClaims(
+                startX = 1f, containerWidth = 400f, edgeExclusionPx = 0f,
+                dx = 50f, dy = 2f, touchSlopPx = slop,
+            ),
+        ).isFalse()
+        assertThat(
+            SwipeZoneRules.edgeExclusionClaims(
+                startX = 1f, containerWidth = 0f, edgeExclusionPx = 24f,
+                dx = 50f, dy = 2f, touchSlopPx = slop,
+            ),
+        ).isFalse()
+    }
 }
 
 class SwipeZoneRegistryTest {

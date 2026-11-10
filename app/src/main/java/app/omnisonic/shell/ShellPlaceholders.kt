@@ -59,7 +59,4 @@ internal fun HomePlaceholder(hasProvider: Boolean, onSetup: () -> Unit) {
     }
 }
 
-@Composable
-internal fun DetailPlaceholder() {
-    PlaceholderPane(stringResource(R.string.placeholder_screen_body))
-}
+

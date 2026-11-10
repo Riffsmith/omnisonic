@@ -23,11 +23,11 @@ class LibraryBrowseViewModel @Inject constructor(
     source: LibraryBrowseSource,
 ) : ViewModel() {
 
-    private val albumsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::albums, source::albumCount)
-    private val artistsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::artists, source::artistCount)
-    private val songsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::songs, source::songCount)
-    private val genresPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::genres, source::genreCount)
-    private val playlistsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::playlists, source::playlistCount)
+    private val albumsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::albums, source::albumCount, source.libraryChanges)
+    private val artistsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::artists, source::artistCount, source.libraryChanges)
+    private val songsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::songs, source::songCount, source.libraryChanges)
+    private val genresPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::genres, source::genreCount, source.libraryChanges)
+    private val playlistsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::playlists, source::playlistCount, source.libraryChanges)
 
     val albums: StateFlow<BrowseUiState<AlbumEntity>> = albumsPager.state
     val artists: StateFlow<BrowseUiState<ArtistEntity>> = artistsPager.state

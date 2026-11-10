@@ -8,6 +8,8 @@ import app.omnisonic.core.data.providers.ProviderBlockPreferenceStore
 import app.omnisonic.core.data.providers.ProviderClientRegistry
 import app.omnisonic.core.data.providers.ProviderConfigMapper
 import app.omnisonic.core.data.security.CredentialCodec
+import app.omnisonic.core.data.sync.LibrarySyncControl
+import app.omnisonic.core.data.sync.LibrarySyncStatusRepository
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.model.runCatchingCancellable
 import app.omnisonic.provider.api.ProviderRegistry
@@ -98,13 +100,14 @@ object ProviderWiringModule {
      */
     @Provides
     @Singleton
-    fun initialLibrarySync(
+    fun librarySyncLauncher(
         database: OmnisonicDatabase,
         clients: ProviderClientRegistry,
         providerRegistry: ProviderRegistry,
         statusTracker: ProviderStatusTracker,
+        statuses: LibrarySyncStatusRepository,
         logger: OmnisonicLogger,
-    ): InitialLibrarySync =
+    ): LibrarySyncLauncher =
         LibrarySyncLauncher(
             database = database,
             clients = clients,
@@ -114,5 +117,15 @@ object ProviderWiringModule {
             runGate = statusTracker.runGate,
             onAuthFailed = statusTracker::markAuthFailed,
             onAuthSucceeded = statusTracker::clearAuthFailed,
+            statuses = statuses,
         )
+
+    @Provides
+    @Singleton
+    fun initialLibrarySync(launcher: LibrarySyncLauncher): InitialLibrarySync = launcher
+
+    /** Screen-facing sync seam for the first-run step and the settings manager. */
+    @Provides
+    @Singleton
+    fun librarySyncControl(launcher: LibrarySyncLauncher): LibrarySyncControl = launcher
 }

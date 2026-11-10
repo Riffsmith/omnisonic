@@ -133,6 +133,25 @@ interface AlbumDao {
     @Query("SELECT * FROM albums WHERE id = :id")
     suspend fun selectById(id: Long): AlbumEntity?
 
+    /**
+     * Artist detail page (ProfileScope convention): albums linked through
+     * `album_artists`, alphabetical. DISTINCT collapses multi-role credits
+     * into one row.
+     */
+    @Query(
+        """
+        SELECT DISTINCT albums.* FROM albums
+        JOIN album_artists ON album_artists.albumId = albums.id AND album_artists.artistId = :artistId
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || albums.providerId || ',') = 0
+        ORDER BY COALESCE(albums.sortTitle, albums.title) COLLATE NOCASE, albums.title COLLATE NOCASE, albums.id
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun artistAlbumsRaw(artistId: Long, excludedProviderIdsCsv: String, limit: Int, offset: Int): List<AlbumEntity>
+
+    suspend fun artistAlbums(scope: ProfileScope, artistId: Long, limit: Int, offset: Int): List<AlbumEntity> =
+        artistAlbumsRaw(artistId, scope.excludedProviderIds.joinToString(","), limit, offset)
+
     @Query("SELECT * FROM albums WHERE providerId = :providerId AND externalId = :externalId")
     suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): AlbumEntity?
 

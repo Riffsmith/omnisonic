@@ -34,6 +34,7 @@ class ShellGoldenTest {
             ShellPreferencesStore.createAt(File("/tmp/opencode", "golden-${System.nanoTime()}.preferences_pb")),
         )
         val providerSetupViewModel = testProviderSetupViewModel()
+        val stepViewModel = testLibrarySyncStepViewModel()
         composeRule.setContent {
             OmnisonicTheme {
                 OmnisonicShell(
@@ -41,6 +42,8 @@ class ShellGoldenTest {
                     settingsViewModel = settingsViewModel,
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = testBrowseViewModel(),
+                    syncStepViewModelProvider = { stepViewModel },
+                    syncManagerViewModel = testLibrarySyncManagerViewModel(),
                 )
             }
         }

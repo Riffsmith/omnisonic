@@ -51,11 +51,19 @@ import app.omnisonic.BuildConfig
 import app.omnisonic.R
 import app.omnisonic.feature.library.browse.LibraryBrowseViewModel
 import app.omnisonic.feature.library.browse.LibrarySection
+import app.omnisonic.feature.library.detail.DetailViewModel
+import app.omnisonic.feature.library.ui.AlbumDetailRoute
+import app.omnisonic.feature.library.ui.ArtistDetailRoute
+import app.omnisonic.feature.library.ui.GenreDetailRoute
 import app.omnisonic.feature.library.ui.LibrarySectionRoute
+import app.omnisonic.feature.library.ui.PlaylistDetailRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupViewModel
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellNavigationResolver
+import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
+import app.omnisonic.feature.settings.sync.LibrarySyncStepRoute
+import app.omnisonic.feature.settings.sync.LibrarySyncStepViewModel
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.ui.label
@@ -69,6 +77,7 @@ import kotlinx.coroutines.launch
 fun OmnisonicApp(
     viewModel: ShellViewModel = hiltViewModel(),
     providerSetupViewModel: ProviderSetupViewModel = hiltViewModel(),
+    syncManagerViewModel: LibrarySyncManagerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     OmnisonicTheme {
@@ -84,6 +93,7 @@ fun OmnisonicApp(
                 settingsViewModel = hiltViewModel(),
                 providerSetupViewModel = providerSetupViewModel,
                 browseViewModel = hiltViewModel(),
+                syncManagerViewModel = syncManagerViewModel,
             )
         }
     }
@@ -103,7 +113,9 @@ fun OmnisonicShell(
     settingsViewModel: ShellSettingsViewModel,
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
+    syncManagerViewModel: LibrarySyncManagerViewModel,
     navController: NavHostController? = null,
+    syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
 ) {
     val controller = navController ?: rememberNavController()
     val backStackEntry by controller.currentBackStackEntryAsState()
@@ -184,6 +196,8 @@ fun OmnisonicShell(
                 settingsViewModel = settingsViewModel,
                 providerSetupViewModel = providerSetupViewModel,
                 browseViewModel = browseViewModel,
+                syncStepViewModelProvider = syncStepViewModelProvider,
+                syncManagerViewModel = syncManagerViewModel,
                 onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                 onTabTapped = onTabTapped,
                 onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
@@ -201,6 +215,8 @@ fun OmnisonicShell(
                 settingsViewModel = settingsViewModel,
                 providerSetupViewModel = providerSetupViewModel,
                 browseViewModel = browseViewModel,
+                syncStepViewModelProvider = syncStepViewModelProvider,
+                syncManagerViewModel = syncManagerViewModel,
                 onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                 onTabTapped = onTabTapped,
                 onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
@@ -235,6 +251,8 @@ private fun ShellContentArea(
     settingsViewModel: ShellSettingsViewModel,
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
+    syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel,
+    syncManagerViewModel: LibrarySyncManagerViewModel,
     onOpenSetup: () -> Unit,
     onTabTapped: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
@@ -248,6 +266,7 @@ private fun ShellContentArea(
             settingsViewModel = settingsViewModel,
             providerSetupViewModel = providerSetupViewModel,
             browseViewModel = browseViewModel,
+            syncStepViewModelProvider = syncStepViewModelProvider,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 0f else 1f)
@@ -260,6 +279,7 @@ private fun ShellContentArea(
             swipeEnabled = swipeEnabled,
             hasProvider = state.hasProvider,
             settingsViewModel = settingsViewModel,
+            syncManagerViewModel = syncManagerViewModel,
             onOpenSetup = onOpenSetup,
             onSelectTab = onTabTapped,
             onOpenSection = onOpenSection,
@@ -357,6 +377,10 @@ internal fun ShellNavHost(
     settingsViewModel: ShellSettingsViewModel,
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
+    detailViewModelProvider: @Composable () -> DetailViewModel = { hiltViewModel() },
+    // Destination-scoped on purpose: the step resolves the provider row in init,
+    // so it must be created when the route opens, never at app launch.
+    syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -397,44 +421,75 @@ internal fun ShellNavHost(
             TabRouteSlot()
         }
         composable(ShellRoutes.PROVIDER_SETUP) {
+            val firstRun = navController.previousBackStackEntry == null
             ProviderSetupRoute(
                 viewModel = providerSetupViewModel,
                 onComplete = {
-                    navController.navigate(ShellRoutes.HOME) {
+                    navController.navigate(
+                        if (firstRun) ShellRoutes.LIBRARY_SYNC else ShellRoutes.HOME,
+                    ) {
                         popUpTo(ShellRoutes.PROVIDER_SETUP) { inclusive = true }
                         launchSingleTop = true
                     }
                 },
-                onCancel = if (navController.previousBackStackEntry != null) {
-                    { navController.popBackStack() }
-                } else {
+                onCancel = if (firstRun) {
                     null
+                } else {
+                    { navController.popBackStack() }
+                },
+            )
+        }
+        composable(ShellRoutes.LIBRARY_SYNC) {
+            LibrarySyncStepRoute(
+                viewModel = syncStepViewModelProvider(),
+                onComplete = {
+                    navController.navigate(ShellRoutes.HOME) {
+                        popUpTo(ShellRoutes.LIBRARY_SYNC) { inclusive = true }
+                        launchSingleTop = true
+                    }
                 },
             )
         }
         composable(
             ShellRoutes.ALBUM,
             arguments = listOf(navArgument(ShellRoutes.ARG_ALBUM_ID) { type = NavType.LongType }),
-        ) {
-            DetailPlaceholder()
+        ) { entry ->
+            AlbumDetailRoute(
+                viewModel = detailViewModelProvider(),
+                albumId = entry.arguments?.getLong(ShellRoutes.ARG_ALBUM_ID) ?: 0L,
+                onBack = { navController.popBackStack() },
+            )
         }
         composable(
             ShellRoutes.ARTIST,
             arguments = listOf(navArgument(ShellRoutes.ARG_ARTIST_ID) { type = NavType.LongType }),
-        ) {
-            DetailPlaceholder()
+        ) { entry ->
+            ArtistDetailRoute(
+                viewModel = detailViewModelProvider(),
+                artistId = entry.arguments?.getLong(ShellRoutes.ARG_ARTIST_ID) ?: 0L,
+                onOpenAlbum = { id -> navController.navigateTo(ShellRoutes.album(id)) },
+                onBack = { navController.popBackStack() },
+            )
         }
         composable(
             ShellRoutes.GENRE,
             arguments = listOf(navArgument(ShellRoutes.ARG_GENRE_ID) { type = NavType.LongType }),
-        ) {
-            DetailPlaceholder()
+        ) { entry ->
+            GenreDetailRoute(
+                viewModel = detailViewModelProvider(),
+                genreId = entry.arguments?.getLong(ShellRoutes.ARG_GENRE_ID) ?: 0L,
+                onBack = { navController.popBackStack() },
+            )
         }
         composable(
             ShellRoutes.PLAYLIST,
             arguments = listOf(navArgument(ShellRoutes.ARG_PLAYLIST_ID) { type = NavType.LongType }),
-        ) {
-            DetailPlaceholder()
+        ) { entry ->
+            PlaylistDetailRoute(
+                viewModel = detailViewModelProvider(),
+                playlistId = entry.arguments?.getLong(ShellRoutes.ARG_PLAYLIST_ID) ?: 0L,
+                onBack = { navController.popBackStack() },
+            )
         }
         composable(ShellRoutes.NOW_PLAYING) {
             PlaceholderPane(stringResource(R.string.placeholder_screen_body))

@@ -112,6 +112,12 @@ class ShellPreferencesStoreTest {
         val store = newStore()
 
         store.completeOnboardingStep(OnboardingSteps.PROVIDER_SETUP)
+        val mid = store.preferences.first()
+        assertThat(mid.onboardingSteps).containsExactly(OnboardingSteps.LIBRARY_SYNC)
+        assertThat(mid.onboardingComplete).isFalse()
+        assertThat(OnboardingGate.startRoute(mid)).isEqualTo(OnboardingSteps.LIBRARY_SYNC)
+
+        store.completeOnboardingStep(OnboardingSteps.LIBRARY_SYNC)
 
         val prefs = store.preferences.first()
         assertThat(prefs.onboardingSteps).isEmpty()
@@ -144,6 +150,7 @@ class ShellPreferencesStoreTest {
         )
         first.setNavOverride(true, NavigationLayout.RAIL)
         first.completeOnboardingStep(OnboardingSteps.PROVIDER_SETUP)
+        first.completeOnboardingStep(OnboardingSteps.LIBRARY_SYNC)
         scope?.cancel()
         withTimeoutOrNull(2_000) { while (firstJob.children.any()) delay(10) }
 

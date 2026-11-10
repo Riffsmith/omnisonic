@@ -1,9 +1,10 @@
 # Library sync UX: progress, live refresh, resume (D-16) + cover sizing (D-17)
 
-Status: **planning record — nothing here is implemented yet** (tasks 4b/4c,
-inserted 2026-11-09 from the first live-device test). Existing sync mechanics
-are `[VERIFIED]`; everything in "Planned" is a contract for the
-implementation tasks, not shipped behavior.
+Status: **tasks 4b + 4c shipped 2026-11-09** (D-16/D-17, inserted from the
+first live-device test). Sync mechanics, the progress surface, resume-on-launch,
+live refresh, cover sizing and the first-run/settings screens are all
+`[VERIFIED]` by unit tests; on-device feel of the new screens is still
+[UNKNOWN] until the next device session.
 
 ## Current mechanics (Phase 3/5 as shipped) [VERIFIED]
 
@@ -37,66 +38,136 @@ implementation tasks, not shipped behavior.
    sends `sizePx = null`; `getCoverArt` returns the 0.3–5 MB original).
    The DB is exonerated at this scale (~1–2k rows).
 
-## Planned — task 4b (data plumbing)
+## Shipped — task 4b (2026-11-09) [VERIFIED by unit tests]
 
-- **Progress model (D-16):** a sync progress value
-  (`providerId`, phase ∈ `ARTISTS | ALBUMS_SONGS | GENRES | RADIOS |
-  PLAYLISTS | BOOKMARKS | PRUNE | DONE | FAILED | BLOCKED`, `itemsDone` /
-  `itemsTotal` for the per-album walk, `startedAt`, outcome/message) exposed
-  as an in-memory StateFlow from a small repository/seam (name to be coined
-  at implementation, e.g. `LibrarySyncStatusRepository`); the syncer gains
-  an optional progress hook wired through `LibrarySyncLauncher`. **No schema
-  change for live progress** — `sync_state` remains the persisted record of
-  last outcomes. [PROPOSED — implement in 4b]
-- **Library invalidation → live refresh:** a debounced flow over the catalog
-  tables (Room `InvalidationTracker.createFlow("songs","albums",
-  "artists","genres","playlists")` — API availability on Room 2.6.1
-  [INFERRED, verify at implementation]) exposed through a core-data seam;
-  the section pagers re-run pages + counts when it fires (coalescing so a
-  whole sync produces a handful of refreshes, not one per INSERT). This is
-  the core correctness fix: it makes the library fill in front of the user
-  during sync regardless of which screen is open.
-- **Resume-on-launch:** at app start, if a provider row exists and
-  `sync_state.lastFullSyncAt IS NULL` (a full sync never completed), start
-  the initial sync through the existing run-gate seam. Double-start guard =
-  the in-process progress state (a running walk is not restarted); force-stop
-  detection is not needed — "never completed" is the trigger. [PROPOSED]
-- **Cover sizing (D-17):** `CoverImage` derives `sizePx` from the measured
-  cell size (density-scaled, capped, e.g. ≤1024 px; list thumbs ~128–192 px,
-  grid cells ~300–600 px). `SubsonicClient.coverArtUrl` already forwards
-  `size=`. Verify with `dumpsys gfxinfo` on the user device; the parked
-  10k-grid frame-time item becomes measurable too.
+- **Progress model + seam:** `sync/LibrarySyncProgress.kt` defines
+  `LibrarySyncPhase` (`ARTISTS | ALBUMS_SONGS | GENRES | RADIOS | PLAYLISTS |
+  BOOKMARKS | PRUNE | DONE | FAILED | BLOCKED | SKIPPED`), `LibrarySyncOutcome`,
+  and the immutable progress value (`providerId`, phase, `itemsDone`/
+  `itemsTotal`, `startedAt`, `finishedAt`, `outcome`, `message`, derived
+  `isRunning`/`fraction`; terminal phases require an outcome + finish time).
+  `sync/LibrarySyncStatusRepository.kt` is the in-memory `StateFlow` seam plus
+  the per-provider `tryBegin`/`finish` run gate. `SubsonicLibrarySyncer` takes
+  an `onProgress` hook and publishes the phase walk; [ALBUMS_SONGS] carries the
+  N/M counter (totals grow as listing pages arrive), terminal values cover
+  success, failure, blocked and skipped. No schema change.
+  [VERIFIED: `LibrarySyncProgressTest`, `SubsonicLibrarySyncerTest` progress
+  cases]
+- **Resume-on-launch:** `LibrarySyncResumePolicy.shouldResume(status,
+  hasLibrarySync)` = "full sync never completed" (`lastFullSyncAt == null`)
+  for providers that report library sync. `LibrarySyncLauncher.resumeIncomplete`
+  queries the provider rows and restarts those walks through `start`, whose
+  `tryBegin` gate makes a live walk unstoppable restart and keeps setup
+  completion from double-starting. `OmnisonicApplication.onCreate` calls it.
+  [VERIFIED: `LibrarySyncProgressTest` resume-policy + run-gate cases;
+  full `:app:assembleDebug` proves the wiring]
+- **Live library refresh:** `sync/LibraryInvalidation.kt` wraps Room's
+  `invalidationTrackerFlow("songs","albums","artists","genres","playlists")`
+  with a quiet-period collapse (250 ms). `BrowseRepository.libraryChanges`
+  exposes it; `LibraryBrowseSource` carries it into each `SectionPager`, which
+  re-fetches the window it is currently showing plus the COUNT (a never-opened
+  section ignores changes, and a change during a load replays once). [VERIFIED:
+  `LibraryInvalidationTest` inserts a row and observes the flow;
+  `LibraryBrowseViewModelTest` covers count growth, window preservation and
+  the mid-load replay]
+- **Cover sizing (D-17):** `CoverImage` measures its cell with
+  `BoxWithConstraints`, derives a bucketed request size (`CoverSizing`, 64 px
+  buckets, 1024 px cap; null for an unmeasured cell) and passes it through
+  `CoverImageKey.sizePx`, so `coverArtUrl` asks the server for a thumbnail
+  instead of the original. Cache identity stays per-size (bucketing keeps
+  neighbours on one entry). [VERIFIED: `CoverSizingTest`; on-device scroll
+  smoothness still [UNKNOWN] until the next user device session]
 
-## Planned — task 4c (UX)
+## Shipped — task 4c (2026-11-09) [VERIFIED by unit tests]
 
-- **First-run sync step:** the D-12 onboarding steps list becomes
-  `[providerSetup, librarySync]` (the gate mechanism takes new steps without
-  code changes); new route `librarySync` (UI_SCREENS.md §5, extend-only).
-  Screen slots: phase/progress list (N/M), fresh humorous copy (clean-room —
-  written fresh, never lifted), Continue enabled on completion; on failure →
-  Retry + Continue-anyway (safe once the invalidation flow lands — the
-  library fills live afterwards). Leaving the screen does not cancel the
-  walk (process-scoped scope continues). Completing the step sets
-  `onboardingComplete` via the existing `completeOnboardingStep`.
+- **First-run sync step:** the onboarding steps list is
+  `[providerSetup, librarySync]` (`OnboardingSteps.LIBRARY_SYNC`); the gate
+  mechanism itself is unchanged (D-12). New route `librarySync`
+  (UI_SCREENS.md §5, extend-only) renders `LibrarySyncStepRoute` — a phase
+  list over the 4b progress flow with N/M for the album walk, fresh
+  shelf-stocking copy, a determinate bar when the walk reports a count.
+  Continue (enabled on completion or after a failure) completes the step via
+  `completeOnboardingStep`, which exhausts the list and sets
+  `onboardingComplete`; a failure additionally offers Retry (restarts the full
+  walk through the run gate) and Continue-anyway. Leaving the screen never
+  cancels the walk (process-scoped scope). The step self-heals: it restarts a
+  walk when the provider has no recorded full sync and nothing is running
+  (relaunch mid-sync), and adopts a recorded completion without starting
+  anything. No skip while sync is healthy — per the open-question default.
+  [VERIFIED: `LibrarySyncStepViewModelTest` (8), `ShellPreferencesStoreTest`
+  two-step cases, `ProviderSetupNavigationTest.firstRunWalksSetupThenSyncThenHome`]
 - **Post-setup navigation:** first run navigates `providerSetup` →
-  `librarySync` → `home`; the later settings path keeps today's behavior
-  (no flag semantics).
-- **Settings sync manager:** providers group gains a sync section per
-  provider — live phase/progress, last result from `sync_state` (time,
-  outcome, message), "Sync now" (`runDiffSync`), "Full resync" (guarded +
-  confirm). Not shown on every launch; the first-run step is gate-only.
-- **Out of scope for now (open questions):** skippable sync step (proposed
-  default: not skippable while healthy; failure → Retry/Continue-anyway);
-  periodic/diff sync policy (proposed default: manual only in Phase 5;
-  pull-to-refresh + background sync are a Phase 6+ decision) — see
-  `.agents/memory/open-questions.md`.
+  `librarySync` → `home` (the NavHost's completion callback branches on
+  `previousBackStackEntry == null`, i.e. setup as start destination); the
+  later settings path keeps today's behavior (`providerSetup` → `home`).
+  [VERIFIED: `ProviderSetupNavigationTest.laterSetupFromSettingsReturnsHomeAfterSave`]
+- **Settings sync manager:** the providers group in settings gained a
+  per-provider sync section (`LibrarySyncManagerSection`) — last recorded
+  outcome from `sync_state` (result label, relative time, failure message),
+  the live walk (phase label + N/M + bar) when one is running, **Sync now**
+  (`runDiffSync`) and **Full resync** (confirmation dialog first; both
+  triggers no-op while that provider's walk is live). Providers that do not
+  report library sync are not listed; recorded results refresh when a walk
+  turns terminal. [VERIFIED: `LibrarySyncManagerViewModelTest` (4)]
+- **Screen-facing seam:** `sync/LibrarySyncControl` (`progress` StateFlow +
+  `providers()` + `startFullSync`/`startDiffSync`) implemented by
+  `LibrarySyncLauncher` (which also gained the FULL/DIFF kind on `start`/`run`)
+  and Hilt-provided from `ProviderWiringModule`; the screens never touch the
+  database directly. [VERIFIED: `LibrarySyncLauncherTest` providers-mapping +
+  full/diff timestamp cases; `:app:assembleDebug` proves the graph]
+
+## Second device session (2026-11-10, release build) — verification + defects
+
+The release (R8-minified) build ran on the RMX3085 for the first time. What
+the session verified, and the two defects it exposed (fixes scheduled as task 4d):
+
+- **Resume works [VERIFIED on device]:** force-killing mid-sync and relaunching
+  brings the walk back up (the `resumeIncomplete()` path) and the step shows
+  live cues — the persisted partial library from the killed run is adopted.
+- **Live refresh works [VERIFIED on device]:** sections entered mid-sync fill
+  in as the walk writes rows (the 4b invalidation feed).
+- **Cover sizing (D-17) holds [VERIFIED on device]:** the release gfxinfo
+  baseline (11,262 frames over a 5-minute active scroll) shows 3 slow bitmap
+  uploads and healthy frame times — the original-size-cover flood is gone.
+  Numbers recorded in `ui/library-browse.md` and the task file.
+- **DEFECT — first-run step shows no progress cues (fixed 2026-11-10 in task 4d):**
+  `LibrarySyncStepViewModel` was hoisted at the app root (`hiltViewModel()`
+  default param in `OmnisonicApp`), so its `init` ran at APP LAUNCH. On a
+  fresh install there was no provider row yet → `providerId = null` → the
+  progress collector's `progress.providerId != state.providerId` filter
+  dropped every update forever → the screen rendered only the static
+  title/intro copy; on relaunch the provider existed at composition → init
+  resolved it → cues appeared. Same init-time-empty class existed in
+  `LibrarySyncManagerViewModel` (providers() at launch → empty entries until a
+  terminal event re-queried). **Fix shipped:** the step VM is destination-scoped
+  through a `syncStepViewModelProvider` seam on `ShellNavHost` (the task-5
+  `detailViewModelProvider` pattern), so `init` runs when the `librarySync`
+  route opens; the manager re-resolves providers via `refresh()`, driven by a
+  `LaunchedEffect` in `LibrarySyncManagerSection` on screen entry. Tests:
+  `ProviderSetupNavigationTest.syncStepViewModelIsOnlyCreatedWhenTheRouteOpens`,
+  `LibrarySyncManagerViewModelTest.refresh picks up a provider that existed
+  only after launch`. Device acceptance (fresh install, no relaunch) stays
+  [UNKNOWN device].
+- **NOT a sync defect — scroll freeze is gesture-level:** the persisting
+  scroll freeze was traced to `pagerEdgeExclusion` consuming all vertical
+  drags (see `ui/gesture-contract.md` bug record). Frame production during
+  the sync/scroll session was healthy (1.42% jank), and the ColorOS app
+  freezer was exonerated for foreground use. Fixed in task 4d.
+- **Open, Phase 6+:** the app is not battery-whitelisted on the test device;
+  ColorOS freezes it while backgrounded (normal cached-app behavior). That
+  pauses background syncs — decide the background-sync policy and whether to
+  request an exemption when the periodic-sync question is answered
+  (`.agents/memory/open-questions.md`).
 
 ## Naming
 
-New public names above are proposals pending the ground-rule naming diff
-(`reference/docs/GESTURES.md` §5) at implementation time: `librarySync`
-route, `LibrarySyncStatusRepository`/progress phase names, settings manager
-strings. No verbatim collision exists in `reference/extracted/theme/
-theme_keys.json` or THEMING.md §4 for these (checked 2026-11-09); the
-studied app's own sync progress surface, if any, was not reconstructed —
-do not borrow names from it regardless [UNKNOWN].
+New public names are recorded in the ground-rule naming diff
+(`reference/docs/GESTURES.md` §5 rule 2 / §5.1): `librarySync` route,
+`OnboardingSteps.LIBRARY_SYNC`, `LibrarySyncControl`/`LibrarySyncProvider`/
+`LibrarySyncLastResult`/`LibrarySyncKind`, the step/manager view-model and
+screen names — Omnisonic-original coinages, no verbatim collision in
+`reference/extracted/theme/theme_keys.json` (241 dotted keys) or THEMING.md §4
+(re-run 2026-11-09; the only studied `sync` key is the unrelated
+`d.lyrics.show.sync.buttons.bar` lyrics toggle). The studied app's own sync
+progress surface, if any, was not reconstructed — do not borrow names from it
+regardless [UNKNOWN]. User-facing copy is written fresh.

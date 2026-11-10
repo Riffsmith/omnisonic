@@ -126,6 +126,7 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         runGate: ProviderRunGate = AllowAllRunGate,
         onAuthFailed: suspend (Long) -> Unit = {},
         onAuthSucceeded: suspend (Long) -> Unit = {},
+        onProgress: (LibrarySyncProgress) -> Unit = {},
     ) = SubsonicLibrarySyncer(
         db,
         provider,
@@ -135,6 +136,7 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         nowMs = nowMs,
         onAuthFailed = onAuthFailed,
         onAuthSucceeded = onAuthSucceeded,
+        onProgress = onProgress,
     )
 
     private fun statusTracker() = ProviderStatusTracker(db, AlwaysOnlineMonitor())
@@ -489,5 +491,80 @@ class SubsonicLibrarySyncerTest : DatabaseTestBase() {
         assertThat(album.sortTitle).isEqualTo("bjork greatest")
         val song = songDao.selectByProviderAndExternal(1, "song-1")!!
         assertThat(song.sortTitle).isEqualTo("johansson")
+    }
+
+    @Test
+    fun `full sync publishes ordered phases with per-album progress`() = runDbTest {
+        newProvider(id = 1)
+        val progress = mutableListOf<LibrarySyncProgress>()
+        val provider = FakeMediaProvider().apply {
+            albumPages[0] = listOf(
+                ProviderAlbum(externalId = "alb-a", title = "A"),
+                ProviderAlbum(externalId = "alb-b", title = "B"),
+            )
+            albumDetails["alb-a"] = ProviderAlbumDetails(ProviderAlbum(externalId = "alb-a", title = "A"))
+            albumDetails["alb-b"] = ProviderAlbumDetails(ProviderAlbum(externalId = "alb-b", title = "B"))
+        }
+
+        syncer(provider, onProgress = progress::add).runFullSync()
+
+        assertThat(progress.map { it.phase }).containsExactly(
+            LibrarySyncPhase.ARTISTS,
+            LibrarySyncPhase.ALBUMS_SONGS,
+            LibrarySyncPhase.ALBUMS_SONGS,
+            LibrarySyncPhase.ALBUMS_SONGS,
+            LibrarySyncPhase.ALBUMS_SONGS,
+            LibrarySyncPhase.GENRES,
+            LibrarySyncPhase.RADIOS,
+            LibrarySyncPhase.PLAYLISTS,
+            LibrarySyncPhase.BOOKMARKS,
+            LibrarySyncPhase.PRUNE,
+            LibrarySyncPhase.DONE,
+        ).inOrder()
+        val albumSteps = progress.filter { it.phase == LibrarySyncPhase.ALBUMS_SONGS }
+        assertThat(albumSteps.last().itemsDone).isEqualTo(2)
+        assertThat(albumSteps.last().itemsTotal).isEqualTo(2)
+        assertThat(albumSteps.last().fraction).isEqualTo(1f)
+        val done = progress.last()
+        assertThat(done.outcome).isEqualTo(LibrarySyncOutcome.COMPLETED)
+        assertThat(done.finishedAt).isNotNull()
+        assertThat(done.providerId).isEqualTo(1L)
+    }
+
+    @Test
+    fun `blocked sync publishes a terminal blocked phase`() = runDbTest {
+        newProvider(id = 1)
+        val progress = mutableListOf<LibrarySyncProgress>()
+
+        syncer(
+            FakeMediaProvider(),
+            runGate = ProviderRunGate { ProviderStatus.OFFLINE },
+            onProgress = progress::add,
+        ).runFullSync()
+
+        assertThat(progress).hasSize(1)
+        assertThat(progress.single().phase).isEqualTo(LibrarySyncPhase.BLOCKED)
+        assertThat(progress.single().outcome).isEqualTo(LibrarySyncOutcome.BLOCKED)
+        assertThat(progress.single().message).isEqualTo("blocked: OFFLINE")
+    }
+
+    @Test
+    fun `failed sync publishes a terminal failed phase`() = runDbTest {
+        newProvider(id = 1)
+        val progress = mutableListOf<LibrarySyncProgress>()
+        val failing = object : MediaProvider by FakeMediaProvider() {
+            override suspend fun listArtists(): List<ProviderArtist> = throw IllegalStateException("boom")
+        }
+
+        assertThrows(IllegalStateException::class.java) {
+            kotlinx.coroutines.runBlocking {
+                syncer(failing, onProgress = progress::add).runFullSync()
+            }
+        }
+
+        val failed = progress.last()
+        assertThat(failed.phase).isEqualTo(LibrarySyncPhase.FAILED)
+        assertThat(failed.outcome).isEqualTo(LibrarySyncOutcome.FAILED)
+        assertThat(failed.message).isEqualTo("boom")
     }
 }

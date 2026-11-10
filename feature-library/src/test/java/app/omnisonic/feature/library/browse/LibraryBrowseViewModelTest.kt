@@ -10,14 +10,19 @@ import com.google.common.truth.Truth.assertThat
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class LibraryBrowseViewModelTest {
 
     @Before
@@ -199,18 +204,90 @@ class LibraryBrowseViewModelTest {
         assertThat((viewModel.playlists.value as BrowseUiState.Content).items).hasSize(7)
     }
 
+    @Test
+    fun `catalog invalidation reloads an open section with the new count`() = runTest {
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 3))
+        val viewModel = LibraryBrowseViewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+        assertThat((viewModel.albums.value as BrowseUiState.Content).totalCount).isEqualTo(3)
+
+        source.totals = mapOf(FakeSection.ALBUMS to 90)
+        source.changes.emit(Unit)
+        runCurrent()
+
+        val content = viewModel.albums.value as BrowseUiState.Content
+        assertThat(content.totalCount).isEqualTo(90)
+        assertThat(content.items).hasSize(60)
+        assertThat(content.hasMore).isTrue()
+    }
+
+    @Test
+    fun `invalidation keeps the accumulated window instead of collapsing to one page`() = runTest {
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
+        val viewModel = LibraryBrowseViewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+        viewModel.loadMore(LibrarySection.ALBUMS)
+        assertThat((viewModel.albums.value as BrowseUiState.Content).items).hasSize(120)
+
+        source.totals = mapOf(FakeSection.ALBUMS to 200)
+        source.changes.emit(Unit)
+        runCurrent()
+
+        val content = viewModel.albums.value as BrowseUiState.Content
+        assertThat(content.items).hasSize(120)
+        assertThat(content.totalCount).isEqualTo(200)
+        assertThat(source.pageRequests.getValue(FakeSection.ALBUMS).last()).isEqualTo(0 to 120)
+    }
+
+    @Test
+    fun `invalidation before a section opens does not fetch anything`() = runTest {
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 10))
+        LibraryBrowseViewModel(source)
+
+        source.changes.emit(Unit)
+        runCurrent()
+
+        assertThat(source.pageRequests).isEmpty()
+    }
+
+    @Test
+    fun `invalidation during the initial load refreshes once it finishes`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 3), pageGate = gate)
+        val viewModel = LibraryBrowseViewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+        assertThat(viewModel.albums.value).isEqualTo(BrowseUiState.Loading)
+
+        source.totals = mapOf(FakeSection.ALBUMS to 90)
+        source.changes.emit(Unit)
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+
+        val content = viewModel.albums.value as BrowseUiState.Content
+        assertThat(content.totalCount).isEqualTo(90)
+        assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0, 0).inOrder()
+    }
+
     private enum class FakeSection { ALBUMS, ARTISTS, SONGS, GENRES, PLAYLISTS }
 
     private class FakeBrowseSource(
-        private val totals: Map<FakeSection, Int> = emptyMap(),
+        var totals: Map<FakeSection, Int> = emptyMap(),
         var failPagesAt: Set<Int> = emptySet(),
         var pageGate: CompletableDeferred<Unit>? = null,
     ) : LibraryBrowseSource {
 
-        val pageOffsets = mutableMapOf<FakeSection, MutableList<Int>>()
+        val changes = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
 
-        private fun record(section: FakeSection, offset: Int) {
+        override val libraryChanges: Flow<Unit>
+            get() = changes
+
+        val pageOffsets = mutableMapOf<FakeSection, MutableList<Int>>()
+        val pageRequests = mutableMapOf<FakeSection, MutableList<Pair<Int, Int>>>()
+
+        private fun record(section: FakeSection, offset: Int, limit: Int) {
             pageOffsets.getOrPut(section) { mutableListOf() }.add(offset)
+            pageRequests.getOrPut(section) { mutableListOf() }.add(offset to limit)
         }
 
         private fun shouldFail(offset: Int): Boolean = offset in failPagesAt
@@ -219,7 +296,7 @@ class LibraryBrowseViewModelTest {
             offset until minOf(offset + limit, total)
 
         override suspend fun albums(offset: Int, limit: Int): BrowsePage<AlbumEntity> {
-            record(FakeSection.ALBUMS, offset)
+            record(FakeSection.ALBUMS, offset, limit)
             pageGate?.await()
             if (shouldFail(offset)) throw IOException("album page failed")
             val total = totals.getOrDefault(FakeSection.ALBUMS, 0)
@@ -234,7 +311,7 @@ class LibraryBrowseViewModelTest {
         }
 
         override suspend fun artists(offset: Int, limit: Int): BrowsePage<ArtistEntity> {
-            record(FakeSection.ARTISTS, offset)
+            record(FakeSection.ARTISTS, offset, limit)
             if (shouldFail(offset)) throw IOException("artist page failed")
             val total = totals.getOrDefault(FakeSection.ARTISTS, 0)
             return BrowsePage(
@@ -248,7 +325,7 @@ class LibraryBrowseViewModelTest {
         }
 
         override suspend fun songs(offset: Int, limit: Int): BrowsePage<SongEntity> {
-            record(FakeSection.SONGS, offset)
+            record(FakeSection.SONGS, offset, limit)
             if (shouldFail(offset)) throw IOException("song page failed")
             val total = totals.getOrDefault(FakeSection.SONGS, 0)
             return BrowsePage(
@@ -262,7 +339,7 @@ class LibraryBrowseViewModelTest {
         }
 
         override suspend fun genres(offset: Int, limit: Int): BrowsePage<GenreEntity> {
-            record(FakeSection.GENRES, offset)
+            record(FakeSection.GENRES, offset, limit)
             if (shouldFail(offset)) throw IOException("genre page failed")
             val total = totals.getOrDefault(FakeSection.GENRES, 0)
             return BrowsePage(
@@ -276,7 +353,7 @@ class LibraryBrowseViewModelTest {
         }
 
         override suspend fun playlists(offset: Int, limit: Int): BrowsePage<PlaylistEntity> {
-            record(FakeSection.PLAYLISTS, offset)
+            record(FakeSection.PLAYLISTS, offset, limit)
             if (shouldFail(offset)) throw IOException("playlist page failed")
             val total = totals.getOrDefault(FakeSection.PLAYLISTS, 0)
             return BrowsePage(

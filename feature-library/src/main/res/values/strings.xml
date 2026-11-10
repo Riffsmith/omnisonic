@@ -14,4 +14,27 @@
     <string name="library_error_body">This section could not be loaded.</string>
     <string name="library_retry">Retry</string>
     <string name="library_load_more_failed">Some items could not be loaded.</string>
+
+    <string name="detail_play">Play</string>
+    <string name="detail_shuffle">Shuffle</string>
+    <string name="detail_missing_title">Gone from the server</string>
+    <string name="detail_missing_body">This item no longer exists on the server. It may have been removed since your last sync.</string>
+    <string name="detail_back">Go back</string>
+    <string name="detail_error_body">This page could not be loaded.</string>
+    <string name="detail_body_empty">No tracks here yet.</string>
+    <string name="detail_artist_top_tracks">Top tracks</string>
+    <string name="detail_artist_albums">Albums</string>
+
+    <plurals name="detail_meta_songs">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+    <plurals name="detail_meta_albums">
+        <item quantity="one">%d album</item>
+        <item quantity="other">%d albums</item>
+    </plurals>
+    <plurals name="detail_meta_tracks">
+        <item quantity="one">%d track</item>
+        <item quantity="other">%d tracks</item>
+    </plurals>
 </resources>

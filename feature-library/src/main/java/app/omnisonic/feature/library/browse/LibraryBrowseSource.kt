@@ -6,6 +6,7 @@ import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.GenreEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import kotlinx.coroutines.flow.Flow
 
 /**
  * The library browse read surface the section ViewModels consume. Decouples
@@ -13,6 +14,9 @@ import app.omnisonic.core.data.db.entity.SongEntity
  * JVM tests can fake the pages.
  */
 interface LibraryBrowseSource {
+
+    /** Debounced catalog changes; section pagers reload their windows on it. */
+    val libraryChanges: Flow<Unit>
 
     suspend fun albums(offset: Int, limit: Int): BrowsePage<AlbumEntity>
 

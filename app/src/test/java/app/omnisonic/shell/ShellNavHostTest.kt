@@ -72,6 +72,7 @@ class ShellNavHostTest {
             ShellPreferencesStore.createAt(File("/tmp/opencode", "navhost-${System.nanoTime()}.preferences_pb")),
         )
         val providerSetupViewModel = testProviderSetupViewModel()
+        val stepViewModel = testLibrarySyncStepViewModel()
         composeRule.setContent {
             OmnisonicTheme {
                 ShellNavHost(
@@ -81,6 +82,8 @@ class ShellNavHostTest {
                     settingsViewModel = settingsViewModel,
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = testBrowseViewModel(),
+                    syncStepViewModelProvider = { stepViewModel },
+                    detailViewModelProvider = { testDetailViewModel() },
                     modifier = Modifier,
                 )
             }
@@ -120,6 +123,7 @@ class ShellTabNavigationTest {
         )
         val providerSetupViewModel = testProviderSetupViewModel()
         lateinit var nav: NavHostController
+        val stepViewModel = testLibrarySyncStepViewModel()
         composeRule.setContent {
             OmnisonicTheme {
                 OmnisonicShell(
@@ -127,6 +131,8 @@ class ShellTabNavigationTest {
                     settingsViewModel = settingsViewModel,
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = testBrowseViewModel(),
+                    syncStepViewModelProvider = { stepViewModel },
+                    syncManagerViewModel = testLibrarySyncManagerViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )
             }

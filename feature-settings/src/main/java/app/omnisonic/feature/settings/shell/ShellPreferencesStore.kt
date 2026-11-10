@@ -19,12 +19,13 @@ import kotlinx.coroutines.flow.map
 import java.io.File
 
 /**
- * Onboarding step identifiers. Values are shell-internal step names; today the
- * only step is [PROVIDER_SETUP], which doubles as its navigation route
- * (reference/docs/UI_SCREENS.md §5). Extend this list with new steps only.
+ * Onboarding step identifiers. Values are shell-internal step names that double
+ * as their navigation routes (reference/docs/UI_SCREENS.md §5). Extend this
+ * list with new steps only — the gate itself never changes (D-12).
  */
 object OnboardingSteps {
     const val PROVIDER_SETUP = "providerSetup"
+    const val LIBRARY_SYNC = "librarySync"
 }
 
 data class ShellPreferences(
@@ -92,7 +93,10 @@ class ShellPreferencesStore(
     }
 
     companion object {
-        val DEFAULT_ONBOARDING_STEPS = listOf(OnboardingSteps.PROVIDER_SETUP)
+        val DEFAULT_ONBOARDING_STEPS = listOf(
+            OnboardingSteps.PROVIDER_SETUP,
+            OnboardingSteps.LIBRARY_SYNC,
+        )
         const val STEP_SEPARATOR = ","
 
         fun create(context: Context): ShellPreferencesStore = ShellPreferencesStore(

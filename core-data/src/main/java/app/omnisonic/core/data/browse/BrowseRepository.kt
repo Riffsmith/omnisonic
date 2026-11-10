@@ -7,8 +7,10 @@ import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.GenreEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.sync.LibraryInvalidation
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Local-library browse pages for the library sections (albums, artists,
@@ -20,7 +22,12 @@ import javax.inject.Singleton
 @Singleton
 class BrowseRepository @Inject constructor(
     private val db: OmnisonicDatabase,
+    private val invalidations: LibraryInvalidation,
 ) {
+
+    /** Debounced catalog-change feed; library screens reload their windows on it. */
+    val libraryChanges: Flow<Unit>
+        get() = invalidations.changes
 
     suspend fun albums(
         scope: ProfileScope = ProfileScope.Unrestricted,
@@ -81,17 +88,7 @@ class BrowseRepository @Inject constructor(
         offset: Int,
         limit: Int,
         rows: suspend (fetchLimit: Int) -> List<T>,
-    ): BrowsePage<T> {
-        val safeOffset = offset.coerceAtLeast(0)
-        val safeLimit = sanitizeLimit(limit)
-        val fetched = rows(safeLimit + 1)
-        return BrowsePage(
-            items = fetched.take(safeLimit),
-            offset = safeOffset,
-            limit = safeLimit,
-            hasMore = fetched.size > safeLimit,
-        )
-    }
+    ): BrowsePage<T> = fetchPage(offset, limit, rows)
 
     companion object {
         const val DEFAULT_PAGE_LIMIT = 60

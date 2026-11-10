@@ -15,6 +15,7 @@ import app.omnisonic.feature.library.browse.LibrarySection
 import app.omnisonic.feature.library.ui.LibraryHubScreen
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
+import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
 import app.omnisonic.feature.settings.ui.label
 import app.omnisonic.style.GestureTwin
@@ -38,6 +39,7 @@ internal fun MainTabsPager(
     swipeEnabled: Boolean,
     hasProvider: Boolean,
     settingsViewModel: ShellSettingsViewModel,
+    syncManagerViewModel: LibrarySyncManagerViewModel,
     onOpenSetup: () -> Unit,
     onSelectTab: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
@@ -68,6 +70,7 @@ internal fun MainTabsPager(
             MainTab.SETTINGS -> ShellSettingsScreen(
                 appVersion = BuildConfig.VERSION_NAME,
                 onOpenProviders = onOpenSetup,
+                syncViewModel = syncManagerViewModel,
                 viewModel = settingsViewModel,
             )
         }

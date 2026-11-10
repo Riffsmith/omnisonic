@@ -93,6 +93,28 @@ object SwipeZoneRules {
     }
 
     /**
+     * Edge-exclusion consumer rule (UI_SPEC.md §1.2; corrected 2026-11-10):
+     * only a horizontal-dominant drag that starts inside the [edgeExclusionPx]
+     * strips is withheld from the pager. Vertical drags belong to content
+     * scrollables and mid-screen horizontal drags belong to the pager, so
+     * neither is ever consumed by the edge-exclusion modifier.
+     */
+    fun edgeExclusionClaims(
+        startX: Float,
+        containerWidth: Float,
+        edgeExclusionPx: Float,
+        dx: Float,
+        dy: Float,
+        touchSlopPx: Float,
+    ): Boolean {
+        if (containerWidth <= 0f) return false
+        if (edgeExclusionPx <= 0f) return false
+        if (!slopCrossed(dx, dy, touchSlopPx)) return false
+        if (abs(dx) <= abs(dy)) return false
+        return startX < edgeExclusionPx || startX > containerWidth - edgeExclusionPx
+    }
+
+    /**
      * Edge exclusion (UI_SPEC.md §1.2): the system back gesture owns the strip
      * within [edgeExclusionPx] of the left/right edge, so the pager never starts
      * a drag there. Vertical drags are exempt from the strip by definition —
@@ -197,11 +219,12 @@ private class SwipeZoneNode(
 }
 
 /**
- * Pager-side edge exclusion (UI_SPEC.md §1.2): horizontal drags that start
- * inside the [edgeExclusionPx] strips are consumed so the pager never claims
- * them and the system back gesture owns the edges; vertical drags stay
- * untouched. Runs in the initial pass so it preempts the pager's own
- * drag detection.
+ * Pager-side edge exclusion (UI_SPEC.md §1.2): only horizontal-dominant drags
+ * that start inside the [edgeExclusionPx] strips are consumed so the pager
+ * never claims them and the system back gesture owns the edges. Vertical drags
+ * and mid-screen drags are never touched — the initial pass preempts children,
+ * so consuming anything else cancels list scrollables (the 2026-11-10 bug).
+ * Runs in the initial pass so it preempts the pager's own drag detection.
  */
 fun Modifier.pagerEdgeExclusion(
     edgeExclusionPx: Float,
@@ -221,7 +244,7 @@ fun Modifier.pagerEdgeExclusion(
                 val dy = tracked.position.y - startY
                 if (SwipeZoneRules.slopCrossed(dx, dy, touchSlopPx)) {
                     decided = true
-                    excluded = !SwipeZoneRules.pagerClaimsHorizontalDrag(
+                    excluded = SwipeZoneRules.edgeExclusionClaims(
                         startX = startX,
                         containerWidth = size.width.toFloat(),
                         edgeExclusionPx = edgeExclusionPx,

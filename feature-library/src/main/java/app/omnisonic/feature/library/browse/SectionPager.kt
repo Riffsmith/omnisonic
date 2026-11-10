@@ -1,10 +1,14 @@
 package app.omnisonic.feature.library.browse
 
+import app.omnisonic.core.data.browse.BrowsePage
+import app.omnisonic.core.data.browse.BrowseRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -18,12 +22,18 @@ import kotlinx.coroutines.launch
  * while any job is running or `hasMore` is false. A failed append keeps the
  * loaded items and raises [BrowseUiState.Content.appendFailed]; `loadMore`
  * retries it.
+ *
+ * [changes] drives live refresh (D-16): a catalog write re-fetches the window
+ * the pager currently shows plus its count, so a sync fills the section in
+ * front of the user. Pages that were never opened ignore changes, and a change
+ * that lands mid-load is replayed once the in-flight job finishes.
  */
 internal class SectionPager<T>(
     private val scope: CoroutineScope,
     private val pageSize: Int,
-    private val loadPage: suspend (offset: Int, limit: Int) -> app.omnisonic.core.data.browse.BrowsePage<T>,
+    private val loadPage: suspend (offset: Int, limit: Int) -> BrowsePage<T>,
     private val loadCount: suspend () -> Int,
+    changes: Flow<Unit> = emptyFlow(),
 ) {
 
     private val _state = MutableStateFlow<BrowseUiState<T>>(BrowseUiState.Loading)
@@ -31,6 +41,13 @@ internal class SectionPager<T>(
 
     private var job: Job? = null
     private var started = false
+    private var refreshPending = false
+
+    init {
+        scope.launch {
+            changes.collect { refresh() }
+        }
+    }
 
     fun loadInitial() {
         if (job?.isActive == true) return
@@ -56,6 +73,7 @@ internal class SectionPager<T>(
                 },
                 onFailure = { BrowseUiState.Error },
             )
+            replayPendingRefresh()
         }
     }
 
@@ -81,6 +99,53 @@ internal class SectionPager<T>(
                     current.copy(appending = false, appendFailed = true)
                 },
             )
+            replayPendingRefresh()
+        }
+    }
+
+    private fun refresh() {
+        if (!started) return
+        if (job?.isActive == true) {
+            refreshPending = true
+            return
+        }
+        launchRefresh()
+    }
+
+    private fun replayPendingRefresh() {
+        if (!refreshPending) return
+        refreshPending = false
+        launchRefresh()
+    }
+
+    private fun launchRefresh() {
+        val current = _state.value
+        val window = when (current) {
+            is BrowseUiState.Content -> current.items.size
+                .coerceAtLeast(pageSize)
+                .coerceAtMost(BrowseRepository.MAX_PAGE_LIMIT)
+            BrowseUiState.Empty -> pageSize
+            else -> return
+        }
+        job = scope.launch {
+            val fresh = runCatching {
+                val page = loadPage(0, window)
+                val count = loadCount()
+                page to count
+            }.getOrNull()
+            if (fresh != null) {
+                val (page, count) = fresh
+                _state.value = if (page.items.isEmpty()) {
+                    BrowseUiState.Empty
+                } else {
+                    BrowseUiState.Content(
+                        items = page.items,
+                        totalCount = count,
+                        hasMore = page.hasMore,
+                    )
+                }
+            }
+            replayPendingRefresh()
         }
     }
 }
