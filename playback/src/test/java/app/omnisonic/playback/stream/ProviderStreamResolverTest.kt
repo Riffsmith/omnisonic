@@ -1,6 +1,5 @@
 package app.omnisonic.playback.stream
 
-import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.stream.StreamTransport
 import app.omnisonic.provider.api.MediaProvider
@@ -22,23 +21,11 @@ private fun entry(
     isRadioStation = isRadioStation,
 )
 
-private fun songRow(resumeMs: Long? = null) = SongEntity(
-    providerId = 1,
-    externalId = "ext-1",
-    title = "T1",
-    resumeMs = resumeMs,
-    updatedAt = 0,
-)
-
-private class FixedRows(private val row: SongEntity?) : SongRowLookup {
-    override suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): SongEntity? = row
-}
-
-private fun resolver(uri: String?, row: SongEntity? = null): ProviderStreamResolver {
+private fun resolver(uri: String?): ProviderStreamResolver {
     val provider = mockk<MediaProvider> {
         every { streamUrl(any(), any(), any()) } returns uri
     }
-    return ProviderStreamResolver({ provider }, FixedRows(row))
+    return ProviderStreamResolver({ provider })
 }
 
 class ProviderStreamResolverTest {
@@ -58,7 +45,7 @@ class ProviderStreamResolverTest {
 
     @Test
     fun `unknown provider resolves to null`() = runTest {
-        val resolver = ProviderStreamResolver({ null }, FixedRows(songRow()))
+        val resolver = ProviderStreamResolver({ null })
 
         assertThat(resolver.resolve(entry())).isNull()
     }
@@ -73,33 +60,22 @@ class ProviderStreamResolverTest {
         val provider = mockk<MediaProvider> {
             every { streamUrl(any(), any(), any()) } throws IOException("boom")
         }
-        val resolver = ProviderStreamResolver({ provider }, FixedRows(null))
+        val resolver = ProviderStreamResolver({ provider })
 
         assertThat(resolver.resolve(entry())).isNull()
     }
 
     @Test
-    fun `seeds the start position from the song resume point`() = runTest {
-        val stream = resolver("http://host/s", songRow(resumeMs = 42_000)).resolve(entry())
+    fun `a resolved stream always starts at zero`() = runTest {
+        val normal = resolver("http://host/s").resolve(entry())
+        val radio = resolver("http://host/radio").resolve(entry(isRadioStation = true))
+        val content = resolver("content://media/external/audio/1").resolve(entry())
+        val unknownDuration = resolver("http://host/s").resolve(entry(durationMs = null))
 
-        assertThat(stream!!.startPositionMs).isEqualTo(42_000L)
-    }
-
-    @Test
-    fun `drops resume points at or past the end`() = runTest {
-        val atEnd = resolver("http://host/s", songRow(resumeMs = 200_000)).resolve(entry())
-        val pastEnd = resolver("http://host/s", songRow(resumeMs = 250_000)).resolve(entry())
-
-        assertThat(atEnd!!.startPositionMs).isEqualTo(0L)
-        assertThat(pastEnd!!.startPositionMs).isEqualTo(0L)
-    }
-
-    @Test
-    fun `keeps a resume point when the duration is unknown`() = runTest {
-        val stream = resolver("http://host/s", songRow(resumeMs = 42_000))
-            .resolve(entry(durationMs = null))
-
-        assertThat(stream!!.startPositionMs).isEqualTo(42_000L)
+        assertThat(normal!!.startPositionMs).isEqualTo(0L)
+        assertThat(radio!!.startPositionMs).isEqualTo(0L)
+        assertThat(content!!.startPositionMs).isEqualTo(0L)
+        assertThat(unknownDuration!!.startPositionMs).isEqualTo(0L)
     }
 
     @Test
@@ -112,9 +88,8 @@ class ProviderStreamResolverTest {
     }
 
     @Test
-    fun `radio entries skip the resume point and report live`() = runTest {
-        val stream = resolver("http://host/radio", songRow(resumeMs = 42_000))
-            .resolve(entry(isRadioStation = true))
+    fun `radio entries report live`() = runTest {
+        val stream = resolver("http://host/radio").resolve(entry(isRadioStation = true))
 
         assertThat(stream!!.isRadio).isTrue()
         assertThat(stream.startPositionMs).isEqualTo(0L)

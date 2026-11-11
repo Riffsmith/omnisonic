@@ -14,8 +14,10 @@ fun interface MediaProviderLookup {
 }
 
 /**
- * Song-row read seam over the library database; the resolver uses the resume
- * point and [SongReplayGainSource] reads the replay-gain values from it.
+ * Song-row read seam over the library database, used by
+ * [SongReplayGainSource] for replay-gain values. The stream resolver must not
+ * read song state through it: a stored resume point is data about the server's
+ * copy of a song, not an implicit start offset.
  */
 fun interface SongRowLookup {
     suspend fun selectByProviderAndExternal(providerId: Long, externalId: String): SongEntity?
@@ -23,14 +25,14 @@ fun interface SongRowLookup {
 
 /**
  * Production [StreamResolver]: maps a queue entry onto the owning provider's
- * stream URL, seeds the start position from the song-level resume point when
- * the queue snapshot carries none, and flags radio stations as live streams.
- * Returns null (not playable) when the provider is unknown or offers no URL;
- * the queue machine then advances to the next entry.
+ * stream URL and flags radio stations as live streams. A resolved stream
+ * always starts at 0 — the queue owns snapshot restore, and a song-level
+ * resume point is never applied implicitly. Returns null (not playable) when
+ * the provider is unknown or offers no URL; the queue machine then advances to
+ * the next entry.
  */
 class ProviderStreamResolver @Inject constructor(
     private val providers: MediaProviderLookup,
-    private val songs: SongRowLookup,
 ) : StreamResolver {
 
     override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? {
@@ -39,22 +41,10 @@ class ProviderStreamResolver @Inject constructor(
         return ResolvedStream(
             entry = entry,
             uri = uri,
-            startPositionMs = resumePositionMs(entry),
             requiresNetwork = !isDirect(uri),
             isRadio = entry.isRadioStation,
             transport = if (isDirect(uri)) StreamTransport.DIRECT_URI else StreamTransport.PROVIDER_HTTP,
         )
-    }
-
-    private suspend fun resumePositionMs(entry: PlaybackQueueEntry): Long {
-        if (entry.isRadioStation) return 0L
-        val resume = songs.selectByProviderAndExternal(entry.providerId, entry.externalId)
-            ?.resumeMs
-            ?.takeIf { it > 0L }
-            ?: return 0L
-        // A resume point at or past the end would end the track instantly; restart instead.
-        val duration = entry.durationMs
-        return if (duration != null && resume >= duration) 0L else resume
     }
 
     private fun isDirect(uri: String): Boolean =

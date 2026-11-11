@@ -20,13 +20,17 @@ Confidence:
 - [VERIFIED] `content://`/`file://` URLs mark `requiresNetwork = false`,
   `routedDirect = true` and transport `DIRECT_URI`; every other URL is
   `PROVIDER_HTTP` and network-bound (resolver tests).
-- [VERIFIED] The song-level resume point (`songs.resumeMs`) seeds
-  `ResolvedStream.startPositionMs` when the queue snapshot carries none: values
-  ≤ 0 are dropped, values at or past the entry duration restart the track, a
-  missing duration keeps the point, and radio stations always start at 0
-  (resolver tests). A queue-snapshot position still overrides it
+- [VERIFIED — code + device, 2026-11-11] A resolved stream always starts at
+  **0**: the resolver never reads song state (it depends only on
+  `MediaProviderLookup`), `ResolvedStream.startPositionMs` keeps its `0L`
+  default, and only the queue snapshot moves the playhead
   (`QueuePlayerImpl.startCurrent` copies `startPositionMs` only when a pending
-  position is armed for the entry).
+  position is armed for the same entry). Before task 6b the resolver seeded
+  that value from `songs.resumeMs`; the column holds server bookmarks written
+  by other clients (measured 279/279 rows byte-identical to the server's
+  `getBookmarks`, every one on a song with `playCount = 0`), so 20 % of a real
+  library could not be played from the beginning. Contract:
+  `resume-and-bookmarks.md`; measurement: `start-position-investigation.md`.
 - [VERIFIED] `SongReplayGainSource` maps `replayGainTrack`/`replayGainAlbum`
   into `ReplayGainValues`; a missing row yields null (no normalisation)
   (source tests).
@@ -49,10 +53,14 @@ Confidence:
   Subsonic family serves internet radio through `stream`); a provider whose
   radio stations only expose a remote direct URL needs a resolver extension
   when radio queueing lands.
-- [UNKNOWN] On-device: resume-point behavior against real bookmark-synced
-  values, and radio-stream transport behavior (live-server acceptance).
+- [VERIFIED — device + server, 2026-11-11] Resume-point behavior against real
+  bookmark-synced values: the stored points are ignored for start position
+  (task 6b) — a song bookmarked at 0:44 started at 0:03 on the user's device,
+  while the values themselves were preserved (279 rows).
+- [UNKNOWN] Radio-stream transport behavior (live-server acceptance).
 
-Date: 2026-11-07
+Date: 2026-11-07 (resume bullet corrected 2026-11-11 from on-device evidence —
+see `start-position-investigation.md`)
 
 Links: `stream-cache-identity.md`, `controller-and-events.md`,
 `sink-processors.md`, `../storage/library-sync-ownership.md` (resume-point
@@ -66,6 +74,12 @@ column ownership), `../protocol/scrobble-timestamps.md` (D-8 submission policy)
 production `StreamResolver`. `MediaProviderLookup` adapts
 `ProviderClientRegistry.providerFor` (cached per provider row, rebuilt on
 edit); `SongRowLookup` adapts the core-data `SongRepository` song-row read.
+
+[VERIFIED] `SongRowLookup` no longer serves the resolver — it exists for
+`SongReplayGainSource` only (the interface and its Hilt binding stay). The
+resolver must not read song state: that is the property that keeps start
+positions honest, and the reason `resume-and-bookmarks.md` puts any future
+resume decision behind a policy seam rather than a raw column read.
 
 [VERIFIED] `ResolvedStream.cacheKey` stays the contract default
 (`StreamKey(providerId, externalId)` — see `stream-cache-identity.md`);

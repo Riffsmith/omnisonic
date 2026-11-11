@@ -62,4 +62,26 @@ and the outcome message reads `prune skipped: <reason>`.
 
 ## Resume merge
 
-[VERIFIED] Server bookmark wins only if newer than the local resume state and no pending local resume upload exists. This prevents a pending outbox row (newer local data) from being clobbered by an older server bookmark.
+[VERIFIED] Server bookmark wins only if newer than the local resume state and no pending local resume upload exists. This prevents a pending outbox row (newer local data) from being clobbered by an older server bookmark. A bookmark without a timestamp never overwrites local state.
+
+[VERIFIED — device + server, 2026-11-11] Today the merge is the **only** source
+of the column: on a measured library every one of the 279 rows with
+`resumeMs > 0` was byte-identical to the server's `getBookmarks` `position`
+(with `resumeUpdatedAt` == `bookmark.changed`) and every one belonged to a song
+with `playCount = 0`. The app has never written a resume point of its own
+(`setResumePoint` has no production caller; the outbox table was empty).
+
+[VERIFIED — 2026-11-11] Storage merge is correct and unchanged; **consumption**
+was the defect and is gone. Playback used to apply the value as the start
+position of every fresh play, so a foreign bookmark forced songs to begin
+mid-track. Since task 6b nothing in playback reads the column; it still feeds
+`albums.resumeTrackPath` (`AggregateDao`, six statements gated on
+`songs.resumeMs > 0`) and the D-9 prune protection (`resumeMs IS NOT NULL`),
+and stays the merge target for the Phase 6 resume feature. Contract:
+`../playback/resume-and-bookmarks.md`.
+
+[VERIFIED — gap] Deletion does not propagate: `syncBookmarks` applies
+bookmarks that exist and never clears a row whose bookmark was removed
+server-side, and there is no local→server resume upload either. Once playback
+stops reading the column the staleness is harmless, so delete-sync belongs
+with the Phase 6 resume feature rather than with this fix.
