@@ -82,6 +82,7 @@ class LibraryScrollGestureTest {
                     browseViewModel = browseViewModel,
                     syncStepViewModelProvider = { stepViewModel },
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),
+                    searchViewModel = testSearchViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )
             }

@@ -1,7 +1,7 @@
 package app.omnisonic.core.data.search
 
+import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.ProfileScope
-import app.omnisonic.core.data.db.dao.SearchDao
 import app.omnisonic.core.data.network.ProviderStatusTracker
 import app.omnisonic.provider.api.ProviderStatus
 import javax.inject.Inject
@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.first
  */
 @Singleton
 class SearchRepository @Inject constructor(
-    private val searchDao: SearchDao,
+    private val db: OmnisonicDatabase,
     private val preferences: SearchPreferencesStore,
     private val providerVisibility: ProviderVisibilityStore,
     private val providerStatuses: ProviderStatusTracker,
@@ -50,6 +50,7 @@ class SearchRepository @Inject constructor(
 
         val effectiveScope = effectiveScope(scope)
         val fetchLimit = safeLimit + 1
+        val searchDao = db.searchDao()
 
         return SearchResults(
             query = query,

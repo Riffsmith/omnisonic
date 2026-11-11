@@ -13,6 +13,8 @@ import app.omnisonic.BuildConfig
 import app.omnisonic.R
 import app.omnisonic.feature.library.browse.LibrarySection
 import app.omnisonic.feature.library.ui.LibraryHubScreen
+import app.omnisonic.feature.search.search.SearchViewModel
+import app.omnisonic.feature.search.ui.SearchRoute
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
@@ -40,9 +42,14 @@ internal fun MainTabsPager(
     hasProvider: Boolean,
     settingsViewModel: ShellSettingsViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
+    searchViewModel: SearchViewModel,
     onOpenSetup: () -> Unit,
     onSelectTab: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
+    onOpenAlbum: (Long) -> Unit,
+    onOpenArtist: (Long) -> Unit,
+    onOpenGenre: (Long) -> Unit,
+    onOpenPlaylist: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
@@ -66,7 +73,14 @@ internal fun MainTabsPager(
         when (val tab = tabs[page]) {
             MainTab.HOME -> HomePlaceholder(hasProvider = hasProvider, onSetup = onOpenSetup)
             MainTab.LIBRARY -> LibraryHubScreen(onOpenSection = onOpenSection)
-            MainTab.SEARCH -> PlaceholderPane(tab.label())
+            MainTab.SEARCH -> SearchRoute(
+                viewModel = searchViewModel,
+                isActive = state.currentPage == page,
+                onOpenAlbum = onOpenAlbum,
+                onOpenArtist = onOpenArtist,
+                onOpenGenre = onOpenGenre,
+                onOpenPlaylist = onOpenPlaylist,
+            )
             MainTab.SETTINGS -> ShellSettingsScreen(
                 appVersion = BuildConfig.VERSION_NAME,
                 onOpenProviders = onOpenSetup,

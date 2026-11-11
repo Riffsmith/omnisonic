@@ -135,6 +135,7 @@ class ShellTabNavigationTest {
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),
+                    searchViewModel = testSearchViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )
             }

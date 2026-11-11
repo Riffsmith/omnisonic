@@ -31,7 +31,7 @@ class SearchPerformanceTest : DatabaseTestBase() {
         val seedElapsed = measureTimeMillis { songDao.upsertRows(songs) }
 
         val repository = SearchRepository(
-            searchDao = searchDao,
+            db = db,
             preferences = preferencesStore(),
             providerVisibility = visibilityStore(),
             providerStatuses = ProviderStatusTracker(db, NetworkMonitor { NetworkState(connected = true, wifi = true) }),

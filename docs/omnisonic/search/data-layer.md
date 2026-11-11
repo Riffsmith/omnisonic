@@ -12,7 +12,7 @@ Confidence:
 - [VERIFIED] A worst-case (matches-everything) first page over a 100k-song library answers inside the Phase 2 query budget (3 s); measured 0.02–0.8 s under Robolectric (`SearchPerformanceTest`).
 - [UNKNOWN] Real-device cold-cache latency and scroll smoothness — needs hardware.
 
-Date: 2026-11-08
+Date: 2026-11-08 (task 7 screen + layout config added 2026-11-11)
 
 Links: `../storage/sqlite-api29-floor.md` (999-variable bound → CSV exclusion), `../storage/schema-v2.md` (column vocabulary), `.agents/plans/phase-5-tasks.md` task 3, `reference/ROADMAP.md` §Phase 5.
 
@@ -64,7 +64,11 @@ Room cannot bind an object parameter, so the convention is: a `*Raw` `@Query` me
 
 - `SearchPreferencesStore` (DataStore `omnisonic_search`): `search.categories` (string set of `SearchCategory` names; absent key = all five enabled), `search.recent_searches` (JSON string list via `JsonText`, newest first, case-insensitive dedupe, cap 10), `search.page_size`. Setters: `setCategories`/`setCategoryEnabled`, `recordRecentSearch`/`removeRecentSearch`/`clearRecentSearches`, `setPageSize`. [VERIFIED]
 - `ProviderVisibilityStore` (DataStore `omnisonic_provider_visibility`): `providers.hidden_ids` string set of provider ids. Hidden-provider management UI is Phase 9/10; Phase 5 ships the seam only. [VERIFIED]
-- The search **page layout** config (single-line chips, favourites button, track-click action…) is task 7 work in `:style` (`SearchPageConfig` JSON), deliberately not in this store. [INFERRED per roadmap]
+- The search **page layout** config lives in `:style` (`SearchPageConfig`, task 7), deliberately not in this store: `chipLayout` (`SINGLE_LINE`/`WRAPPED`), `autofocusOnEntry`, `showRecentSearches`. `SearchPageConfig.DEFAULT_JSON` is the shipped default; `fromJson` falls back to `SearchPageConfig.DEFAULT` for malformed JSON, unknown enum values and type mismatches, and missing keys keep their defaults. [VERIFIED `SearchPageConfigTest`]
+
+## Search screen (task 7)
+
+`feature-search` renders `SearchRoute` from `SearchViewModel` (`search/`), which talks only to the `SearchSource` seam (`RepositorySearchSource` wraps `SearchRepository` + `SearchPreferencesStore`). One submit runs one repository call at offset 0; the state machine is `IDLE → SEARCHING → RESULTS | NO_RESULTS | ERROR`. Category chips are the persisted toggles; toggling re-runs the active query. Recent searches are recorded only after a successful submit, newest first (store-side dedupe/cap). The load-more footer requests the next offset across all enabled categories, appends each category page and ORs their `hasMore`; a failed append keeps the loaded rows and offers an inline retry. Results render in one `LazyColumn` in the fixed order albums → artists → songs → genres → playlists; a song row opens its album detail. Covers are requested at a bucketed thumb size (≤1024 px, the D-17 rule). Result taps are wired by `:app` to the shell routes.
 
 ## Deferred
 

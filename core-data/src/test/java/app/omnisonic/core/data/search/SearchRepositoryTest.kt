@@ -53,7 +53,7 @@ class SearchRepositoryTest : DatabaseTestBase() {
         preferences: SearchPreferencesStore = preferencesStore(),
         visibility: ProviderVisibilityStore = visibilityStore(),
         statuses: ProviderStatusTracker = tracker(),
-    ): SearchRepository = SearchRepository(searchDao, preferences, visibility, statuses)
+    ): SearchRepository = SearchRepository(db, preferences, visibility, statuses)
 
     private suspend fun seedSong(
         id: Long,

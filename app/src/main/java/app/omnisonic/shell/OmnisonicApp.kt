@@ -58,6 +58,7 @@ import app.omnisonic.feature.library.ui.MiniPlayerBar
 import app.omnisonic.feature.library.ui.NowPlayingRoute
 import app.omnisonic.feature.library.ui.PlaylistDetailRoute
 import app.omnisonic.feature.library.ui.QueueRoute
+import app.omnisonic.feature.search.search.SearchViewModel
 import app.omnisonic.feature.settings.providers.ProviderSetupRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupViewModel
 import app.omnisonic.feature.settings.shell.MainTab
@@ -81,6 +82,7 @@ fun OmnisonicApp(
     providerSetupViewModel: ProviderSetupViewModel = hiltViewModel(),
     syncManagerViewModel: LibrarySyncManagerViewModel = hiltViewModel(),
     miniPlayerViewModel: MiniPlayerViewModel = hiltViewModel(),
+    searchViewModel: SearchViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val miniPlayer by miniPlayerViewModel.state.collectAsStateWithLifecycle()
@@ -98,6 +100,7 @@ fun OmnisonicApp(
                 providerSetupViewModel = providerSetupViewModel,
                 browseViewModel = hiltViewModel(),
                 syncManagerViewModel = syncManagerViewModel,
+                searchViewModel = searchViewModel,
                 miniPlayerState = miniPlayer,
                 onMiniPlayerTogglePlayPause = miniPlayerViewModel::togglePlayPause,
                 onMiniPlayerNext = miniPlayerViewModel::next,
@@ -121,6 +124,7 @@ fun OmnisonicShell(
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
+    searchViewModel: SearchViewModel,
     miniPlayerState: MiniPlayerUiState = MiniPlayerUiState(),
     onMiniPlayerTogglePlayPause: () -> Unit = {},
     onMiniPlayerNext: () -> Unit = {},
@@ -228,12 +232,17 @@ fun OmnisonicShell(
                     browseViewModel = browseViewModel,
                     syncStepViewModelProvider = syncStepViewModelProvider,
                     syncManagerViewModel = syncManagerViewModel,
+                    searchViewModel = searchViewModel,
                     detailViewModelProvider = detailViewModelProvider,
                     nowPlayingViewModelProvider = nowPlayingViewModelProvider,
                     queueViewModelProvider = queueViewModelProvider,
                     onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                     onTabTapped = onTabTapped,
                     onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
+                    onOpenAlbum = { controller.navigateTo(ShellRoutes.album(it)) },
+                    onOpenArtist = { controller.navigateTo(ShellRoutes.artist(it)) },
+                    onOpenGenre = { controller.navigateTo(ShellRoutes.genre(it)) },
+                    onOpenPlaylist = { controller.navigateTo(ShellRoutes.playlist(it)) },
                     modifier = Modifier.weight(1f),
                 )
                 miniPlayer(Modifier)
@@ -252,12 +261,17 @@ fun OmnisonicShell(
                 browseViewModel = browseViewModel,
                 syncStepViewModelProvider = syncStepViewModelProvider,
                 syncManagerViewModel = syncManagerViewModel,
+                searchViewModel = searchViewModel,
                 detailViewModelProvider = detailViewModelProvider,
                 nowPlayingViewModelProvider = nowPlayingViewModelProvider,
                 queueViewModelProvider = queueViewModelProvider,
                 onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                 onTabTapped = onTabTapped,
                 onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
+                onOpenAlbum = { controller.navigateTo(ShellRoutes.album(it)) },
+                onOpenArtist = { controller.navigateTo(ShellRoutes.artist(it)) },
+                onOpenGenre = { controller.navigateTo(ShellRoutes.genre(it)) },
+                onOpenPlaylist = { controller.navigateTo(ShellRoutes.playlist(it)) },
                 modifier = Modifier.weight(1f),
             )
             miniPlayer(Modifier)
@@ -295,12 +309,17 @@ private fun ShellContentArea(
     browseViewModel: LibraryBrowseViewModel,
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
+    searchViewModel: SearchViewModel,
     detailViewModelProvider: @Composable () -> DetailViewModel,
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel,
     queueViewModelProvider: @Composable () -> QueueViewModel,
     onOpenSetup: () -> Unit,
     onTabTapped: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
+    onOpenAlbum: (Long) -> Unit,
+    onOpenArtist: (Long) -> Unit,
+    onOpenGenre: (Long) -> Unit,
+    onOpenPlaylist: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier) {
@@ -328,9 +347,14 @@ private fun ShellContentArea(
             hasProvider = state.hasProvider,
             settingsViewModel = settingsViewModel,
             syncManagerViewModel = syncManagerViewModel,
+            searchViewModel = searchViewModel,
             onOpenSetup = onOpenSetup,
             onSelectTab = onTabTapped,
             onOpenSection = onOpenSection,
+            onOpenAlbum = onOpenAlbum,
+            onOpenArtist = onOpenArtist,
+            onOpenGenre = onOpenGenre,
+            onOpenPlaylist = onOpenPlaylist,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 1f else 0f),

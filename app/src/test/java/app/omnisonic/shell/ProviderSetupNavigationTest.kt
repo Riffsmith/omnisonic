@@ -70,6 +70,7 @@ class ProviderSetupNavigationTest {
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),
+                    searchViewModel = testSearchViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )
             }
@@ -110,6 +111,7 @@ class ProviderSetupNavigationTest {
                         stepViewModel
                     },
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),
+                    searchViewModel = testSearchViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )
             }
@@ -141,6 +143,7 @@ class ProviderSetupNavigationTest {
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),
+                    searchViewModel = testSearchViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )
             }
