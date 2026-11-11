@@ -4,7 +4,12 @@ Status: **tasks 4b + 4c shipped 2026-11-09** (D-16/D-17, inserted from the
 first live-device test). Sync mechanics, the progress surface, resume-on-launch,
 live refresh, cover sizing and the first-run/settings screens are all
 `[VERIFIED]` by unit tests; on-device feel of the new screens is still
-[UNKNOWN] until the next device session.
+[UNKNOWN] until the next device session. **Updated 2026-11-11 (task 7b):** a
+terminal `DONE` now completes the onboarding step and advances to home on its
+own; the manual button remains for failure/skip and provider-less installs, and
+completion travels as a replayed `Completed` event so a late route subscriber
+still navigates. [VERIFIED: `LibrarySyncStepViewModelTest` (12),
+`LibrarySyncStepRouteTest`, `ProviderSetupNavigationTest`]
 
 ## Current mechanics (Phase 3/5 as shipped) [VERIFIED]
 
@@ -86,16 +91,25 @@ live refresh, cover sizing and the first-run/settings screens are all
   (UI_SCREENS.md §5, extend-only) renders `LibrarySyncStepRoute` — a phase
   list over the 4b progress flow with N/M for the album walk, fresh
   shelf-stocking copy, a determinate bar when the walk reports a count.
-  Continue (enabled on completion or after a failure) completes the step via
-  `completeOnboardingStep`, which exhausts the list and sets
+  A terminal `DONE` completes the step on its own
+  (`LibrarySyncStepViewModel.maybeAutoAdvance`, called after the provider
+  resolves and after every accepted progress emission) — the Continue button
+  stays as a fallback and is the only exit for a failure, a blocked/skipped
+  walk and a provider-less install. Completion is a single replayed `Completed`
+  event (`MutableSharedFlow(replay = 1)`), so an emission that lands before the
+  route's collector subscribes is not lost and the fallback button can never be
+  inert. `completeOnboardingStep` exhausts the list and sets
   `onboardingComplete`; a failure additionally offers Retry (restarts the full
   walk through the run gate) and Continue-anyway. Leaving the screen never
   cancels the walk (process-scoped scope). The step self-heals: it restarts a
   walk when the provider has no recorded full sync and nothing is running
   (relaunch mid-sync), and adopts a recorded completion without starting
   anything. No skip while sync is healthy — per the open-question default.
-  [VERIFIED: `LibrarySyncStepViewModelTest` (8), `ShellPreferencesStoreTest`
-  two-step cases, `ProviderSetupNavigationTest.firstRunWalksSetupThenSyncThenHome`]
+  [VERIFIED: `LibrarySyncStepViewModelTest` (12, incl. auto-advance, failure,
+  provider-less and late-subscriber cases), `ShellPreferencesStoreTest`
+  two-step cases,
+  `ProviderSetupNavigationTest.firstRunWalksSetupThenSyncThenAutoAdvancesHome`,
+  `LibrarySyncStepRouteTest`]
 - **Post-setup navigation:** first run navigates `providerSetup` →
   `librarySync` → `home` (the NavHost's completion callback branches on
   `previousBackStackEntry == null`, i.e. setup as start destination); the

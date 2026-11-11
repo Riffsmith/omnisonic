@@ -63,7 +63,9 @@ class LibrarySyncStepViewModel @Inject constructor(
     private val _state = MutableStateFlow(LibrarySyncStepUiState())
     val state: StateFlow<LibrarySyncStepUiState> = _state.asStateFlow()
 
-    private val _events = MutableSharedFlow<LibrarySyncStepEvent>(extraBufferCapacity = 1)
+    // Replayed: the terminal event can be emitted before the route subscribes
+    // (init auto-advance), and a lost event would leave an inert Continue button.
+    private val _events = MutableSharedFlow<LibrarySyncStepEvent>(replay = 1)
     val events: SharedFlow<LibrarySyncStepEvent> = _events.asSharedFlow()
 
     init {
@@ -78,12 +80,14 @@ class LibrarySyncStepViewModel @Inject constructor(
                     recordedComplete = active?.lastFullSyncAt != null,
                 )
             }
+            maybeAutoAdvance()
             if (active != null && active.lastFullSyncAt == null && sync.progress.value?.isRunning != true) {
                 sync.startFullSync(active.providerId)
             }
             sync.progress.collect { progress ->
                 if (progress != null && progress.providerId != _state.value.providerId) return@collect
                 _state.update { it.copy(progress = progress) }
+                maybeAutoAdvance()
             }
         }
     }
@@ -92,6 +96,11 @@ class LibrarySyncStepViewModel @Inject constructor(
     fun retry() {
         val providerId = _state.value.providerId ?: return
         sync.startFullSync(providerId)
+    }
+
+    /** Terminal success finishes the step for the user; failures still ask. */
+    private fun maybeAutoAdvance() {
+        if (_state.value.isComplete) continueIntoApp()
     }
 
     fun continueIntoApp() {

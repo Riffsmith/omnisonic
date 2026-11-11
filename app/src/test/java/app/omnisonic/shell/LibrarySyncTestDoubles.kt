@@ -54,6 +54,15 @@ internal fun syncDoneProvider(id: Long = 1): LibrarySyncProvider = LibrarySyncPr
     lastResult = LibrarySyncLastResult.COMPLETED,
 )
 
+/** Fresh-install shape: no completed walk, no live progress (step stays put). */
+internal fun syncPendingProvider(id: Long = 1): LibrarySyncProvider = LibrarySyncProvider(
+    providerId = id,
+    name = "Home",
+    supportsLibrarySync = true,
+    lastFullSyncAt = null,
+    lastResult = LibrarySyncLastResult.NEVER,
+)
+
 internal fun syncCompletedProgress(providerId: Long = 1): LibrarySyncProgress =
     LibrarySyncProgress(
         providerId = providerId,
@@ -64,9 +73,11 @@ internal fun syncCompletedProgress(providerId: Long = 1): LibrarySyncProgress =
     )
 
 internal fun testLibrarySyncStepViewModel(
+    // Inert default: a completed fake would auto-advance off the route during
+    // composition and break tests that assert the destination itself.
     control: LibrarySyncControl = FakeLibrarySyncControl(
-        initialProgress = syncCompletedProgress(),
-        initialProviders = listOf(syncDoneProvider()),
+        initialProgress = null,
+        initialProviders = listOf(syncPendingProvider()),
     ),
 ): LibrarySyncStepViewModel = LibrarySyncStepViewModel(
     sync = control,

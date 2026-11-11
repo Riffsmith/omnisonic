@@ -10,7 +10,6 @@ import app.omnisonic.style.NavigationLayout
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,7 +29,7 @@ class ShellViewModel @Inject constructor(
     database: OmnisonicDatabase,
 ) : ViewModel() {
 
-    private val providerCount = flow { emit(database.providerDao().count()) }
+    private val providerCount = database.providerDao().countFlow()
 
     val state: StateFlow<ShellUiState?> = combine(
         shellPreferences.preferences,

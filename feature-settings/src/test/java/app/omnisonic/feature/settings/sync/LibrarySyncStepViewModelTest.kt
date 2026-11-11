@@ -11,6 +11,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.AfterEach
@@ -50,11 +51,13 @@ class LibrarySyncStepViewModelTest {
     }
 
     @Test
-    fun `completion enables Continue`() = runTest {
+    fun `terminal completion auto-advances`() = runTest {
         val control = FakeLibrarySyncControl(
             initialProviders = listOf(provider(id = 1)),
         )
-        val viewModel = LibrarySyncStepViewModel(control, shellStore())
+        val store = mockk<ShellPreferencesStore>(relaxed = true)
+        val viewModel = LibrarySyncStepViewModel(control, store)
+        val events = collectEvents(viewModel)
         assertThat(viewModel.state.value.canContinue).isFalse()
 
         control.publish(terminalProgress(LibrarySyncPhase.DONE))
@@ -62,6 +65,67 @@ class LibrarySyncStepViewModelTest {
 
         assertThat(viewModel.state.value.isComplete).isTrue()
         assertThat(viewModel.state.value.canContinue).isTrue()
+        coVerify(exactly = 1) { store.completeOnboardingStep(OnboardingSteps.LIBRARY_SYNC) }
+        assertThat(events).containsExactly(LibrarySyncStepEvent.Completed)
+    }
+
+    @Test
+    fun `failure does not auto-advance`() = runTest {
+        val control = FakeLibrarySyncControl(
+            initialProviders = listOf(provider(id = 1)),
+        )
+        val viewModel = LibrarySyncStepViewModel(control, shellStore())
+        val events = collectEvents(viewModel)
+
+        control.publish(terminalProgress(LibrarySyncPhase.FAILED))
+        runCurrent()
+
+        assertThat(events).isEmpty()
+        assertThat(viewModel.state.value.canContinue).isTrue()
+    }
+
+    @Test
+    fun `a provider-less install does not auto-advance`() = runTest {
+        val control = FakeLibrarySyncControl()
+        val viewModel = LibrarySyncStepViewModel(control, shellStore())
+        val events = collectEvents(viewModel)
+
+        runCurrent()
+
+        assertThat(events).isEmpty()
+        assertThat(viewModel.state.value.canContinue).isTrue()
+    }
+
+    @Test
+    fun `completion followed by a manual continue emits once`() = runTest {
+        val control = FakeLibrarySyncControl(
+            initialProviders = listOf(provider(id = 1)),
+        )
+        val viewModel = LibrarySyncStepViewModel(control, shellStore())
+        val events = collectEvents(viewModel)
+
+        control.publish(terminalProgress(LibrarySyncPhase.DONE))
+        runCurrent()
+        viewModel.continueIntoApp()
+        runCurrent()
+
+        assertThat(events).containsExactly(LibrarySyncStepEvent.Completed)
+    }
+
+    @Test
+    fun `completion emitted before a collector subscribes is still delivered`() = runTest {
+        val control = FakeLibrarySyncControl(
+            initialProgress = terminalProgress(LibrarySyncPhase.DONE),
+            initialProviders = listOf(provider(id = 1)),
+        )
+        // Construction runs `init` on the Unconfined main dispatcher, so the
+        // completion is emitted before this subscription exists.
+        val viewModel = LibrarySyncStepViewModel(control, shellStore())
+        val events = collectEvents(viewModel)
+
+        runCurrent()
+
+        assertThat(events).containsExactly(LibrarySyncStepEvent.Completed)
     }
 
     @Test
@@ -108,10 +172,9 @@ class LibrarySyncStepViewModelTest {
         )
         val store = mockk<ShellPreferencesStore>(relaxed = true)
         val viewModel = LibrarySyncStepViewModel(control, store)
-        val events = mutableListOf<LibrarySyncStepEvent>()
-        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
-            viewModel.events.collect { events += it }
-        }
+        // Subscribed after construction: only the replayed completion is visible,
+        // which is exactly what the route sees when it opens late.
+        val events = collectEvents(viewModel)
 
         viewModel.continueIntoApp()
         viewModel.continueIntoApp()
@@ -128,10 +191,13 @@ class LibrarySyncStepViewModelTest {
         )
 
         val viewModel = LibrarySyncStepViewModel(control, shellStore())
+        val events = collectEvents(viewModel)
+        runCurrent()
 
         assertThat(control.fullSyncCalls).isEmpty()
         assertThat(viewModel.state.value.isComplete).isTrue()
         assertThat(viewModel.state.value.canContinue).isTrue()
+        assertThat(events).containsExactly(LibrarySyncStepEvent.Completed)
     }
 
     @Test
@@ -159,6 +225,16 @@ class LibrarySyncStepViewModelTest {
 
     private fun runCurrent() {
         mainDispatcher.scheduler.runCurrent()
+    }
+
+    private fun TestScope.collectEvents(
+        viewModel: LibrarySyncStepViewModel,
+    ): MutableList<LibrarySyncStepEvent> {
+        val events = mutableListOf<LibrarySyncStepEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events += it }
+        }
+        return events
     }
 
     private fun shellStore(): ShellPreferencesStore = mockk(relaxed = true)

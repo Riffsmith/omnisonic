@@ -4,7 +4,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -48,13 +50,12 @@ class ProviderSetupNavigationTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun firstRunWalksSetupThenSyncThenHome() {
+    fun firstRunWalksSetupThenSyncThenAutoAdvancesHome() {
         val service = mockk<ProviderSetupService>(relaxed = true)
         coEvery { service.probe(any()) } returns ProviderProbeResult.Success(ProviderCapabilities())
         coEvery { service.save(any()) } returns ProviderSetupOutcome.Saved(1L)
         val syncControl = FakeLibrarySyncControl(
-            initialProgress = syncCompletedProgress(),
-            initialProviders = listOf(syncDoneProvider()),
+            initialProviders = listOf(syncPendingProvider()),
         )
 
         lateinit var nav: NavHostController
@@ -77,14 +78,11 @@ class ProviderSetupNavigationTest {
         }
         composeRule.waitForIdle()
 
-        val fields = composeRule.onAllNodes(hasSetTextAction())
-        fields[0].performTextInput("https://music.example.com")
-        fields[1].performTextInput("admin")
-        fields[2].performTextInput("hunter2")
+        fillSetupForm()
         composeRule.onNodeWithText("Save and continue").performScrollTo().performClick()
 
         awaitRoute(nav, ShellRoutes.LIBRARY_SYNC)
-        composeRule.onNodeWithText("Continue").performClick()
+        syncControl.publish(syncCompletedProgress())
         awaitRoute(nav, ShellRoutes.HOME)
     }
 
@@ -123,7 +121,7 @@ class ProviderSetupNavigationTest {
         composeRule.waitForIdle()
 
         assertThat(providerInvocations).isAtLeast(1)
-        composeRule.onNodeWithText("Continue").assertExists()
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.LIBRARY_SYNC)
     }
 
     @Test
@@ -156,14 +154,24 @@ class ProviderSetupNavigationTest {
         composeRule.waitForIdle()
         awaitRoute(nav, ShellRoutes.PROVIDER_SETUP)
 
-        val fields = composeRule.onAllNodes(hasSetTextAction())
-        fields[0].performTextInput("https://music.example.com")
-        fields[1].performTextInput("admin")
-        fields[2].performTextInput("hunter2")
+        fillSetupForm()
         composeRule.onNodeWithText("Save and continue").performScrollTo().performClick()
 
         awaitRoute(nav, ShellRoutes.HOME)
     }
+
+    /**
+     * Fields are addressed by their label, not by index: the tab pager keeps an
+     * adjacent page composed, so an unrelated text field can share the tree.
+     */
+    private fun fillSetupForm() {
+        setupField("Server URL").performTextInput("https://music.example.com")
+        setupField("Username").performTextInput("admin")
+        setupField("Password").performTextInput("hunter2")
+    }
+
+    private fun setupField(label: String): SemanticsNodeInteraction =
+        composeRule.onNode(hasSetTextAction() and hasText(label))
 
     private fun awaitRoute(nav: NavHostController, route: String, timeoutMs: Long = 10_000) {
         val deadline = System.currentTimeMillis() + timeoutMs
