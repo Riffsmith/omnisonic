@@ -102,6 +102,7 @@ fun LibrarySectionRoute(
             ) { content ->
                 SongListBody(
                     content = content,
+                    onSongClick = viewModel::playFrom,
                     onLoadMore = { viewModel.loadMore(section) },
                 )
             }

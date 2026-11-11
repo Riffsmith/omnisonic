@@ -46,8 +46,8 @@ discipline). Data contract: `docs/omnisonic/search/data-layer.md` (the
   survive navigation. Public typed flows: `albums`/`artists`/`songs`/
   `genres`/`playlists` as `StateFlow<BrowseUiState<…Entity>>`; commands
   `load(section)` (idempotent initial load; re-enters only from the error
-  state) and `loadMore(section)` (guarded by `hasMore`/`appending`/active
-  job). Reads go through **`LibraryBrowseSource`** (interface) implemented
+  state), `loadMore(section)` (guarded by `hasMore`/`appending`/active job)
+  and `playFrom(rowIndex)` (songs only, see the playback-actions note below). Reads go through **`LibraryBrowseSource`** (interface) implemented
   by `RepositoryBrowseSource` over `BrowseRepository` — the seam plain JVM
   tests fake (bound in `di/LibraryBrowseModule`).
 - **`SectionPager<T>`** owns one section's state. `loadInitial` is idempotent
@@ -66,10 +66,24 @@ discipline). Data contract: `docs/omnisonic/search/data-layer.md` (the
   loading placeholder grid/rows, empty copy, error + retry, or content).
   Albums/artists/playlists render `CoverGridBody` (cover tiles +
   title/subtitle), genres render placeholder tiles with the title inside,
-  songs render `SongListBody` (thumb, title, artist, duration). Load-more is
+  songs render `SongListBody` (thumb, title, artist, duration; the whole row
+  is one tap target). Load-more is
   a full-span footer that **is** the trigger: while it is composed with more
   pages pending it requests the next page; a failed append swaps the spinner
   for a retry [VERIFIED: state machine in `LibraryBrowseViewModelTest`].
+- **Song-row playback action (task 7d):** tapping a songs row calls
+  `LibraryBrowseViewModel.playFrom(rowIndex)`, which queues the **loaded**
+  songs window through `PlaybackController` and starts at the tapped row.
+  Rows without a provider external id cannot be resolved by the stream
+  resolver, so they are skipped and the start index re-anchors on the tapped
+  row's identity; a tap before content, out of range, or on an unplayable row
+  is a no-op. This is the same contract as `DetailViewModel.playFrom`
+  (`ui/detail-screens.md`), implemented once through the shared
+  `feature/library/playback/QueueEntries.kt` mappers. Tap only — no
+  long-press/appbar action, so no visible-control twin is owed
+  (`ui/gesture-contract.md`). Queueing beyond the loaded window stays a
+  later-phase item. [VERIFIED in `LibraryBrowseViewModelTest` +
+  `:app` `LibrarySongTapTest`; device tap feel UNKNOWN]
 - **Covers:** `CoverImage` composable (`feature-library/ui/CoverImage.kt`)
   builds `CoverImageKey(providerId, imagePath)` models (provider-api —
   relocated from `:playback` in this task; `CoverKeyer` stayed in
@@ -102,8 +116,6 @@ discipline). Data contract: `docs/omnisonic/search/data-layer.md` (the
   with task 5's detail pass or later.
 - **Long-press multi-select** (+ header selection-mode button twin) —
   deferred: selection has no consumers until detail/play wiring (tasks 5/6).
-- **Song-row tap** — no action yet; play wiring lands with the playback
-  surfaces (tasks 5/6).
 - **Sort control / view toggle** in the section header — explicitly later
   per §3.4.
 - **10k-album grid frame time** — device-gated [UNKNOWN]; Robolectric

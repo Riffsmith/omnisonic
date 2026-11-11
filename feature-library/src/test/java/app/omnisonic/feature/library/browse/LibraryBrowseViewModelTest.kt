@@ -6,6 +6,7 @@ import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.GenreEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.feature.library.FakePlaybackController
 import com.google.common.truth.Truth.assertThat
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
@@ -25,6 +26,11 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryBrowseViewModelTest {
 
+    private fun viewModel(
+        source: LibraryBrowseSource,
+        controller: FakePlaybackController = FakePlaybackController(),
+    ) = LibraryBrowseViewModel(source, controller)
+
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -38,7 +44,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `initial load lands on content with count and hasMore`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
 
         viewModel.load(LibrarySection.ALBUMS)
 
@@ -54,7 +60,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `initial load is idempotent`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
 
         viewModel.load(LibrarySection.ALBUMS)
         viewModel.load(LibrarySection.ALBUMS)
@@ -66,7 +72,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `loadMore appends the next window without duplicate keys`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
         viewModel.load(LibrarySection.ALBUMS)
 
         viewModel.loadMore(LibrarySection.ALBUMS)
@@ -86,7 +92,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `loadMore stops requesting once hasMore is false`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 10))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
         viewModel.load(LibrarySection.ALBUMS)
 
         viewModel.loadMore(LibrarySection.ALBUMS)
@@ -99,7 +105,7 @@ class LibraryBrowseViewModelTest {
     fun `initial load parks in loading until the page returns`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130), pageGate = gate)
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
 
         viewModel.load(LibrarySection.ALBUMS)
         assertThat(viewModel.albums.value).isEqualTo(BrowseUiState.Loading)
@@ -116,7 +122,7 @@ class LibraryBrowseViewModelTest {
         val firstPage = CompletableDeferred<Unit>()
         val secondPage = CompletableDeferred<Unit>()
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
 
         source.pageGate = firstPage
         viewModel.load(LibrarySection.ALBUMS)
@@ -138,7 +144,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `empty library lands on the empty state`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 0))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
 
         viewModel.load(LibrarySection.ALBUMS)
 
@@ -148,7 +154,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `initial failure lands on error and load retries`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 5), failPagesAt = setOf(0))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
 
         viewModel.load(LibrarySection.ALBUMS)
         assertThat(viewModel.albums.value).isEqualTo(BrowseUiState.Error)
@@ -163,7 +169,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `append failure keeps items and flags appendFailed until retried`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130), failPagesAt = setOf(60))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
         viewModel.load(LibrarySection.ALBUMS)
 
         viewModel.loadMore(LibrarySection.ALBUMS)
@@ -191,7 +197,7 @@ class LibraryBrowseViewModelTest {
                 FakeSection.PLAYLISTS to 7,
             ),
         )
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
 
         viewModel.load(LibrarySection.ARTISTS)
         viewModel.load(LibrarySection.SONGS)
@@ -205,9 +211,71 @@ class LibraryBrowseViewModelTest {
     }
 
     @Test
+    fun `playFrom queues the loaded songs and starts at the tapped row`() = runTest {
+        val controller = FakePlaybackController()
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.SONGS to 4))
+        val viewModel = viewModel(source, controller)
+        viewModel.load(LibrarySection.SONGS)
+
+        viewModel.playFrom(2)
+
+        val (queued, start) = controller.plays.single()
+        assertThat(start).isEqualTo(2)
+        assertThat(queued.map { it.externalId }).containsExactly("e-1", "e-2", "e-3", "e-4").inOrder()
+        assertThat(queued.first().songRowId).isEqualTo(1L)
+        assertThat(queued.first().title).isEqualTo("Song 1")
+    }
+
+    @Test
+    fun `playFrom skips unresolvable rows without shifting the anchor`() = runTest {
+        val controller = FakePlaybackController()
+        val source = FakeBrowseSource(
+            totals = mapOf(FakeSection.SONGS to 3),
+            nullExternalIdIndexes = setOf(0),
+        )
+        val viewModel = viewModel(source, controller)
+        viewModel.load(LibrarySection.SONGS)
+
+        viewModel.playFrom(2)
+
+        val (queued, start) = controller.plays.single()
+        assertThat(queued.map { it.externalId }).containsExactly("e-2", "e-3").inOrder()
+        assertThat(start).isEqualTo(1)
+    }
+
+    @Test
+    fun `playFrom before content or out of range is a no-op`() = runTest {
+        val controller = FakePlaybackController()
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.SONGS to 3))
+        val viewModel = viewModel(source, controller)
+
+        viewModel.playFrom(0)
+        viewModel.load(LibrarySection.SONGS)
+        viewModel.playFrom(9)
+
+        assertThat(controller.plays).isEmpty()
+    }
+
+    @Test
+    fun `playFrom after loadMore includes the appended window`() = runTest {
+        val controller = FakePlaybackController()
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.SONGS to 70))
+        val viewModel = viewModel(source, controller)
+        viewModel.load(LibrarySection.SONGS)
+        viewModel.loadMore(LibrarySection.SONGS)
+
+        viewModel.playFrom(65)
+
+        val (queued, start) = controller.plays.single()
+        assertThat(queued).hasSize(70)
+        assertThat(start).isEqualTo(65)
+        assertThat(queued[65].externalId).isEqualTo("e-66")
+    }
+
+    @Test
     fun `catalog invalidation reloads an open section with the new count`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 3))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
         viewModel.load(LibrarySection.ALBUMS)
         assertThat((viewModel.albums.value as BrowseUiState.Content).totalCount).isEqualTo(3)
 
@@ -224,7 +292,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `invalidation keeps the accumulated window instead of collapsing to one page`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
         viewModel.load(LibrarySection.ALBUMS)
         viewModel.loadMore(LibrarySection.ALBUMS)
         assertThat((viewModel.albums.value as BrowseUiState.Content).items).hasSize(120)
@@ -242,7 +310,7 @@ class LibraryBrowseViewModelTest {
     @Test
     fun `invalidation before a section opens does not fetch anything`() = runTest {
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 10))
-        LibraryBrowseViewModel(source)
+        viewModel(source)
 
         source.changes.emit(Unit)
         runCurrent()
@@ -254,7 +322,7 @@ class LibraryBrowseViewModelTest {
     fun `invalidation during the initial load refreshes once it finishes`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 3), pageGate = gate)
-        val viewModel = LibraryBrowseViewModel(source)
+        val viewModel = viewModel(source)
         viewModel.load(LibrarySection.ALBUMS)
         assertThat(viewModel.albums.value).isEqualTo(BrowseUiState.Loading)
 
@@ -275,6 +343,7 @@ class LibraryBrowseViewModelTest {
         var totals: Map<FakeSection, Int> = emptyMap(),
         var failPagesAt: Set<Int> = emptySet(),
         var pageGate: CompletableDeferred<Unit>? = null,
+        var nullExternalIdIndexes: Set<Int> = emptySet(),
     ) : LibraryBrowseSource {
 
         val changes = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
@@ -330,7 +399,14 @@ class LibraryBrowseViewModelTest {
             val total = totals.getOrDefault(FakeSection.SONGS, 0)
             return BrowsePage(
                 items = indexes(offset, limit, total).map { n ->
-                    SongEntity(id = n + 1L, providerId = 1, title = "Song ${n + 1}", updatedAt = 0)
+                    SongEntity(
+                        id = n + 1L,
+                        providerId = 1,
+                        externalId = if (n in nullExternalIdIndexes) null else "e-${n + 1}",
+                        title = "Song ${n + 1}",
+                        displayArtist = "Artist",
+                        updatedAt = 0,
+                    )
                 },
                 offset = offset,
                 limit = limit,

@@ -36,7 +36,10 @@ import app.omnisonic.playback.queue.QueuePersistence
 import app.omnisonic.playback.queue.QueuePersistenceCoordinator
 import app.omnisonic.playback.queue.QueuePlayerImpl
 import app.omnisonic.playback.renderer.LocalPlaybackRenderer
+import app.omnisonic.playback.service.ControllerConnector
+import app.omnisonic.playback.service.ServiceControllerConnector
 import app.omnisonic.playback.settings.PlaybackSettingsStore
+import app.omnisonic.playback.startup.PlaybackLaunchRestore
 import app.omnisonic.playback.source.AutoplayQueueSource
 import app.omnisonic.playback.source.RadioQueueSource
 import app.omnisonic.playback.source.SearchPlayQueueSource
@@ -204,6 +207,18 @@ object PlaybackWiringModule {
     @Singleton
     @ExposedPlayer
     fun exposedPlayer(stack: PlaybackStack): Player = stack.sessionPlayer
+
+    @Provides
+    @Singleton
+    fun launchRestore(
+        controller: PlaybackController,
+        @PlaybackEngineScope scope: CoroutineScope,
+    ): PlaybackLaunchRestore = PlaybackLaunchRestore(controller, scope)
+
+    @Provides
+    @Singleton
+    fun controllerConnector(@ApplicationContext context: Context): ControllerConnector =
+        ServiceControllerConnector(context)
 
     @Provides
     @Singleton

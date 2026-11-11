@@ -69,6 +69,9 @@ Status: Phase 5 task 5, shipped 2026-11-10. Spec: `reference/docs/UI_SPEC.md` §
   re-anchors to the nearest playable row. **The queue holds the rows loaded
   so far** (first page + load-more windows), not the whole list —
   queueing beyond the window is a later-phase item. [INFERRED behavior note]
+  The same contract is reused by the Library → Songs list via
+  `LibraryBrowseViewModel.playFrom` (task 7d) and the shared
+  `feature/library/playback/QueueEntries.kt` mappers.
 - **Header (§3.5 slot order):** art/placeholder (`ImageryTokens.detailArtSize`),
   title, subtitle (album artist / playlist description), meta line
   (year + `N songs`, `N albums · N songs`, `N songs`, `N tracks` — plural

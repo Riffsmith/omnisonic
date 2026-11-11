@@ -46,6 +46,19 @@ Confidence:
   and re-applies it at the next start via `ResolvedStream.startPositionMs`.
   User seeks update the pending restore point while idle and clear it while
   playing.
+- [VERIFIED] Launch restore (task 7c): `PlaybackLaunchRestore`
+  (`playback/.../startup/`) is called from `OmnisonicApplication.onCreate`,
+  which launches a bounded (2 s) `restoreQueue()` on the engine scope — the
+  shell only uses the in-process controller, so nothing else would apply the
+  snapshot at launch. `restoreQueue()` applies a snapshot **at most once per
+  process**: `restoreAttempted` is set before the first suspension, and a call
+  made when the in-memory queue already holds entries returns `false` too (a
+  play may have landed first). Every later caller — notably the media service
+  starting after 7e's launch connect binds it — gets `false` and the live
+  queue is untouched; both restore paths (app init and service `onCreate`)
+  therefore coexist safely. Idle restore still
+  sets `playIntent = false` and requests no focus; only a play/resume command
+  starts audio and takes focus.
 - [VERIFIED] `flush()` call sites (deferral 2): the controller flushes the
   snapshot on explicit pause and on stop; the service adds stop/background
   call sites in T11.

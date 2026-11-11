@@ -48,8 +48,10 @@ interface PlaybackController : QueueCommandPort {
     val renderer: PlaybackRenderer
 
     /**
-     * Applies a persisted queue snapshot without starting playback. Must run on
-     * the engine thread because the queue machine commands the player inline.
+     * Applies a persisted queue snapshot without starting playback. At most one
+     * call per process applies a snapshot; later calls (from the media service,
+     * for instance) report `false` and leave the live queue untouched. Must run
+     * on the engine thread because the queue machine commands the player inline.
      */
     suspend fun restoreQueue(): Boolean
 

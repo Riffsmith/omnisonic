@@ -1,4 +1,4 @@
-package app.omnisonic.feature.library.detail
+package app.omnisonic.feature.library.playback
 
 import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 import app.omnisonic.core.data.db.entity.SongEntity
