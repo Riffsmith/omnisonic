@@ -40,7 +40,7 @@ lint/
 # Baseline profile (generated)
 **/baseline-prof.txt
 
-# Agent contract files (name the studied app by design; never commit)
+# Agent contract files
 AGENTS.md
 example-AGENTS.md
 progress/
