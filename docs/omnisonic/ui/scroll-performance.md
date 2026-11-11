@@ -16,8 +16,12 @@ symptom do not exist yet — every device-gated step below is `[UNKNOWN]`.
 Confidence: root-cause *candidates* are code-verified where tagged; the
 ranking is `[INFERRED]` until the discrimination protocol in §4 is run. The
 shipped costs themselves are `[VERIFIED]` against the file references.
+**[Update 2026-11-11 — the matrix ran (§4.5): H1/H2/H3 demoted as causes of
+the primary symptom; the real cause was a second gesture-ownership bug
+(`consumeSurplusInput`, Main-pass ancestor consumption) — see §5 P0 and
+`ui/gesture-contract.md`. P1–P4 stand as general cost work.]**
 
-Date: 2026-11-10
+Date: 2026-11-10 (matrix results + P0 added 2026-11-11)
 
 Links: `ui/library-browse.md` (screen/paging/cover pipeline), `ui/gesture-contract.md`
 (edge-exclusion bug record), `providers/library-sync-ux.md` (invalidation +
@@ -338,13 +342,62 @@ even looked at the touch (CPU contention or a long frame/GC). Large
 semantics). Large `traversals`/`draw` ⇒ measure/layout/graphics. All small with
 a bad feel ⇒ look at input injection/dispatch or the device's own scheduling.
 
+### 4.5 Matrix results — 2026-11-11 (fourth device session, release build)
+
+| # | Scenario | frames | janky % | high-input-latency | hi-lat/frames | Result |
+|---|---|---|---|---|---|---|
+| A | cold + Wi-Fi | 8,101 | 3.23 | 13,626 | 1.68 | drag-start swallow |
+| B | cold + airplane | 8,217 | 1.91 | 13,499 | 1.64 | **same** → not network |
+| C | cold + AOT | — | — | — | — | **device-blocked** (see below) |
+| D | warm process | 2,354 | 3.14 | 4,113 | 1.75 | **same** → not process warmth |
+| E | all pages loaded | 7,115 | 1.45 | 12,314 | 1.73 | **same** → not page loads |
+| F | hub (cold) | 3,370 | 2.79 | 4,750 | 1.41 | horizontal swipes flawless; hub vertical untestable (too little content) |
+
+- The user re-reported the swallowing in **every** scenario and **overturned
+  F4** mid-session: "the more the app runs, the less it occurs" was an
+  artifact of testing with fast continuous scrolling (fewer drag starts), not
+  process warm-up.
+- Frame tails (last-120-frames ring buffer) were healthy in all scenarios:
+  `input_handle` p50 0ms, `pre_input_wait` p50 <1ms, `traversals` p50 ~2–4ms —
+  frame production was never the problem. `framestats` is a 120-frame ring
+  buffer, so it only samples the END of a pass — capture per segment if a
+  first-pass segment is needed.
+- **Scenario C is impossible on this phone:** ColorOS rejects shell-initiated
+  dexopt for ALL packages (including `com.android.settings`) —
+  `cmd package compile -m speed -f` fails silently ("Failed to cpmpile !",
+  no dex2oat log) and `cmd package bg-dexopt-job` returns "Failure". JIT
+  isolation stays `[UNKNOWN device]` on this hardware.
+- The decisive data was the user's refined symptom: **every new touch
+  sequence can be swallowed for a random number of tries (even after idle
+  waiting); an established drag/fling is smooth; a drag started
+  simultaneously with navigation works perfectly.** That is a gesture
+  ownership race, not CPU contention — see §5 P0.
+
 ## 5. Fix plan
 
 Execute in order, re-running the §4 matrix after each step. Do not bundle all
 of P1–P4 into one unmeasured change; the point is to know which one bought the
 fix.
 
-### P1 — Cover pipeline (mostly `:app`, small `:feature-library`)
+**Status after the 2026-11-11 matrix: the §4.3 decision table's last row
+("A smooth? NO — intermittent (gesture or sync)") was the live one. The
+primary fix turned out to be P0 below — a second gesture-ownership bug — which
+shipped the same day and was device-verified. P1–P4 remain real costs and the
+follow-up work queue, re-ranked; P1.4 is dropped (A was not network-bound).**
+
+### P0 — Drag-start swallowing — LANDED 2026-11-11 (same session)
+
+**Root cause:** `consumeSurplusInput` on the NavHost layer (task 2a) consumed
+every move on the Main pass; `detectDragGestures` (which backs every
+`scrollable` in the pinned Compose 1.7.4) re-checks the same event on
+`PointerEventPass.Final` and cancels when anything consumed it — an ancestor's
+Main-pass consumption therefore cancels every child drag start whose per-event
+delta stays under touch slop. Full mechanism + fix + tests: `ui/gesture-contract.md`
+§"Second bug record". The fix (inert `inputBarrier()` + pager
+`userScrollEnabled` gating) was verified on the device the same session:
+slow drag starts work on Albums/Songs; 9,662 frames, 2.50% janky post-fix.
+
+### P1 — Cover pipeline (mostly `:app`, small `:feature-library`) — general cost work, demoted
 
 **P1.1 Per-surface crossfade, off in lists.** Remove the global
 `crossfade(true)` from `buildImageLoader`. Keep the art fade where it is a
@@ -396,13 +449,17 @@ Tests: a plain/Robolectric test that one cover fetch performs exactly one
 provider lookup and zero `selectAll()` calls (fake registry counter), plus the
 existing cache-identity test.
 
-**P1.4 (optional, only if A is network-bound) warm the cover cache after a
-sync.** Enqueue low-priority `ImageRequest`s for the first page of each section
-(60 items) when the sync reaches `DONE`, with `memoryCachePolicy(DISABLED)` so
-only the disk cache is warmed. Cap it (e.g. 4 concurrent, cancel on user
-scroll) — this must never compete with an active scroll.
+**P1.4 (dropped 2026-11-11)** — post-sync disk-cache warm: the §4.5 matrix
+showed A ≈ B (airplane mode), so the network was never the cost. Not pursued.
 
 ### P2 — Paging + invalidation (`:feature-library`, `:core-data`)
+
+**Re-ranked after the matrix:** H3 is not the drag-start cause, but it is the
+best explanation for the **fresh-install-only** mid-list stall pattern
+("scrolls, stucks at a specific part, scrolls again, stucks, then smooth at
+the end" — the page-boundary shape) and remains a real 10k-library scaling
+defect. Keep P2.1/P2.3 (cheap) and P2.2 (the schema-v2 sortKey migration —
+user confirmation still pending, §9.2).
 
 **P2.1 `refresh()` must never shrink the window under the user.** Options, in
 order of preference:
@@ -512,14 +569,20 @@ the naming diff.
    own judgement is the acceptance signal; record it verbatim.
 2. **Relaunch:** force-stop → relaunch → first pass of the same section must
    feel the same as the warm pass (F5 is the regression that hid behind "it
-   gets better with time").
+   gets better with time"). **[Updated 2026-11-11: F4/F5 were artifacts of
+   fast-scroll testing — the real invariant is "drag starts always respond",
+   now covered by P0. Keep this gate as a smoke check after future changes.]**
 3. **After a fresh sync:** the first pass while/after the initial sync must not
    be worse than the steady state (P2.3).
-4. **`dumpsys gfxinfo`:** `Number High input latency` near zero for a
-   continuous scroll window (the 4d baseline was 17,585); janky frames must not
-   regress above ~2%.
-5. **`framestats`:** `input_queue` p95 under one vsync (16.7 ms) and no frame
-   over ~50 ms in the first pass.
+4. **`dumpsys gfxinfo` — recalibrated 2026-11-11:** `Number High input latency`
+   is **NOT a usable pass/fail gate on this device**. It stayed ~1.5–1.75×
+   frame count in every scenario including the fixed, smooth session: the
+   60Hz ColorOS device completes steady-state frames in ~19.9ms, missing the
+   16.7ms deadline by presentation cadence alone. Accept instead: subjective
+   feel (primary) + janky frames % (must stay ≤ ~3%) + `framestats` tails.
+5. **`framestats`:** `input_handle`/`pre_input_wait` p95 under one vsync and
+   no frame over ~50ms in a pass segment (mind the 120-frame ring buffer —
+   capture right after the segment of interest).
 6. If P3.2 lands: `frameOverrunMs` p95 ≤ 0 and p99 within one frame on the
    scroll benchmark, run three times, cold each time.
 

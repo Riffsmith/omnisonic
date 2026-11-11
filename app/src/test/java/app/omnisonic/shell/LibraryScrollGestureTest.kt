@@ -36,12 +36,24 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Scroll-ownership regression (`pagerEdgeExclusion`, task 4d): a vertical drag
- * through the real pointer dispatch pipeline must reach the list underneath the
- * tab pager and the NavHost overlay. The shipped modifier consumed every
- * vertical drag on the Initial pass, so only
- * `SemanticsActions.ScrollBy`/`performScrollTo` (which bypass the pointer
- * pipeline) kept working — hence the pure-rule tests never caught it.
+ * Scroll-ownership regressions through the real pointer dispatch pipeline.
+ *
+ * Task 4d: `pagerEdgeExclusion` consumed every vertical drag on the Initial
+ * pass, so only `SemanticsActions.ScrollBy`/`performScrollTo` (which bypass
+ * the pointer pipeline) kept working — hence the pure-rule tests never caught
+ * it. The `swipe()` helper below crosses touch slop on its first move event,
+ * which is why the 4d tests stayed green while the device still swallowed
+ * slow drag starts (see the Main-pass bug below).
+ *
+ * Task 4e: an ancestor consuming moves on the Main pass (the shell's
+ * surplus-input absorber while a non-tab destination is on top) poisons the
+ * Final-pass consumption re-check in `detectDragGestures`
+ * (`awaitTouchSlopOrCancellation` re-reads the same event on Final and
+ * cancels when anything consumed it). Slow drag starts — per-event deltas
+ * under touch slop, the normal human touch — were cancelled before slop
+ * could be crossed, while fast flicks and in-flight gestures (modifier
+ * attached mid-gesture) still won. The slow-drag tests inject that real
+ * event shape; `swipe()` cannot express it.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
@@ -97,6 +109,21 @@ class LibraryScrollGestureTest {
         composeRule.waitForIdle()
     }
 
+    /**
+     * A drag whose every move event stays under touch slop until the
+     * cumulative distance crosses it — the event shape of a slow human drag
+     * start. `swipe()` above splits into ~10 large steps, so it crosses slop
+     * on the first move and can never reproduce the slow-start bug class.
+     */
+    private fun slowDragUpOnContent() {
+        composeRule.onRoot().performTouchInput {
+            down(center)
+            repeat(40) { moveBy(Offset(0f, -3f)) }
+            up()
+        }
+        composeRule.waitForIdle()
+    }
+
     @Test
     fun verticalDragScrollsTheLibraryHub() {
         // One column makes the five hub entries taller than the viewport.
@@ -127,6 +154,41 @@ class LibraryScrollGestureTest {
         assertThat(before.all { it == 0f }).isTrue()
 
         dragUpOnContent()
+
+        assertThat(verticalScrollOffsets().any { it > 0f }).isTrue()
+    }
+
+    @Test
+    fun slowVerticalDragStartsAScrollOnTheLibraryHub() {
+        // Control for the section test below: on a tab page no ancestor
+        // absorbs input, so a slow drag start must always scroll.
+        setShell(
+            tokens = DefaultStyleTokens.copy(
+                layout = DefaultStyleTokens.layout.copy(gridColumnsPortrait = 1),
+            ),
+        )
+        composeRule.waitForIdle()
+
+        slowDragUpOnContent()
+
+        assertThat(verticalScrollOffsets().any { it > 0f }).isTrue()
+    }
+
+    @Test
+    fun slowVerticalDragStartsAScrollOnASectionScreen() {
+        // The device bug (task 4e): the NavHost-layer input absorber consumed
+        // moves on the Main pass, so the grid's slop detector saw its Final
+        // re-check consumed and cancelled the drag before slop was crossed.
+        val nav = setShell(browseViewModel = LibraryBrowseViewModel(CountingBrowseSource(albumsPerPage = 60)))
+        composeRule.onNodeWithText("Albums").performClick()
+        composeRule.waitForIdle()
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.SECTION)
+        composeRule.onNodeWithText("Album 1").assertExists()
+        val before = verticalScrollOffsets()
+        assertThat(before).isNotEmpty()
+        assertThat(before.all { it == 0f }).isTrue()
+
+        slowDragUpOnContent()
 
         assertThat(verticalScrollOffsets().any { it > 0f }).isTrue()
     }

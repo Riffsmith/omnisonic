@@ -2,8 +2,6 @@ package app.omnisonic.shell
 
 import android.content.res.Configuration
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,11 +28,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.pager.PagerState
@@ -47,7 +44,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import app.omnisonic.BuildConfig
 import app.omnisonic.R
 import app.omnisonic.feature.library.browse.LibraryBrowseViewModel
 import app.omnisonic.feature.library.browse.LibrarySection
@@ -238,8 +234,11 @@ fun OmnisonicShell(
  * Tab screens live in the pager; the NavHost hosts everything else. The two
  * layers swap z-order instead of composition so both stay alive: while a
  * non-tab route is on top the NavHost draws an opaque background (hiding the
- * pager) and absorbs whatever input its content did not, so no tap or swipe
- * bleeds through to the hidden tab pages.
+ * pager) and its [inputBarrier] keeps the hidden pager out of the hit path.
+ * The barrier never consumes: a Main-pass consumption on this ancestor
+ * poisons every child scrollable's Final-pass consumption re-check and
+ * cancels slow drag starts (`ui/gesture-contract.md`, task 4e bug record),
+ * and the pager's own scrolling is disabled for the duration anyway.
  */
 @Composable
 private fun ShellContentArea(
@@ -271,12 +270,12 @@ private fun ShellContentArea(
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 0f else 1f)
                 .background(if (showingTabs) Color.Transparent else MaterialTheme.colorScheme.background)
-                .then(if (showingTabs) Modifier else Modifier.consumeSurplusInput()),
+                .then(if (showingTabs) Modifier else Modifier.inputBarrier()),
         )
         MainTabsPager(
             tabs = state.tabs,
             state = pagerState,
-            swipeEnabled = swipeEnabled,
+            swipeEnabled = swipeEnabled && showingTabs,
             hasProvider = state.hasProvider,
             settingsViewModel = settingsViewModel,
             syncManagerViewModel = syncManagerViewModel,
@@ -291,20 +290,13 @@ private fun ShellContentArea(
 }
 
 /**
- * Absorbs every gesture its content did not consume, in the main pass after
- * the destination content had its chance — keeps the hidden pager unreachable
- * while a non-tab destination is on top.
+ * Hit-path barrier for the destination layer. The pointer-input node alone
+ * keeps every touch inside the NavHost bounds from falling through to the
+ * hidden pager layer behind it (a direct hit on the top sibling stops the
+ * sibling hit test); the lambda stays empty because consuming here would
+ * cancel child gesture detection — see [ShellContentArea].
  */
-private fun Modifier.consumeSurplusInput(): Modifier = pointerInput(Unit) {
-    awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Main)
-            event.changes.forEach { it.consume() }
-            if (event.changes.none { it.pressed }) break
-        }
-    }
-}
+private fun Modifier.inputBarrier(): Modifier = pointerInput(Unit) { }
 
 @Composable
 private fun ShellNavRail(

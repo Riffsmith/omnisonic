@@ -215,6 +215,16 @@ compilation → paging/invalidation churn → composition micro-costs), the
 measurement protocol, and the acceptance gates live in
 `ui/scroll-performance.md`** — that document is the authoritative record for
 this symptom and the Phase 5 task 4e playbook; this section only pins the
-symptom and the device-session facts. Nothing is marked fixed for this one:
-all mechanisms are [INFERRED] until the §4 discrimination matrix runs on the
-device.
+symptom and the device-session facts.
+
+**[Corrected 2026-11-11 — the §4 matrix ran and the user refined the
+symptom.]** F1/F3/F4/F5 were artifacts of one underlying fact: **every new
+touch sequence could be swallowed for a random number of tries** (even after
+idle waiting), while an established drag/fling was smooth. Fast continuous
+scrolling (the original symptom reports) hides it — hence "gets better over
+time" (F4) and "fine after reaching the end" (F3). Root cause =
+`consumeSurplusInput` Main-pass ancestor consumption (task 4e; full mechanism
+in `ui/gesture-contract.md` §"Second bug record"); fixed and device-verified
+2026-11-11. What remains open for a **fresh install** is a second, distinct
+pattern — stalls at specific mid-list points (page boundaries) — which stays
+with `ui/scroll-performance.md` §5 P2 (paging/invalidation).
