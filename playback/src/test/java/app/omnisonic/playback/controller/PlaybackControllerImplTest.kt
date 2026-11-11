@@ -561,6 +561,26 @@ class PlaybackControllerImplTest {
     }
 
     @Test
+    fun `queue edits remove, move and clear through the command port`() = runTest {
+        val f = newFixture()
+        f.controller.play(listOf(entry(1), entry(2), entry(3)))
+        runCurrent()
+
+        f.controller.removeFromQueue(2)
+        runCurrent()
+        assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(1L, 3L).inOrder()
+
+        f.controller.moveInQueue(3, 0)
+        runCurrent()
+        assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(3L, 1L).inOrder()
+
+        f.controller.clearQueueExceptCurrent()
+        runCurrent()
+        val state = f.queue.state.value
+        assertThat(state.entries.map { it.queueItemId }).containsExactly(state.currentEntry?.queueItemId)
+    }
+
+    @Test
     fun `ticker crossing the scrobble threshold emits one point per playthrough`() = runTest {
         val f = newFixture()
         f.controller.play(listOf(entry(1, durationMs = 200_000)))

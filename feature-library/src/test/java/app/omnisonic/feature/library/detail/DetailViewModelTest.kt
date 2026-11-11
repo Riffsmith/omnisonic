@@ -463,5 +463,9 @@ class DetailViewModelTest {
             shuffleCalls.add(enabled)
             callOrder.add("shuffle")
         }
+
+        override fun removeFromQueue(queueItemId: Long) = Unit
+        override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) = Unit
+        override fun clearQueueExceptCurrent() = Unit
     }
 }

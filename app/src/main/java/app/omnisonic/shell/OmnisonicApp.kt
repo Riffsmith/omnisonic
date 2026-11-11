@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -44,15 +43,18 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import app.omnisonic.R
 import app.omnisonic.feature.library.browse.LibraryBrowseViewModel
 import app.omnisonic.feature.library.browse.LibrarySection
 import app.omnisonic.feature.library.detail.DetailViewModel
+import app.omnisonic.feature.library.nowplaying.NowPlayingViewModel
+import app.omnisonic.feature.library.queue.QueueViewModel
 import app.omnisonic.feature.library.ui.AlbumDetailRoute
 import app.omnisonic.feature.library.ui.ArtistDetailRoute
 import app.omnisonic.feature.library.ui.GenreDetailRoute
 import app.omnisonic.feature.library.ui.LibrarySectionRoute
+import app.omnisonic.feature.library.ui.NowPlayingRoute
 import app.omnisonic.feature.library.ui.PlaylistDetailRoute
+import app.omnisonic.feature.library.ui.QueueRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupViewModel
 import app.omnisonic.feature.settings.shell.MainTab
@@ -370,6 +372,8 @@ internal fun ShellNavHost(
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
     detailViewModelProvider: @Composable () -> DetailViewModel = { hiltViewModel() },
+    nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel = { hiltViewModel() },
+    queueViewModelProvider: @Composable () -> QueueViewModel = { hiltViewModel() },
     // Destination-scoped on purpose: the step resolves the provider row in init,
     // so it must be created when the route opens, never at app launch.
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
@@ -484,10 +488,19 @@ internal fun ShellNavHost(
             )
         }
         composable(ShellRoutes.NOW_PLAYING) {
-            PlaceholderPane(stringResource(R.string.placeholder_screen_body))
+            NowPlayingRoute(
+                viewModel = nowPlayingViewModelProvider(),
+                onCollapse = { navController.popBackStack() },
+                onOpenQueue = { navController.navigateTo(ShellRoutes.QUEUE) },
+                onOpenLibrary = { navController.navigateTo(ShellRoutes.LIBRARY) },
+            )
         }
         composable(ShellRoutes.QUEUE) {
-            PlaceholderPane(stringResource(R.string.placeholder_screen_body))
+            QueueRoute(
+                viewModel = queueViewModelProvider(),
+                onBack = { navController.popBackStack() },
+                onOpenLibrary = { navController.navigateTo(ShellRoutes.LIBRARY) },
+            )
         }
     }
 }

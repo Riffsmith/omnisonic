@@ -20,6 +20,15 @@ interface QueueCommandPort {
     fun setRepeatMode(mode: RepeatMode)
     fun setShuffleEnabled(enabled: Boolean)
 
+    /** Removes one queue entry; removing the playing entry advances playback. */
+    fun removeFromQueue(queueItemId: Long)
+
+    /** Reorders one queue entry to [toEntriesIndex] in the stable entries list. */
+    fun moveInQueue(queueItemId: Long, toEntriesIndex: Int)
+
+    /** Drops every entry except the current one ("clear remaining" on the queue screen). */
+    fun clearQueueExceptCurrent()
+
     /**
      * Transport play/pause requested through the exposed player (session,
      * media button, lock screen). Returns true when the port handled the

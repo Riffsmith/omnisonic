@@ -37,4 +37,31 @@
         <item quantity="one">%d track</item>
         <item quantity="other">%d tracks</item>
     </plurals>
+
+    <string name="now_playing_collapse">Collapse player</string>
+    <string name="now_playing_play_pause">Play or pause</string>
+    <string name="now_playing_previous">Previous</string>
+    <string name="now_playing_next">Next</string>
+    <string name="now_playing_queue">Queue</string>
+    <string name="now_playing_favorite">Favorite</string>
+    <string name="now_playing_shuffle">Shuffle</string>
+    <string name="now_playing_repeat">Repeat</string>
+    <string name="now_playing_repeat_one">Repeat one</string>
+    <string name="now_playing_empty_title">Nothing playing yet</string>
+    <string name="now_playing_empty_body">Pick something from your library and it will start right here.</string>
+    <string name="now_playing_open_library">Open library</string>
+    <string name="now_playing_seek">Seek</string>
+
+    <string name="queue_title">Queue</string>
+    <string name="queue_playing_of">Playing %1$d of %2$d</string>
+    <string name="queue_clear_remaining">Clear remaining</string>
+    <string name="queue_current_marker">Now playing</string>
+    <string name="queue_remove">Remove %1$s</string>
+    <string name="queue_move_up">Move %1$s up</string>
+    <string name="queue_move_down">Move %1$s down</string>
+    <string name="queue_row_actions">More options for %1$s</string>
+    <string name="queue_empty_title">Nothing playing yet</string>
+    <string name="queue_empty_body">Start something from your library and it will line up here.</string>
+    <string name="queue_open_library">Open library</string>
+    <string name="queue_back">Go back</string>
 </resources>

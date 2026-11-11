@@ -14,6 +14,9 @@ class TestQueuePort(startState: QueueState = QueueState()) : QueueCommandPort {
     val jumpCalls = mutableListOf<Int>()
     val repeatCalls = mutableListOf<RepeatMode>()
     val shuffleCalls = mutableListOf<Boolean>()
+    val removedCalls = mutableListOf<Long>()
+    val moveCalls = mutableListOf<Pair<Long, Int>>()
+    val clearExceptCurrentCalls = mutableListOf<Unit>()
 
     override fun skipNext() {
         skipNextCalls += true
@@ -33,5 +36,17 @@ class TestQueuePort(startState: QueueState = QueueState()) : QueueCommandPort {
 
     override fun setShuffleEnabled(enabled: Boolean) {
         shuffleCalls += enabled
+    }
+
+    override fun removeFromQueue(queueItemId: Long) {
+        removedCalls += queueItemId
+    }
+
+    override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) {
+        moveCalls += queueItemId to toEntriesIndex
+    }
+
+    override fun clearQueueExceptCurrent() {
+        clearExceptCurrentCalls += Unit
     }
 }

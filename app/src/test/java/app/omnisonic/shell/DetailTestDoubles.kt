@@ -9,6 +9,8 @@ import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.feature.library.detail.DetailSource
 import app.omnisonic.feature.library.detail.DetailViewModel
+import app.omnisonic.feature.library.nowplaying.NowPlayingViewModel
+import app.omnisonic.feature.library.queue.QueueViewModel
 import app.omnisonic.playback.api.controller.PlaybackController
 import app.omnisonic.playback.api.controller.PlayerCoreState
 import app.omnisonic.playback.api.events.PlaybackEvent
@@ -92,8 +94,17 @@ internal class NoopPlaybackController : PlaybackController {
     override fun jumpToOrderIndex(orderIndex: Int) = Unit
     override fun setRepeatMode(mode: RepeatMode) = Unit
     override fun setShuffleEnabled(enabled: Boolean) = Unit
+    override fun removeFromQueue(queueItemId: Long) = Unit
+    override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) = Unit
+    override fun clearQueueExceptCurrent() = Unit
     override fun onPlayWhenReady(playWhenReady: Boolean): Boolean = false
 }
 
 internal fun testDetailViewModel(): DetailViewModel =
     DetailViewModel(EmptyDetailSource(), NoopPlaybackController())
+
+internal fun testNowPlayingViewModel(): NowPlayingViewModel =
+    NowPlayingViewModel(NoopPlaybackController())
+
+internal fun testQueueViewModel(): QueueViewModel =
+    QueueViewModel(NoopPlaybackController())

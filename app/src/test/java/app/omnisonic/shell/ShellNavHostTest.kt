@@ -84,6 +84,8 @@ class ShellNavHostTest {
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },
                     detailViewModelProvider = { testDetailViewModel() },
+                    nowPlayingViewModelProvider = { testNowPlayingViewModel() },
+                    queueViewModelProvider = { testQueueViewModel() },
                     modifier = Modifier,
                 )
             }

@@ -235,6 +235,21 @@ class PlaybackControllerImpl(
         queue.setShuffleEnabled(enabled)
     }
 
+    override fun removeFromQueue(queueItemId: Long) {
+        if (released) return
+        queue.removeEntry(queueItemId)
+    }
+
+    override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) {
+        if (released) return
+        queue.moveEntry(queueItemId, toEntriesIndex)
+    }
+
+    override fun clearQueueExceptCurrent() {
+        if (released) return
+        queue.clearQueue(keepCurrent = true)
+    }
+
     override fun onPlayWhenReady(playWhenReady: Boolean): Boolean {
         if (released) return true
         if (playWhenReady) resume() else pause()
