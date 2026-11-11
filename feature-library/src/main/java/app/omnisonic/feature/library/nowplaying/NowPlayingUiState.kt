@@ -38,14 +38,7 @@ data class NowPlayingUiState(
         fun from(player: PlayerCoreState, queue: QueueState): NowPlayingUiState {
             val current = player.current ?: queue.currentEntry
             return NowPlayingUiState(
-                entry = current?.let { entry ->
-                    NowPlayingEntry(
-                        queueItemId = entry.queueItemId,
-                        title = entry.title,
-                        artistName = entry.artistName,
-                        cover = entry.coverImageId?.let { CoverImageKey(entry.providerId, it) },
-                    )
-                },
+                entry = resolveNowPlayingEntry(player, queue),
                 isPlaying = player.isPlaying,
                 positionMs = player.positionMs,
                 durationMs = player.durationMs ?: current?.durationMs,
@@ -54,4 +47,22 @@ data class NowPlayingUiState(
             )
         }
     }
+}
+
+/**
+ * The queue pointer survives a stopped/ended engine, so the current song is
+ * read from the player first and the queue second. Shared by every playback
+ * surface that shows the playing item (now-playing, mini-player).
+ */
+internal fun resolveNowPlayingEntry(
+    player: PlayerCoreState,
+    queue: QueueState,
+): NowPlayingEntry? {
+    val current = player.current ?: queue.currentEntry ?: return null
+    return NowPlayingEntry(
+        queueItemId = current.queueItemId,
+        title = current.title,
+        artistName = current.artistName,
+        cover = current.coverImageId?.let { CoverImageKey(current.providerId, it) },
+    )
 }

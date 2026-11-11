@@ -46,12 +46,15 @@ import androidx.navigation.navArgument
 import app.omnisonic.feature.library.browse.LibraryBrowseViewModel
 import app.omnisonic.feature.library.browse.LibrarySection
 import app.omnisonic.feature.library.detail.DetailViewModel
+import app.omnisonic.feature.library.miniplayer.MiniPlayerUiState
+import app.omnisonic.feature.library.miniplayer.MiniPlayerViewModel
 import app.omnisonic.feature.library.nowplaying.NowPlayingViewModel
 import app.omnisonic.feature.library.queue.QueueViewModel
 import app.omnisonic.feature.library.ui.AlbumDetailRoute
 import app.omnisonic.feature.library.ui.ArtistDetailRoute
 import app.omnisonic.feature.library.ui.GenreDetailRoute
 import app.omnisonic.feature.library.ui.LibrarySectionRoute
+import app.omnisonic.feature.library.ui.MiniPlayerBar
 import app.omnisonic.feature.library.ui.NowPlayingRoute
 import app.omnisonic.feature.library.ui.PlaylistDetailRoute
 import app.omnisonic.feature.library.ui.QueueRoute
@@ -69,6 +72,7 @@ import app.omnisonic.style.NavigationLabelMode
 import app.omnisonic.style.NavigationLayout
 import app.omnisonic.style.OmnisonicTheme
 import app.omnisonic.style.TabSwipeMode
+import app.omnisonic.style.rememberSwipeZoneRegistry
 import kotlinx.coroutines.launch
 
 @Composable
@@ -76,8 +80,10 @@ fun OmnisonicApp(
     viewModel: ShellViewModel = hiltViewModel(),
     providerSetupViewModel: ProviderSetupViewModel = hiltViewModel(),
     syncManagerViewModel: LibrarySyncManagerViewModel = hiltViewModel(),
+    miniPlayerViewModel: MiniPlayerViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val miniPlayer by miniPlayerViewModel.state.collectAsStateWithLifecycle()
     OmnisonicTheme {
         val shell = state
         if (shell == null) {
@@ -92,6 +98,9 @@ fun OmnisonicApp(
                 providerSetupViewModel = providerSetupViewModel,
                 browseViewModel = hiltViewModel(),
                 syncManagerViewModel = syncManagerViewModel,
+                miniPlayerState = miniPlayer,
+                onMiniPlayerTogglePlayPause = miniPlayerViewModel::togglePlayPause,
+                onMiniPlayerNext = miniPlayerViewModel::next,
             )
         }
     }
@@ -112,8 +121,14 @@ fun OmnisonicShell(
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
+    miniPlayerState: MiniPlayerUiState = MiniPlayerUiState(),
+    onMiniPlayerTogglePlayPause: () -> Unit = {},
+    onMiniPlayerNext: () -> Unit = {},
     navController: NavHostController? = null,
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
+    detailViewModelProvider: @Composable () -> DetailViewModel = { hiltViewModel() },
+    nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel = { hiltViewModel() },
+    queueViewModelProvider: @Composable () -> QueueViewModel = { hiltViewModel() },
 ) {
     val controller = navController ?: rememberNavController()
     val backStackEntry by controller.currentBackStackEntryAsState()
@@ -177,6 +192,22 @@ fun OmnisonicShell(
         }
     }
 
+    val swipeZoneRegistry = rememberSwipeZoneRegistry()
+    val currentRoute = backStackEntry?.destination?.route ?: state.startRoute
+    val showMiniPlayer = miniPlayerState.isVisible && currentRoute != ShellRoutes.NOW_PLAYING
+    val miniPlayer: @Composable (Modifier) -> Unit = { miniModifier ->
+        if (showMiniPlayer) {
+            MiniPlayerBar(
+                state = miniPlayerState,
+                swipeZoneRegistry = swipeZoneRegistry,
+                onTogglePlayPause = onMiniPlayerTogglePlayPause,
+                onNext = onMiniPlayerNext,
+                onExpand = { controller.navigateTo(ShellRoutes.NOW_PLAYING) },
+                modifier = miniModifier,
+            )
+        }
+    }
+
     if (isLandscape && navLayout == NavigationLayout.RAIL) {
         Row(modifier = Modifier.fillMaxSize()) {
             ShellNavRail(
@@ -185,22 +216,28 @@ fun OmnisonicShell(
                 labelMode = labelMode,
                 onSelect = onTabTapped,
             )
-            ShellContentArea(
-                state = state,
-                pagerState = pagerState,
-                swipeEnabled = swipeEnabled,
-                showingTabs = showingTabs,
-                navController = controller,
-                settingsViewModel = settingsViewModel,
-                providerSetupViewModel = providerSetupViewModel,
-                browseViewModel = browseViewModel,
-                syncStepViewModelProvider = syncStepViewModelProvider,
-                syncManagerViewModel = syncManagerViewModel,
-                onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
-                onTabTapped = onTabTapped,
-                onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
-                modifier = Modifier.weight(1f),
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                ShellContentArea(
+                    state = state,
+                    pagerState = pagerState,
+                    swipeEnabled = swipeEnabled,
+                    showingTabs = showingTabs,
+                    navController = controller,
+                    settingsViewModel = settingsViewModel,
+                    providerSetupViewModel = providerSetupViewModel,
+                    browseViewModel = browseViewModel,
+                    syncStepViewModelProvider = syncStepViewModelProvider,
+                    syncManagerViewModel = syncManagerViewModel,
+                    detailViewModelProvider = detailViewModelProvider,
+                    nowPlayingViewModelProvider = nowPlayingViewModelProvider,
+                    queueViewModelProvider = queueViewModelProvider,
+                    onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
+                    onTabTapped = onTabTapped,
+                    onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
+                    modifier = Modifier.weight(1f),
+                )
+                miniPlayer(Modifier)
+            }
         }
     } else {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -215,11 +252,15 @@ fun OmnisonicShell(
                 browseViewModel = browseViewModel,
                 syncStepViewModelProvider = syncStepViewModelProvider,
                 syncManagerViewModel = syncManagerViewModel,
+                detailViewModelProvider = detailViewModelProvider,
+                nowPlayingViewModelProvider = nowPlayingViewModelProvider,
+                queueViewModelProvider = queueViewModelProvider,
                 onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                 onTabTapped = onTabTapped,
                 onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
                 modifier = Modifier.weight(1f),
             )
+            miniPlayer(Modifier)
             if (navLayout == NavigationLayout.BOTTOM_BAR) {
                 ShellBottomBar(
                     tabs = state.tabs,
@@ -254,6 +295,9 @@ private fun ShellContentArea(
     browseViewModel: LibraryBrowseViewModel,
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
+    detailViewModelProvider: @Composable () -> DetailViewModel,
+    nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel,
+    queueViewModelProvider: @Composable () -> QueueViewModel,
     onOpenSetup: () -> Unit,
     onTabTapped: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
@@ -268,6 +312,9 @@ private fun ShellContentArea(
             providerSetupViewModel = providerSetupViewModel,
             browseViewModel = browseViewModel,
             syncStepViewModelProvider = syncStepViewModelProvider,
+            detailViewModelProvider = detailViewModelProvider,
+            nowPlayingViewModelProvider = nowPlayingViewModelProvider,
+            queueViewModelProvider = queueViewModelProvider,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 0f else 1f)
