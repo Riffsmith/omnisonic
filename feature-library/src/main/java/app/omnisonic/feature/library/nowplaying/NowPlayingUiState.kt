@@ -27,12 +27,7 @@ data class NowPlayingUiState(
 ) {
     val isEmpty: Boolean get() = entry == null
 
-    val progress: Float
-        get() {
-            val duration = durationMs ?: return 0f
-            if (duration <= 0L) return 0f
-            return (positionMs.toFloat() / duration).coerceIn(0f, 1f)
-        }
+    val progress: Float get() = playbackProgress(positionMs, durationMs)
 
     companion object {
         fun from(player: PlayerCoreState, queue: QueueState): NowPlayingUiState {
@@ -47,6 +42,17 @@ data class NowPlayingUiState(
             )
         }
     }
+}
+
+/**
+ * Determinate playback progress in 0..1; a missing or non-positive duration
+ * reads as 0. Shared by the now-playing seek display and the mini-player
+ * hairline so the clamp semantics cannot drift apart.
+ */
+internal fun playbackProgress(positionMs: Long, durationMs: Long?): Float {
+    val duration = durationMs ?: return 0f
+    if (duration <= 0L) return 0f
+    return (positionMs.toFloat() / duration).coerceIn(0f, 1f)
 }
 
 /**

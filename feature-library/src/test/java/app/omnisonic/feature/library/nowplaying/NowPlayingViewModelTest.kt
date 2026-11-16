@@ -155,4 +155,19 @@ class NowPlayingViewModelTest {
 
         assertThat(controller.seeks).containsExactly(9_999L)
     }
+
+    @Test
+    fun `the lyrics pane starts on the cover and toggles`() {
+        val controller = FakePlaybackController()
+        val viewModel = NowPlayingViewModel(controller)
+
+        assertThat(viewModel.pane.value).isEqualTo(NowPlayingPane.COVER)
+        assertThat(viewModel.lyrics.value.isEmpty).isTrue()
+
+        viewModel.togglePane()
+        assertThat(viewModel.pane.value).isEqualTo(NowPlayingPane.LYRICS)
+
+        viewModel.togglePane()
+        assertThat(viewModel.pane.value).isEqualTo(NowPlayingPane.COVER)
+    }
 }

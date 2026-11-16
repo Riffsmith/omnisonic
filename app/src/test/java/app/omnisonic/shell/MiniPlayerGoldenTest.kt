@@ -23,7 +23,8 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Roborazzi goldens for the mini-player bar's resting states (D-14). Record
- * deliberately with `:app:recordRoborazziDebug`; plain `test` compares (R-25).
+ * deliberately with `:app:recordRoborazziDebug`; plain `test` does not verify
+ * them — use `:app:verifyRoborazziDebug` to compare (R-25).
  *
  * The "expanded transition" has no separate resting frame to capture: the
  * settle animation runs before the shell swaps the bar for the now-playing
@@ -45,6 +46,7 @@ class MiniPlayerGoldenTest {
                         state = state,
                         swipeZoneRegistry = rememberSwipeZoneRegistry(),
                         onTogglePlayPause = {},
+                        onPrevious = {},
                         onNext = {},
                         onExpand = {},
                         modifier = Modifier.align(Alignment.BottomCenter),
@@ -66,6 +68,8 @@ class MiniPlayerGoldenTest {
                     cover = null,
                 ),
                 isPlaying = true,
+                positionMs = 61_000,
+                durationMs = 200_000,
             ),
         )
 

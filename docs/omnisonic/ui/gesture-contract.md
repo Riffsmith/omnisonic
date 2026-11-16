@@ -6,9 +6,9 @@ How derived: own design for Phase 5, specified in `reference/docs/GESTURES.md` �
 
 Confidence: `[VERIFIED]` against `style/src/main/java/app/omnisonic/style/SwipeZone.kt`, `ButtonTwins.kt`, their tests (`SwipeZoneRulesTest` 22 incl. the five `edgeExclusionClaims` cases, `SwipeZoneRegistryTest` 3), the shell wiring tests (`MainTabsPagerTest` 7, `ButtonTwinAuditTest` 3, `:app`) and the 4d regression `LibraryScrollGestureTest` 3 (vertical drags through the real dispatch pipeline on the hub and a section grid + single-append footer). Gesture *feel* (spring parameters, fling thresholds on hardware) is device-gated `[UNKNOWN]`.
 
-Date: 2026-11-08
+Date: 2026-11-16
 
-Links: `ui/style-tokens.md` (`LayoutTokens.edgeExclusionDp`, `TabSwipeMode`, `MotionTokens.nowPlayingExpand`); `decisions.md` (D-13, D-14); `reference/docs/GESTURES.md` §4-5; `reference/docs/UI_SPEC.md` §1-2, §5; `.agents/plans/phase-5-tasks.md` task 2a.
+Links: `ui/style-tokens.md` (`LayoutTokens.edgeExclusionDp`, `TabSwipeMode`, `MotionTokens.nowPlayingExpand`); `ui/queue-swipe.md` (queue row swipe rules); `decisions.md` (D-13, D-14, D-26); `reference/docs/GESTURES.md` §4-5; `reference/docs/UI_SPEC.md` §1-2, §5; `.agents/plans/phase-5-tasks.md` task 2a.
 
 ---
 
@@ -34,6 +34,86 @@ The system back gesture owns the strip within `LayoutTokens.edgeExclusionDp` (de
 **[BUG RECORD — found 2026-11-11 via the §4 discrimination matrix + user symptom refinement, fixed same day]** After 4d, every NEW touch sequence on a section screen could still be swallowed for a random number of tries while established drags/flings stayed smooth — and a drag started **simultaneously with navigation** worked perfectly. Root cause: `consumeSurplusInput` on the NavHost layer (task 2a's "surplus-input absorption", active exactly while a non-tab destination is on top) consumed every move on the **Main pass**. Compose's `detectDragGestures` — which in the pinned 1.7.4 backs every `scrollable` (`DragGestureNode` delegates to it; verified against the disassembled `foundation-release.aar`) — accumulates touch slop on Main, then **re-reads the same event on `PointerEventPass.Final` and cancels when anything consumed it** (`DragGestureDetector.kt:922-928` in 1.7.4). Pass order is Initial → Main → Final, so an ancestor's Main-pass consumption is visible to the child's Final re-check of the same event: any drag whose per-event delta stays under touch slop (a slow human drag start) is cancelled before slop can be crossed. Fast flicks win (the first event crosses slop → the child consumes on Main, before the parent, and returns without the Final check); a gesture already in flight when the modifier attaches wins (the new filter misses the down, so it never arms for that gesture) — hence "simultaneous nav+scroll is flawless". The 4d regression tests missed it because `performTouchInput.swipe()` splits into ~10 large steps that cross slop on the first move.
 
 **Binding rule (extends the 4d rule to the other axis):** never consume pointer events on an **ancestor of a scrollable on the Main pass** either — the only safe consumer passes for a scrollable ancestor are the Initial pass (preempts children deliberately) or never. If the goal is only to keep a hidden layer out of the hit path, an **inert** pointer-input node is enough: a direct hit on the top sibling stops the sibling hit test, and an empty lambda cannot poison child Final-pass checks. Shipped fix: `OmnisonicApp.kt` `consumeSurplusInput` → `Modifier.inputBarrier()` (empty) + `userScrollEnabled = swipeEnabled && showingTabs` on the pager (belt-and-suspenders). Regression tests: `LibraryScrollGestureTest.slowVerticalDragStartsAScrollOnASectionScreen` (40 × 3px per-event deltas — fails on the pre-fix code) + the hub control.
+
+## Sanctioned handoff: scrollable child → sheet ancestor (2026-11-15)
+
+The two bug records above leave one case open: a drag that must start on a
+scrollable child but end up moving an ancestor 
+(the queue list pulling now-playing back down inside the player sheet). The
+contract grows here, it does not bend: **the ancestor still never consumes
+pointer events on the Main pass.** The handoff is built from nested scroll plus
+an inert observer, both on the child (`ui/player-queue-return.md`,
+`ui/player-sheet.md` §4.1):
+
+1. **`NestedScrollConnection.onPreScroll`** on the list consumes the downward
+   `UserInput` delta while the gesture is eligible and hands it to the sheet.
+   The list therefore stays pinned and Material's overscroll effect receives a
+   zero delta, so no stretch or glow leaks across the handoff.
+2. **A passive pointer observer** (`awaitEachGesture` +
+   `awaitFirstDown(requireUnconsumed = false)`, never `consume()`) latches the
+   gesture-start eligibility and reads the release velocity. No consumption on
+   the Main pass means the child's own drag detection is never poisoned.
+
+Rules that make it safe:
+
+- **Eligibility is latched at the down** — the true list top, or the unscrolled
+  reveal position (D-24), never re-evaluated mid-gesture. A fling that reaches
+  the top must not hand the rest of the drag to the ancestor, and one user
+  scroll drops the reveal-position eligibility.
+- **The release comes from the observer, not `onPreFling`:** a scrollable that
+  consumed no deltas may never fling, which would leave the sheet half-open.
+- **The ancestor's settle is bounded** to the detents the gesture may reach, so
+  one gesture cannot skip a surface. (The full-range sheet settle is app-owned
+  since D-25 — `PlayerSheetRules.settleTarget` plus the sheet's own spring — and
+  the queue path keeps the bounded `pullTarget` rule.)
+- **A leaf may consume:** the empty state has no scrollable child, so it may
+  carry a normal consuming vertical detector (same exemption as the now-playing
+  art surface and the lyrics pane). The container that holds the scrollable may
+  not.
+
+Shipped form: `QueueScreen.queueSheetHandoff` (nested scroll + observer),
+`QueueScreen.queueEmptySheetPull` (leaf), `QueuePullHandoff` (pure gesture
+lifecycle, closed at the lift), `PlayerSheetRules.dragPositionFromSwipeUpTarget`
+/ `pullTarget` (bounds). The peek drag surface is the mini-player bar itself: its SwipeZone
+drag forwards raw `dy` into the same sheet state, so "drag the bar up" and
+"drag the now-playing surface down" are one continuum with one spring.
+Tests: `:feature-library` `QueuePullHandoffTest` (10) plus the `:app`
+`MiniPlayerShellTest` return-pull cases, which drive the real pointer pipeline
+with slow per-event deltas (40 × 3 px) so an ownership regression cannot hide
+behind `swipe()`'s large steps.
+
+## Pane vs sheet ownership (2026-11-16, D-23)
+
+The now-playing art block can show the lyrics pane instead of the cover. The pane
+does not add a gesture owner: its text is a leaf, so a vertical drag the text
+cannot scroll passes through and the now-playing surface detector claims it as a
+sheet drag; once the line list overflows, the scrollable child consumes the
+delta and the surface detector yields (it breaks on `change.isConsumed`).The sheet's sibling layers (queue, mini bar) keep the rules above. No Main-pass
+consumption is introduced anywhere on the pane's ancestors.
+
+## Queue row swipe vs list scroll (2026-11-16, D-26)
+
+The queue row's right-to-left remove is a **child-owned horizontal detector**,
+not a Material `SwipeToDismissBox` (`ui/queue-swipe.md`). Ownership stays inside
+the existing rules:
+
+- The row (`QueueRowItem`'s content) carries
+  `Modifier.pointerInput { detectHorizontalDragGestures(...) }`. The detector
+  claims only after **horizontal** touch slop and consumes only after it
+  claims, so horizontal movement belongs to the row.- The `LazyColumn` still owns **vertical** scroll. A vertical drag never
+  crosses the row's horizontal slop, the detector cancels without consuming,
+  and the list's drag detection proceeds. A drag that starts horizontal stays
+  the row's; the list does not also scroll it.
+- Nothing on the row's ancestors (the list, the sheet slot, the shell) consumes
+  pointer events on any pass — the task-4e rule is unchanged. The windowed
+  return handoff (`ui/player-queue-return.md`, D-24) remains the only
+  scrollable-child → ancestor path and is vertical/orthogonal to this one.
+- The reserved start-to-end direction has no detector branch yet: the pure
+  `QueueSwipeRules.dragOffset` clamps positive travel to `0` while it is
+  disabled, so adding it later cannot change the delete path.
+- The gesture keeps its button twin (`queue-remove` on the per-row delete
+  button) and adds none: the swipe is never the only removal affordance.
+
 
 ## Tab + pager pairing (`:app`, `MainTabsPager` + `OmnisonicShell`)
 

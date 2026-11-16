@@ -56,11 +56,41 @@ class MiniPlayerViewModelTest {
     }
 
     @Test
+    fun `maps position and progress from the player ticker`() {
+        val controller = FakePlaybackController()
+        controller.player.value = PlayerCoreState(
+            current = entry(1, title = "Night Ride"),
+            isPlaying = true,
+            positionMs = 25_000L,
+            durationMs = 100_000L,
+        )
+
+        val state = MiniPlayerViewModel(controller).state.value
+
+        assertThat(state.positionMs).isEqualTo(25_000L)
+        assertThat(state.durationMs).isEqualTo(100_000L)
+        assertThat(state.progress).isEqualTo(0.25f)
+    }
+
+    @Test
+    fun `duration falls back to the queue entry and clamps past the end`() {
+        val controller = FakePlaybackController()
+        controller.player.value = PlayerCoreState(positionMs = 90_000L, durationMs = null)
+        controller.queue.value = QueueState(entries = listOf(entry(3, durationMs = 90_000L)))
+
+        val state = MiniPlayerViewModel(controller).state.value
+
+        assertThat(state.durationMs).isEqualTo(90_000L)
+        assertThat(state.progress).isEqualTo(1f)
+    }
+
+    @Test
     fun `hidden state when nothing is queued`() {
         val state = MiniPlayerViewModel(FakePlaybackController()).state.value
 
         assertThat(state.isVisible).isFalse()
         assertThat(state.entry).isNull()
+        assertThat(state.progress).isEqualTo(0f)
     }
 
     @Test
@@ -83,9 +113,11 @@ class MiniPlayerViewModelTest {
         val viewModel = MiniPlayerViewModel(controller)
 
         viewModel.togglePlayPause()
+        viewModel.previous()
         viewModel.next()
 
         assertThat(controller.playOrPauseCalls).hasSize(1)
+        assertThat(controller.previousCalls).hasSize(1)
         assertThat(controller.nextCalls).hasSize(1)
     }
 }

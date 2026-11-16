@@ -46,12 +46,13 @@ internal class EmptyDetailSource : DetailSource {
     override suspend fun playlistEntries(playlistId: Long, offset: Int, limit: Int) = BrowsePage<PlaylistEntryEntity>(emptyList(), offset, limit, false)
 }
 
-internal class NoopPlaybackController : PlaybackController {
+internal class NoopPlaybackController(
+    queue: QueueState = QueueState(),
+) : PlaybackController {
 
     private val playerStateFlow = MutableStateFlow(PlayerCoreState())
 
-    override val queueState: StateFlow<QueueState> =
-        MutableStateFlow(QueueState())
+    override val queueState: StateFlow<QueueState> = MutableStateFlow(queue)
 
     override val playerState: StateFlow<PlayerCoreState> = playerStateFlow
 
@@ -106,5 +107,18 @@ internal fun testDetailViewModel(): DetailViewModel =
 internal fun testNowPlayingViewModel(): NowPlayingViewModel =
     NowPlayingViewModel(NoopPlaybackController())
 
-internal fun testQueueViewModel(): QueueViewModel =
-    QueueViewModel(NoopPlaybackController())
+internal fun testQueueViewModel(state: QueueState = QueueState()): QueueViewModel =
+    QueueViewModel(NoopPlaybackController(state))
+
+internal fun testQueueState(count: Int, playIndex: Int): QueueState = QueueState(
+    entries = (0 until count).map { index ->
+        PlaybackQueueEntry(
+            providerId = 1,
+            externalId = "ext-$index",
+            queueItemId = index.toLong() + 1L,
+            title = "Track ${index + 1}",
+            artistName = "The Late Shift",
+        )
+    },
+    playIndex = playIndex,
+)

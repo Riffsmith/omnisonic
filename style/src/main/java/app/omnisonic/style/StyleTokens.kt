@@ -212,12 +212,15 @@ data class LayoutTokens(
     val pagePadding: Dp = 16.dp,
     val listRowMinHeight: Dp = 64.dp,
     val nowPlayingBarHeight: Dp = 64.dp,
+    val miniPlayerProgressHeight: Dp = 2.dp,
     val detailHeaderHeight: Dp = 240.dp,
     val playerArtSize: Dp = 320.dp,
     val maxContentWidth: Dp = 840.dp,
     val sectionSpacing: Dp = 24.dp,
     val edgeExclusionDp: Dp = 24.dp,
     val hubEntryAspectRatio: Float = 1.4f,
+    /** Distance that commits a slow pull from a scrollable target to the player (D-21). */
+    val sheetPullCommitDistance: Dp = 32.dp,
 ) {
     fun navigationFor(isLandscape: Boolean): NavigationLayout =
         if (isLandscape) landscapeNavigation else portraitNavigation
@@ -343,6 +346,7 @@ data class MotionTokens(
     val easingProfile: MotionEasingProfile = MotionEasingProfile.STANDARD,
     val tabTransition: MotionTween = MotionTween(durationMs = 250),
     val nowPlayingExpand: MotionSpring = MotionSpring(dampingRatio = 0.85f, stiffness = 380f),
+    val nowPlayingRoute: MotionTween = MotionTween(durationMs = 300),
     val queueReorder: MotionTween = MotionTween(durationMs = 300),
     val artCrossfade: MotionTween = MotionTween(durationMs = 200),
 )

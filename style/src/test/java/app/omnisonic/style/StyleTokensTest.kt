@@ -284,9 +284,14 @@ class StyleTokensTest {
         val motion = DefaultStyleTokens.motion
         assertThat(motion).isEqualTo(MotionTokens())
         assertThat(motion.durationScale).isEqualTo(1f)
+        assertThat(motion.nowPlayingRoute.durationMs).isEqualTo(300)
 
-        listOf(motion.tabTransition, motion.queueReorder, motion.artCrossfade)
-            .forEach { tween -> assertThat(tween.durationMs).isGreaterThan(0) }
+        listOf(
+            motion.tabTransition,
+            motion.nowPlayingRoute,
+            motion.queueReorder,
+            motion.artCrossfade,
+        ).forEach { tween -> assertThat(tween.durationMs).isGreaterThan(0) }
         assertThat(motion.nowPlayingExpand.dampingRatio).isGreaterThan(0f)
         assertThat(motion.nowPlayingExpand.stiffness).isGreaterThan(0f)
 
@@ -341,6 +346,11 @@ class StyleTokensTest {
         assertThat(configured.tabSwipeModeFor(isLandscape = true)).isEqualTo(TabSwipeMode.ENABLED)
         assertThat(configured.tabBarStyleFor(isLandscape = false)).isEqualTo(TabBarStyle.HIDDEN)
         assertThat(configured.tabBarStyleFor(isLandscape = true)).isEqualTo(TabBarStyle.VISIBLE)
+    }
+
+    @Test
+    fun miniPlayerProgressHairlineDefaultsToTwoDp() {
+        assertThat(DefaultStyleTokens.layout.miniPlayerProgressHeight).isEqualTo(2.dp)
     }
 
     @Test

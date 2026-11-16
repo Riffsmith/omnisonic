@@ -4,19 +4,29 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import app.omnisonic.feature.library.miniplayer.MiniPlayerUiState
 import app.omnisonic.feature.library.nowplaying.NowPlayingEntry
+import app.omnisonic.feature.library.player.PlayerSheetStops
 import app.omnisonic.feature.library.ui.MiniPlayerBar
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
+import app.omnisonic.playback.api.queue.QueueState
 import app.omnisonic.style.ButtonTwinAudit
 import app.omnisonic.style.GestureTwin
 import app.omnisonic.style.OmnisonicTheme
@@ -27,6 +37,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.math.abs
 
 /**
  * Mini-player bar wiring (UI_SPEC.md §3.10): the drag/expand state machine's
@@ -55,6 +66,7 @@ class MiniPlayerBarTest {
     private fun setBar(
         state: MiniPlayerUiState = playingState(),
         onTogglePlayPause: () -> Unit = {},
+        onPrevious: () -> Unit = {},
         onNext: () -> Unit = {},
         onExpand: () -> Unit = {},
     ) {
@@ -65,6 +77,7 @@ class MiniPlayerBarTest {
                         state = state,
                         swipeZoneRegistry = rememberSwipeZoneRegistry(),
                         onTogglePlayPause = onTogglePlayPause,
+                        onPrevious = onPrevious,
                         onNext = onNext,
                         onExpand = onExpand,
                     )
@@ -96,8 +109,29 @@ class MiniPlayerBarTest {
         composeRule.onNodeWithText("Night Ride").assertExists()
         composeRule.onNodeWithText("The Late Shift").assertExists()
         composeRule.onNodeWithContentDescription("Play or pause").assertExists()
+        composeRule.onNodeWithContentDescription("Previous").assertExists()
         composeRule.onNodeWithContentDescription("Next").assertExists()
         composeRule.onNodeWithContentDescription("Expand player").assertExists()
+    }
+
+    @Test
+    fun hairlineProgressComesFromState() {
+        setBar(
+            playingState().copy(positionMs = 25_000L, durationMs = 100_000L),
+        )
+
+        composeRule
+            .onNode(hasProgressBarRangeInfo(ProgressBarRangeInfo(0.25f, 0f..1f)))
+            .assertExists()
+    }
+
+    @Test
+    fun hairlineReadsZeroWithoutADuration() {
+        setBar()
+
+        composeRule
+            .onNode(hasProgressBarRangeInfo(ProgressBarRangeInfo(0f, 0f..1f)))
+            .assertExists()
     }
 
     @Test
@@ -135,12 +169,19 @@ class MiniPlayerBarTest {
     @Test
     fun transportButtonsDispatch() {
         var toggles = 0
+        var previous = 0
         var next = 0
-        setBar(onTogglePlayPause = { toggles += 1 }, onNext = { next += 1 })
+        setBar(
+            onTogglePlayPause = { toggles += 1 },
+            onPrevious = { previous += 1 },
+            onNext = { next += 1 },
+        )
 
+        composeRule.onNodeWithContentDescription("Previous").performClick()
         composeRule.onNodeWithContentDescription("Play or pause").performClick()
         composeRule.onNodeWithContentDescription("Next").performClick()
 
+        assertThat(previous).isEqualTo(1)
         assertThat(toggles).isEqualTo(1)
         assertThat(next).isEqualTo(1)
     }
@@ -173,6 +214,9 @@ class MiniPlayerShellTest {
     @get:Rule
     val composeRule = createComposeRule()
 
+    private lateinit var sheet: PlayerSheetState
+    private lateinit var backDispatcher: OnBackPressedDispatcher
+
     private fun playingState() = MiniPlayerUiState(
         entry = NowPlayingEntry(
             queueItemId = 7,
@@ -195,13 +239,19 @@ class MiniPlayerShellTest {
     private fun setShell(
         miniPlayerState: MiniPlayerUiState,
         startRoute: String = ShellRoutes.LIBRARY,
+        queueState: QueueState = QueueState(),
     ): NavHostController {
         lateinit var nav: NavHostController
         val settingsViewModel = ShellSettingsViewModel(tempShellStore("miniplayer"))
         val providerSetupViewModel = testProviderSetupViewModel()
         val stepViewModel = testLibrarySyncStepViewModel()
+        val queueViewModel = testQueueViewModel(queueState)
         composeRule.setContent {
             OmnisonicTheme {
+                backDispatcher = checkNotNull(LocalOnBackPressedDispatcherOwner.current)
+                    .onBackPressedDispatcher
+                val sheetState = rememberPlayerSheetState()
+                sheet = sheetState
                 OmnisonicShell(
                     state = shellState(startRoute),
                     settingsViewModel = settingsViewModel,
@@ -212,22 +262,14 @@ class MiniPlayerShellTest {
                     searchViewModel = testSearchViewModel(),
                     miniPlayerState = miniPlayerState,
                     navController = rememberNavController().also { nav = it },
+                    sheetState = sheetState,
                     nowPlayingViewModelProvider = { testNowPlayingViewModel() },
-                    queueViewModelProvider = { testQueueViewModel() },
+                    queueViewModelProvider = { queueViewModel },
                 )
             }
         }
         composeRule.waitForIdle()
         return nav
-    }
-
-    private fun awaitRoute(nav: NavHostController, route: String) {
-        repeat(20) {
-            composeRule.waitForIdle()
-            if (nav.currentDestination?.route == route) return
-            Thread.sleep(25)
-        }
-        assertThat(nav.currentDestination?.route).isEqualTo(route)
     }
 
     @Test
@@ -252,12 +294,429 @@ class MiniPlayerShellTest {
         composeRule.onNodeWithContentDescription("Expand player").assertDoesNotExist()
     }
 
+    /** The test doubles have no playback state, so the sheet shows its empty state. */
+    private fun sheetVisible() = composeRule.onAllNodesWithText("Nothing playing yet")
+        .fetchSemanticsNodes().isNotEmpty()
+
     @Test
-    fun expandingOpensNowPlaying() {
+    fun expandingOpensThePlayerSheetOverTheCurrentRoute() {
         val nav = setShell(playingState())
 
         composeRule.onNodeWithContentDescription("Expand player").performClick()
 
-        awaitRoute(nav, ShellRoutes.NOW_PLAYING)
+        // The sheet slides over the route instead of navigating (ui/player-sheet.md),
+        // so the route underneath stays put and is what a downward drag reveals.
+        awaitCondition { sheetVisible() }
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.LIBRARY)
+    }
+
+    /**
+     * Regression for the fast-fling bug (ui/player-sheet.md §2): one coalesced
+     * move gives the release only two velocity samples and the pre-fix tracker
+     * released at 0 px/s, so this settled back to peek. The flick travels 31%
+     * of the viewport, well past the framework's fling gate.
+     */
+    @Test
+    fun fastPartialUpwardFlingFromTheBarOpensNowPlaying() {
+        setShell(playingState())
+
+        flingOn(BAR_TITLE, dyFraction = -0.31f)
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertSheetStaysAt(PlayerSheetStops.NOW_PLAYING)
+    }
+
+    /** A slow short drag keeps the existing behaviour: it still opens. */
+    @Test
+    fun slowShortUpwardDragFromTheBarStillOpensNowPlaying() {
+        setShell(playingState())
+
+        composeRule.onNodeWithText(BAR_TITLE).performTouchInput {
+            down(center)
+            repeat(40) { moveBy(Offset(0f, -3f)) }
+            up()
+        }
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+    }
+
+    @Test
+    fun downwardFlingOnTheCollapsedBarStaysCollapsed() {
+        setShell(playingState())
+
+        flingOn(BAR_TITLE, dyFraction = 0.31f)
+
+        Thread.sleep(200)
+        composeRule.waitForIdle()
+        assertThat(sheet.position).isWithin(0.002f).of(PlayerSheetStops.PEEK)
+        assertThat(sheet.isVisible).isFalse()
+    }
+
+    @Test
+    fun fastDownwardFlingOnNowPlayingCollapses() {
+        setShell(playingState())
+        composeRule.onNodeWithContentDescription("Expand player").performClick()
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+
+        flingOn(NOW_PLAYING_BODY, dyFraction = 0.31f)
+
+        awaitSheetAt(PlayerSheetStops.PEEK)
+        assertThat(sheet.isVisible).isFalse()
+    }
+
+    @Test
+    fun fastUpwardFlingOnNowPlayingOpensTheQueue() {
+        setShell(playingState())
+        composeRule.onNodeWithContentDescription("Expand player").performClick()
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+
+        flingOn(NOW_PLAYING_BODY, dyFraction = -0.31f)
+
+        awaitSheetAt(PlayerSheetStops.SWIPE_UP_TARGET)
+        assertThat(sheet.swipeUpTargetRevealed).isTrue()
+    }
+
+    @Test
+    fun queueBackReturnsToNowPlaying() {
+        setShell(playingState())
+        composeRule.onNodeWithContentDescription("Expand player").performClick()
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        composeRule.onRoot().performTouchInput {
+            swipeUp(startY = height * 0.7f, endY = height * 0.15f, durationMillis = 120)
+        }
+        awaitSheetAt(PlayerSheetStops.SWIPE_UP_TARGET)
+
+        composeRule.onNodeWithContentDescription("Go back").performClick()
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+    }
+
+    @Test
+    fun swipingUpOnTheSheetPullsTheQueueIn() {
+        val nav = setShell(playingState())
+        composeRule.onNodeWithContentDescription("Expand player").performClick()
+        awaitCondition { sheetVisible() }
+
+        composeRule.onRoot().performTouchInput {
+            swipeUp(startY = height * 0.7f, endY = height * 0.15f, durationMillis = 120)
+        }
+
+        awaitCondition {
+            composeRule.onAllNodesWithContentDescription("Go back")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // Other than the default: the swipe-up target is a slot (ui/player-sheet.md).
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.LIBRARY)
+    }
+
+    /** A short queue fits the viewport, so its list is at the top from the start. */
+    private fun shortQueue(): QueueState = testQueueState(count = 3, playIndex = 1)
+
+    private fun longQueue(): QueueState = testQueueState(count = 60, playIndex = 30)
+
+    private fun openQueue() {
+        composeRule.onNodeWithContentDescription("Expand player").performClick()
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        composeRule.onRoot().performTouchInput {
+            swipeUp(startY = height * 0.7f, endY = height * 0.15f, durationMillis = 120)
+        }
+        awaitSheetAt(PlayerSheetStops.SWIPE_UP_TARGET)
+    }
+
+    private fun pullDownOn(
+        text: String,
+        dyPxPerStep: Float = 15f,
+        steps: Int = 60,
+        millisPerStep: Long = 0L,
+    ) {
+        composeRule.onNodeWithText(text).performTouchInput {
+            down(center)
+            repeat(steps) {
+                if (millisPerStep > 0L) advanceEventTime(millisPerStep)
+                moveBy(Offset(0f, dyPxPerStep))
+            }
+            up()
+        }
+        composeRule.waitForIdle()
+    }
+
+    private fun pressBack() {
+        composeRule.runOnUiThread { backDispatcher.onBackPressed() }
+        composeRule.waitForIdle()
+    }
+
+    @Test
+    fun swipingDownAtTheQueueTopReturnsToNowPlaying() {
+        setShell(playingState(), queueState = shortQueue())
+        openQueue()
+
+        pullDownOn(QUEUE_LAST_ROW)
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertSheetStaysAt(PlayerSheetStops.NOW_PLAYING)
+    }
+
+    /**
+     * Regression for D-21: a deliberate but slow pull reports almost no
+     * release velocity, and the pre-fix half-viewport rule snapped it back.
+     * 160 px of an 891 px viewport is well under that half, yet well past the
+     * commit distance (32 dp).
+     */
+    @Test
+    fun aSlowShortPullFromTheQueueTopReturnsToNowPlaying() {
+        setShell(playingState(), queueState = shortQueue())
+        openQueue()
+
+        pullDownOn(QUEUE_LAST_ROW, dyPxPerStep = 4f, steps = 40, millisPerStep = 100L)
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertSheetStaysAt(PlayerSheetStops.NOW_PLAYING)
+    }
+
+    /**
+     * Regression for D-24: a long queue opens with the current row second, so
+     * the true top is off-screen. The reveal position is eligible instead, and
+     * one deliberate pull returns on the first attempt.
+     */
+    @Test
+    fun aPullAtTheRevealPositionOfALongQueueReturnsOnTheFirstAttempt() {
+        setShell(playingState(), queueState = longQueue())
+        openQueue()
+        awaitCondition { rowExists(CURRENT_ROW) }
+        assertThat(sheet.position).isWithin(0.002f).of(PlayerSheetStops.SWIPE_UP_TARGET)
+
+        pullDownOn(CURRENT_ROW)
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertSheetStaysAt(PlayerSheetStops.NOW_PLAYING)
+    }
+
+    @Test
+    fun aTinySlowTwitchAtTheRevealPositionSnapsBack() {
+        setShell(playingState(), queueState = longQueue())
+        openQueue()
+        awaitCondition { rowExists(CURRENT_ROW) }
+
+        pullDownOn(CURRENT_ROW, dyPxPerStep = 1f, steps = 20)
+
+        assertSheetStaysAt(PlayerSheetStops.SWIPE_UP_TARGET)
+    }
+
+    @Test
+    fun aTinySlowTwitchAtTheQueueTopSnapsBack() {
+        setShell(playingState(), queueState = shortQueue())
+        openQueue()
+
+        pullDownOn(QUEUE_LAST_ROW, dyPxPerStep = 1f, steps = 20)
+
+        assertSheetStaysAt(PlayerSheetStops.SWIPE_UP_TARGET)
+    }
+
+    /**
+     * A pointer stream can end without the dragging surface seeing the up
+     * (system cancellation, focus loss). The overlay's gesture-end observer is
+     * the safety net: the sheet must settle instead of staying parked halfway.
+     */
+    @Test
+    fun aPullWhoseReleaseNeverArrivesStillSettles() {
+        setShell(playingState(), queueState = shortQueue())
+        openQueue()
+
+        composeRule.runOnUiThread {
+            sheet.onPointerDown()
+            sheet.dragFromSwipeUpTarget(160f)
+            sheet.onAllPointersUp(flingVelocityPx = 139f, commitDistancePx = 89f)
+        }
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertSheetStaysAt(PlayerSheetStops.NOW_PLAYING)
+    }
+
+    @Test
+    fun aLostReleaseBeforeTheCommitDistanceSnapsBack() {
+        setShell(playingState(), queueState = shortQueue())
+        openQueue()
+
+        composeRule.runOnUiThread {
+            sheet.onPointerDown()
+            sheet.dragFromSwipeUpTarget(20f)
+            sheet.onAllPointersUp(flingVelocityPx = 139f, commitDistancePx = 89f)
+        }
+
+        awaitSheetAt(PlayerSheetStops.SWIPE_UP_TARGET)
+        assertSheetStaysAt(PlayerSheetStops.SWIPE_UP_TARGET)
+    }
+
+    @Test
+    fun aCompletedPullNeverCollapsesTheSheet() {
+        setShell(playingState(), queueState = shortQueue())
+        openQueue()
+
+        // Another screen-height of downward drag after the player arrived must
+        // be swallowed instead of continuing into the collapsed detent.
+        pullDownOn(QUEUE_LAST_ROW, steps = 120)
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertThat(sheet.isVisible).isTrue()
+    }
+
+    @Test
+    fun swipingDownOnAScrolledQueueLeavesTheSheetAlone() {
+        setShell(playingState(), queueState = longQueue())
+        openQueue()
+        awaitCondition { rowExists(CURRENT_ROW) }
+        assertThat(rowExists(QUEUE_FIRST_HIDDEN)).isFalse()
+
+        // One user scroll drops the reveal-position eligibility (D-24); the
+        // jump pill then returns the list to the current row so the pull below
+        // starts exactly where it used to enrol.
+        composeRule.onRoot().performTouchInput {
+            swipeUp(startY = height * 0.8f, endY = height * 0.1f, durationMillis = 300)
+        }
+        awaitCondition { jumpPillExists() }
+        composeRule.onNodeWithContentDescription(JUMP_LABEL).performClick()
+        awaitCondition { rowExists(CURRENT_ROW) }
+
+        pullDownOn(CURRENT_ROW, dyPxPerStep = 3f, steps = 40)
+
+        assertSheetStaysAt(PlayerSheetStops.SWIPE_UP_TARGET)
+        assertThat(sheet.isVisible).isTrue()
+        // The drag scrolled the list instead: the row above arrived.
+        assertThat(
+            composeRule.onAllNodesWithText("Track 30").fetchSemanticsNodes(),
+        ).isNotEmpty()
+    }
+
+    @Test
+    fun emptyQueueSwipesDownToNowPlaying() {
+        setShell(playingState())
+        openQueue()
+
+        pullDownOn(QUEUE_EMPTY_BODY)
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertThat(sheet.isVisible).isTrue()
+    }
+
+    @Test
+    fun systemBackOnTheQueueGoesToNowPlayingThenCollapses() {
+        val nav = setShell(playingState(), queueState = shortQueue())
+        openQueue()
+
+        pressBack()
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.LIBRARY)
+
+        pressBack()
+
+        awaitSheetAt(PlayerSheetStops.PEEK)
+        assertThat(sheet.isVisible).isFalse()
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.LIBRARY)
+    }
+
+    @Test
+    fun queueOpensAtTheCurrentRow() {
+        setShell(playingState(), queueState = longQueue())
+        openQueue()
+
+        awaitCondition { rowExists(CURRENT_ROW) }
+        assertThat(rowExists(QUEUE_FIRST_HIDDEN)).isFalse()
+        assertThat(
+            composeRule.onAllNodesWithText("Track 29").fetchSemanticsNodes(),
+        ).isNotEmpty()
+    }
+
+    @Test
+    fun jumpToCurrentAfterScrolling() {
+        setShell(playingState(), queueState = longQueue())
+        openQueue()
+        awaitCondition { rowExists(CURRENT_ROW) }
+        composeRule.onRoot().performTouchInput {
+            swipeUp(startY = height * 0.8f, endY = height * 0.1f, durationMillis = 300)
+        }
+        composeRule.waitForIdle()
+
+        // The pill appears as soon as the current row stops being fully visible,
+        // which may still be a partially composed row.
+        awaitCondition { jumpPillExists() }
+
+        composeRule.onNodeWithContentDescription(JUMP_LABEL).performClick()
+
+        awaitCondition { rowExists(CURRENT_ROW) }
+        awaitCondition { !jumpPillExists() }
+    }
+
+    private fun rowExists(title: String) = composeRule.onAllNodesWithText(title)
+        .fetchSemanticsNodes().isNotEmpty()
+
+    private fun jumpPillExists() = composeRule.onAllNodesWithContentDescription(JUMP_LABEL)
+        .fetchSemanticsNodes().isNotEmpty()
+
+    @Test
+    fun swipingDownOnTheSheetRevealsTheRouteBeneath() {
+        val nav = setShell(playingState())
+        composeRule.onNodeWithContentDescription("Expand player").performClick()
+        awaitCondition { sheetVisible() }
+
+        composeRule.onRoot().performTouchInput {
+            swipeDown(startY = height * 0.2f, endY = height * 0.9f, durationMillis = 120)
+        }
+
+        awaitCondition { !sheetVisible() }
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.LIBRARY)
+    }
+
+    /**
+     * One quick move over [dyFraction] of the viewport then lift — the event
+     * shape of a fast flick that the input system may coalesce into a single
+     * batch. Negative fractions move up.
+     */
+    private fun flingOn(text: String, dyFraction: Float) {
+        val viewportPx = composeRule.onRoot().fetchSemanticsNode().size.height.toFloat()
+        composeRule.onNodeWithText(text).performTouchInput {
+            down(center)
+            advanceEventTime(16)
+            moveBy(Offset(0f, viewportPx * dyFraction))
+            advanceEventTime(16)
+            up()
+        }
+    }
+
+    private fun awaitSheetAt(target: Float) {
+        repeat(80) {
+            composeRule.waitForIdle()
+            if (abs(sheet.position - target) <= 0.002f) return
+            Thread.sleep(20)
+        }
+        assertThat(sheet.position).isWithin(0.002f).of(target)
+    }
+
+    private fun assertSheetStaysAt(target: Float) {
+        Thread.sleep(200)
+        composeRule.waitForIdle()
+        assertThat(sheet.position).isWithin(0.002f).of(target)
+    }
+
+    private fun awaitCondition(condition: () -> Boolean) {
+        repeat(40) {
+            composeRule.waitForIdle()
+            if (condition()) return
+            Thread.sleep(25)
+        }
+        assertThat(condition()).isTrue()
+    }
+
+    private companion object {
+        const val BAR_TITLE = "Night Ride"
+        // Unique to now-playing; "Nothing playing yet" is shared with the queue.
+        const val NOW_PLAYING_BODY = "Pick something from your library and it will start right here."
+        const val QUEUE_EMPTY_BODY =
+            "Start something from your library and it will line up here."
+        const val QUEUE_LAST_ROW = "Track 3"
+        const val QUEUE_FIRST_HIDDEN = "Track 1"
+        const val CURRENT_ROW = "Track 31"
+        const val JUMP_LABEL = "Jump to Track 31"
     }
 }

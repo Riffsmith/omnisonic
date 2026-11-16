@@ -6,10 +6,13 @@ import app.omnisonic.playback.api.controller.PlaybackController
 import app.omnisonic.playback.api.queue.RepeatMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 
 /**
  * Now-playing commands and state (UI_SPEC.md §3.8). Every transport action is
@@ -50,6 +53,22 @@ class NowPlayingViewModel @Inject constructor(
     fun toggleShuffle() = controller.setShuffleEnabled(!state.value.shuffleEnabled)
 
     fun cycleRepeat() = controller.setRepeatMode(nextRepeatMode(state.value.repeatMode))
+
+    /**
+     * Pane state of the player surface (D-23): survives collapse because it
+     * lives here, not in the sheet or the screen.
+     */
+    private val _pane = MutableStateFlow(NowPlayingPane.COVER)
+    val pane: StateFlow<NowPlayingPane> = _pane.asStateFlow()
+
+    private val _lyrics = MutableStateFlow(LyricsUiState())
+    val lyrics: StateFlow<LyricsUiState> = _lyrics.asStateFlow()
+
+    fun togglePane() {
+        _pane.update { current ->
+            if (current == NowPlayingPane.COVER) NowPlayingPane.LYRICS else NowPlayingPane.COVER
+        }
+    }
 }
 
 internal fun nextRepeatMode(mode: RepeatMode): RepeatMode = when (mode) {

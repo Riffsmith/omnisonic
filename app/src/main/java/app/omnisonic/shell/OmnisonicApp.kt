@@ -1,6 +1,12 @@
 package app.omnisonic.shell
 
 import android.content.res.Configuration
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +27,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -29,7 +36,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -56,6 +67,7 @@ import app.omnisonic.feature.library.ui.GenreDetailRoute
 import app.omnisonic.feature.library.ui.LibrarySectionRoute
 import app.omnisonic.feature.library.ui.MiniPlayerBar
 import app.omnisonic.feature.library.ui.NowPlayingRoute
+import app.omnisonic.feature.library.ui.PlayerSheetDrag
 import app.omnisonic.feature.library.ui.PlaylistDetailRoute
 import app.omnisonic.feature.library.ui.QueueRoute
 import app.omnisonic.feature.search.search.SearchViewModel
@@ -74,7 +86,9 @@ import app.omnisonic.style.NavigationLayout
 import app.omnisonic.style.OmnisonicTheme
 import app.omnisonic.style.TabSwipeMode
 import app.omnisonic.style.rememberSwipeZoneRegistry
+import app.omnisonic.style.toEasing
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun OmnisonicApp(
@@ -103,6 +117,7 @@ fun OmnisonicApp(
                 searchViewModel = searchViewModel,
                 miniPlayerState = miniPlayer,
                 onMiniPlayerTogglePlayPause = miniPlayerViewModel::togglePlayPause,
+                onMiniPlayerPrevious = miniPlayerViewModel::previous,
                 onMiniPlayerNext = miniPlayerViewModel::next,
             )
         }
@@ -114,8 +129,8 @@ fun OmnisonicApp(
  * NavHost keeps the §5 route table resolvable and hosts the non-tab
  * destinations. Tab taps animate the pager and move the back stack, a settled
  * swipe follows the route, and route arrivals (deep links, back pops) snap the
- * idle pager. [navController] is a test seam; production code lets the shell
- * remember its own.
+ * idle pager. [navController] and [sheetState] are test seams; production code
+ * lets the shell remember its own.
  */
 @Composable
 fun OmnisonicShell(
@@ -127,8 +142,10 @@ fun OmnisonicShell(
     searchViewModel: SearchViewModel,
     miniPlayerState: MiniPlayerUiState = MiniPlayerUiState(),
     onMiniPlayerTogglePlayPause: () -> Unit = {},
+    onMiniPlayerPrevious: () -> Unit = {},
     onMiniPlayerNext: () -> Unit = {},
     navController: NavHostController? = null,
+    sheetState: PlayerSheetState? = null,
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
     detailViewModelProvider: @Composable () -> DetailViewModel = { hiltViewModel() },
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel = { hiltViewModel() },
@@ -199,28 +216,145 @@ fun OmnisonicShell(
     val swipeZoneRegistry = rememberSwipeZoneRegistry()
     val currentRoute = backStackEntry?.destination?.route ?: state.startRoute
     val showMiniPlayer = miniPlayerState.isVisible && currentRoute != ShellRoutes.NOW_PLAYING
+
+    // The player is a shell-level sheet (ui/player-sheet.md §1): it slides with
+    // the finger over the current route instead of navigating to it, so the
+    // route underneath stays composed and is revealed by a downward drag.
+    val sheet = sheetState ?: rememberPlayerSheetState()
+    val context = LocalContext.current
+    // One fling gate for every sheet release (PlayerSheetRules.settleTarget and
+    // pullTarget): the device's own minimum fling velocity, so a detent decision
+    // does not depend on a fraction of a particular screen height.
+    val flingVelocityPx = remember(context) {
+        android.view.ViewConfiguration.get(context).scaledMinimumFlingVelocity.toFloat()
+    }
+    val sheetDrag = remember(sheet, flingVelocityPx) {
+        PlayerSheetDrag(
+            onDrag = { dy -> sheet.drag(dy) },
+            onRelease = { velocityY -> sheet.release(velocityY, flingVelocityPx) },
+        )
+    }
+    val pullCommitPx = with(LocalDensity.current) {
+        tokens.layout.sheetPullCommitDistance.toPx()
+    }
+    val swipeUpTargetDrag = remember(sheet, flingVelocityPx, pullCommitPx) {
+        PlayerSheetDrag(
+            onDrag = { dy -> sheet.dragFromSwipeUpTarget(dy) },
+            onRelease = { velocityY ->
+                sheet.releaseFromSwipeUpTarget(velocityY, flingVelocityPx, pullCommitPx)
+            },
+        )
+    }
+    // Read through derived state so the target recomposes on the reveal edge,
+    // not on every drag frame.
+    val swipeUpTargetRevealed by remember(sheet) {
+        derivedStateOf { sheet.swipeUpTargetRevealed }
+    }
+    BackHandler(enabled = sheet.isVisible) { sheet.onBack() }
+
+    val nowPlayingSheet: @Composable () -> Unit = {
+        NowPlayingRoute(
+            viewModel = nowPlayingViewModelProvider(),
+            onCollapse = { sheet.close() },
+            onOpenQueue = { sheet.openSwipeUpTarget() },
+            onOpenLibrary = {
+                sheet.close()
+                controller.navigateTo(ShellRoutes.LIBRARY)
+            },
+            sheetDrag = sheetDrag,
+        )
+    }
+    // The swipe-up target is a slot so a later phase can make it configurable
+    // (ui/player-sheet.md §4); the queue is only the default. A slot that owns
+    // scrollable content opts into the return gesture with the bounded drag.
+    val swipeUpTargetSheet: @Composable () -> Unit = {
+        QueueRoute(
+            viewModel = queueViewModelProvider(),
+            onBack = { sheet.openNowPlaying() },
+            onOpenLibrary = {
+                sheet.close()
+                controller.navigateTo(ShellRoutes.LIBRARY)
+            },
+            sheetDrag = swipeUpTargetDrag,
+            isRevealed = swipeUpTargetRevealed,
+        )
+    }
+
     val miniPlayer: @Composable (Modifier) -> Unit = { miniModifier ->
         if (showMiniPlayer) {
             MiniPlayerBar(
                 state = miniPlayerState,
                 swipeZoneRegistry = swipeZoneRegistry,
                 onTogglePlayPause = onMiniPlayerTogglePlayPause,
+                onPrevious = onMiniPlayerPrevious,
                 onNext = onMiniPlayerNext,
-                onExpand = { controller.navigateTo(ShellRoutes.NOW_PLAYING) },
+                onExpand = { sheet.openNowPlaying() },
                 modifier = miniModifier,
+                sheetDrag = sheetDrag,
+                sheetPosition = { sheet.position },
             )
         }
     }
 
-    if (isLandscape && navLayout == NavigationLayout.RAIL) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            ShellNavRail(
-                tabs = state.tabs,
-                pagerState = pagerState,
-                labelMode = labelMode,
-                onSelect = onTabTapped,
-            )
-            Column(modifier = Modifier.weight(1f)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { sheet.viewportPx = it.height.toFloat() }
+            // Gesture ownership for the sheet (D-25): the shell root sees every
+            // pointer stream, including the ones that start on the mini bar while
+            // the sheet is still off-screen. It never consumes, so child drag
+            // detection is untouched.
+            .pointerInput(sheet, flingVelocityPx, pullCommitPx) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.any { it.pressed }) {
+                            sheet.onPointerDown()
+                        } else {
+                            sheet.onAllPointersUp(flingVelocityPx, pullCommitPx)
+                        }
+                    }
+                }
+            },
+    ) {
+        if (isLandscape && navLayout == NavigationLayout.RAIL) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                ShellNavRail(
+                    tabs = state.tabs,
+                    pagerState = pagerState,
+                    labelMode = labelMode,
+                    onSelect = onTabTapped,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    ShellContentArea(
+                        state = state,
+                        pagerState = pagerState,
+                        swipeEnabled = swipeEnabled,
+                        showingTabs = showingTabs,
+                        navController = controller,
+                        settingsViewModel = settingsViewModel,
+                        providerSetupViewModel = providerSetupViewModel,
+                        browseViewModel = browseViewModel,
+                        syncStepViewModelProvider = syncStepViewModelProvider,
+                        syncManagerViewModel = syncManagerViewModel,
+                        searchViewModel = searchViewModel,
+                        detailViewModelProvider = detailViewModelProvider,
+                        nowPlayingViewModelProvider = nowPlayingViewModelProvider,
+                        queueViewModelProvider = queueViewModelProvider,
+                        onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
+                        onTabTapped = onTabTapped,
+                        onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
+                        onOpenAlbum = { controller.navigateTo(ShellRoutes.album(it)) },
+                        onOpenArtist = { controller.navigateTo(ShellRoutes.artist(it)) },
+                        onOpenGenre = { controller.navigateTo(ShellRoutes.genre(it)) },
+                        onOpenPlaylist = { controller.navigateTo(ShellRoutes.playlist(it)) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    miniPlayer(Modifier)
+                }
+            }
+        } else {
+            Column(modifier = Modifier.fillMaxSize()) {
                 ShellContentArea(
                     state = state,
                     pagerState = pagerState,
@@ -246,44 +380,21 @@ fun OmnisonicShell(
                     modifier = Modifier.weight(1f),
                 )
                 miniPlayer(Modifier)
+                if (navLayout == NavigationLayout.BOTTOM_BAR) {
+                    ShellBottomBar(
+                        tabs = state.tabs,
+                        pagerState = pagerState,
+                        labelMode = labelMode,
+                        onSelect = onTabTapped,
+                    )
+                }
             }
         }
-    } else {
-        Column(modifier = Modifier.fillMaxSize()) {
-            ShellContentArea(
-                state = state,
-                pagerState = pagerState,
-                swipeEnabled = swipeEnabled,
-                showingTabs = showingTabs,
-                navController = controller,
-                settingsViewModel = settingsViewModel,
-                providerSetupViewModel = providerSetupViewModel,
-                browseViewModel = browseViewModel,
-                syncStepViewModelProvider = syncStepViewModelProvider,
-                syncManagerViewModel = syncManagerViewModel,
-                searchViewModel = searchViewModel,
-                detailViewModelProvider = detailViewModelProvider,
-                nowPlayingViewModelProvider = nowPlayingViewModelProvider,
-                queueViewModelProvider = queueViewModelProvider,
-                onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
-                onTabTapped = onTabTapped,
-                onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
-                onOpenAlbum = { controller.navigateTo(ShellRoutes.album(it)) },
-                onOpenArtist = { controller.navigateTo(ShellRoutes.artist(it)) },
-                onOpenGenre = { controller.navigateTo(ShellRoutes.genre(it)) },
-                onOpenPlaylist = { controller.navigateTo(ShellRoutes.playlist(it)) },
-                modifier = Modifier.weight(1f),
-            )
-            miniPlayer(Modifier)
-            if (navLayout == NavigationLayout.BOTTOM_BAR) {
-                ShellBottomBar(
-                    tabs = state.tabs,
-                    pagerState = pagerState,
-                    labelMode = labelMode,
-                    onSelect = onTabTapped,
-                )
-            }
-        }
+        PlayerSheetOverlay(
+            state = sheet,
+            swipeUpTarget = swipeUpTargetSheet,
+            nowPlaying = nowPlayingSheet,
+        )
     }
 }
 
@@ -450,6 +561,15 @@ internal fun ShellNavHost(
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
     modifier: Modifier = Modifier,
 ) {
+    // Player surfaces are bottom takeovers (D-19): slide up on push, down on
+    // pop. `MotionTokens.durationScale` multiplies every duration (0 = snap).
+    val routeMotion = OmnisonicTheme.tokens.motion
+    val routeDurationMs =
+        (routeMotion.nowPlayingRoute.durationMs * routeMotion.durationScale).roundToInt()
+    val routeEasing = routeMotion.easingProfile.toEasing()
+    val slideSpec = tween<IntOffset>(durationMillis = routeDurationMs, easing = routeEasing)
+    val fadeSpec = tween<Float>(durationMillis = routeDurationMs, easing = routeEasing)
+
     NavHost(
         navController = navController,
         startDestination = startRoute,
@@ -558,7 +678,11 @@ internal fun ShellNavHost(
                 onBack = { navController.popBackStack() },
             )
         }
-        composable(ShellRoutes.NOW_PLAYING) {
+        composable(
+            ShellRoutes.NOW_PLAYING,
+            enterTransition = { slideInVertically(slideSpec) { it } + fadeIn(fadeSpec) },
+            popExitTransition = { slideOutVertically(slideSpec) { it } + fadeOut(fadeSpec) },
+        ) {
             NowPlayingRoute(
                 viewModel = nowPlayingViewModelProvider(),
                 onCollapse = { navController.popBackStack() },
@@ -566,7 +690,11 @@ internal fun ShellNavHost(
                 onOpenLibrary = { navController.navigateTo(ShellRoutes.LIBRARY) },
             )
         }
-        composable(ShellRoutes.QUEUE) {
+        composable(
+            ShellRoutes.QUEUE,
+            enterTransition = { slideInVertically(slideSpec) { it } + fadeIn(fadeSpec) },
+            popExitTransition = { slideOutVertically(slideSpec) { it } + fadeOut(fadeSpec) },
+        ) {
             QueueRoute(
                 viewModel = queueViewModelProvider(),
                 onBack = { navController.popBackStack() },

@@ -21,7 +21,8 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Roborazzi goldens for the player screens (D-14). Record deliberately with
- * `:app:recordRoborazziDebug`; plain `test` compares (R-25).
+ * `:app:recordRoborazziDebug`; plain `test` does not verify them — use
+ * `:app:verifyRoborazziDebug` to compare (R-25).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-420dpi")

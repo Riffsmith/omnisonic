@@ -1,5 +1,8 @@
 package app.omnisonic.shell
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -7,14 +10,22 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeUp
+import app.omnisonic.feature.library.nowplaying.LyricsUiState
 import app.omnisonic.feature.library.nowplaying.NowPlayingEntry
+import app.omnisonic.feature.library.nowplaying.NowPlayingPane
 import app.omnisonic.feature.library.nowplaying.NowPlayingUiState
 import app.omnisonic.feature.library.queue.QueueRow
 import app.omnisonic.feature.library.queue.QueueUiState
 import app.omnisonic.feature.library.ui.NowPlayingScreen
+import app.omnisonic.feature.library.ui.PlayerSheetDrag
 import app.omnisonic.feature.library.ui.QueueScreen
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.queue.RepeatMode
@@ -85,6 +96,9 @@ class PlayerScreensRenderTest {
         onCollapse: () -> Unit = {},
         onOpenQueue: () -> Unit = {},
         onOpenLibrary: () -> Unit = {},
+        pane: NowPlayingPane = NowPlayingPane.COVER,
+        onTogglePane: () -> Unit = {},
+        lyrics: LyricsUiState = LyricsUiState(),
     ) {
         composeRule.setContent {
             OmnisonicTheme {
@@ -99,10 +113,25 @@ class PlayerScreensRenderTest {
                     onCollapse = onCollapse,
                     onOpenQueue = onOpenQueue,
                     onOpenLibrary = onOpenLibrary,
+                    pane = pane,
+                    onTogglePane = onTogglePane,
+                    lyrics = lyrics,
                 )
             }
         }
     }
+
+    private fun longQueueState(currentOrderIndex: Int): QueueUiState = QueueUiState(
+        rows = (0 until 60).map { index ->
+            QueueRow(
+                entry = queueEntry(index.toLong() + 1L, "Track ${index + 1}"),
+                orderIndex = index,
+                isCurrent = index == currentOrderIndex,
+            )
+        },
+        currentOrderIndex = currentOrderIndex,
+        shuffled = false,
+    )
 
     private fun setQueue(
         state: QueueUiState = queueState(),
@@ -113,6 +142,8 @@ class PlayerScreensRenderTest {
         onClearRemaining: () -> Unit = {},
         onBack: () -> Unit = {},
         onOpenLibrary: () -> Unit = {},
+        sheetDrag: PlayerSheetDrag? = null,
+        isRevealed: Boolean = true,
     ) {
         composeRule.setContent {
             OmnisonicTheme {
@@ -125,6 +156,8 @@ class PlayerScreensRenderTest {
                     onClearRemaining = onClearRemaining,
                     onBack = onBack,
                     onOpenLibrary = onOpenLibrary,
+                    sheetDrag = sheetDrag,
+                    isRevealed = isRevealed,
                 )
             }
         }
@@ -142,6 +175,7 @@ class PlayerScreensRenderTest {
         composeRule.onNodeWithContentDescription("Shuffle").assertExists()
         composeRule.onNodeWithContentDescription("Repeat").assertExists()
         composeRule.onNodeWithContentDescription("Queue").assertExists()
+        composeRule.onNodeWithContentDescription("Lyrics").assertExists()
         composeRule.onNodeWithContentDescription("Collapse player").assertExists()
     }
 
@@ -153,6 +187,36 @@ class PlayerScreensRenderTest {
         composeRule.onAllNodesWithContentDescription("Play or pause").onFirst().performClick()
 
         assertThat(toggles).isEqualTo(1)
+    }
+
+    @Test
+    fun artHorizontalDragMapsLeftToNextAndRightToPrevious() {
+        var next = 0
+        var previous = 0
+        setNowPlaying(onNext = { next += 1 }, onPrevious = { previous += 1 })
+        val art = composeRule.onAllNodesWithContentDescription("Play or pause").onFirst()
+
+        art.performTouchInput {
+            swipe(
+                start = center,
+                end = center - Offset(width * 0.4f, 0f),
+                durationMillis = 300,
+            )
+        }
+
+        assertThat(next).isEqualTo(1)
+        assertThat(previous).isEqualTo(0)
+
+        art.performTouchInput {
+            swipe(
+                start = center,
+                end = center + Offset(width * 0.4f, 0f),
+                durationMillis = 300,
+            )
+        }
+
+        assertThat(previous).isEqualTo(1)
+        assertThat(next).isEqualTo(1)
     }
 
     @Test
@@ -173,6 +237,42 @@ class PlayerScreensRenderTest {
         assertThat(next).isEqualTo(1)
         assertThat(previous).isEqualTo(1)
         assertThat(queue).isEqualTo(1)
+    }
+
+    @Test
+    fun lyricsButtonTogglesThePane() {
+        var toggles = 0
+        setNowPlaying(onTogglePane = { toggles += 1 })
+
+        composeRule.onNodeWithContentDescription("Lyrics").performClick()
+
+        assertThat(toggles).isEqualTo(1)
+    }
+
+    @Test
+    fun lyricsPaneShowsItsEmptyState() {
+        setNowPlaying(pane = NowPlayingPane.LYRICS)
+
+        composeRule.onNodeWithText("No lyrics for this track").assertExists()
+    }
+
+    @Test
+    fun lyricsPaneRendersItsLines() {
+        setNowPlaying(
+            pane = NowPlayingPane.LYRICS,
+            lyrics = LyricsUiState(lines = listOf("First light", "Last call")),
+        )
+
+        composeRule.onNodeWithText("First light").assertExists()
+        composeRule.onNodeWithText("Last call").assertExists()
+        composeRule.onNodeWithText("No lyrics for this track").assertDoesNotExist()
+    }
+
+    @Test
+    fun theCoverPaneHidesTheLyricsPane() {
+        setNowPlaying()
+
+        composeRule.onNodeWithText("No lyrics for this track").assertDoesNotExist()
     }
 
     @Test
@@ -257,6 +357,107 @@ class PlayerScreensRenderTest {
                 GestureTwin("queue-remove", "Remove Encore", "Remove Encore"),
             ),
         )
+    }
+
+    private fun queueScrollOffsets(): List<Float> =
+        composeRule.onAllNodes(
+            SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange),
+        ).fetchSemanticsNodes().map { node ->
+            node.config[SemanticsProperties.VerticalScrollAxisRange].value()
+        }
+
+    @Test
+    fun queueRowSwipeRevealsTheDeleteBackgroundAndFollowsTheFinger() {
+        val removed = mutableListOf<Long>()
+        setQueue(onRemove = { removed.add(it) })
+        val row = composeRule.onNodeWithTag("queue-swipe-reveal-3")
+        val restingLeft = row.fetchSemanticsNode().boundsInRoot.left
+
+        row.performTouchInput {
+            down(center)
+            moveBy(Offset(-width * 0.3f, 0f))
+        }
+        composeRule.waitForIdle()
+
+        assertThat(composeRule.onNodeWithText("Encore").fetchSemanticsNode().boundsInRoot.left)
+            .isLessThan(restingLeft)
+
+        row.performTouchInput { up() }
+        composeRule.waitForIdle()
+
+        assertThat(composeRule.onNodeWithText("Encore").fetchSemanticsNode().boundsInRoot.left)
+            .isWithin(1f).of(restingLeft)
+        assertThat(removed).isEmpty()
+    }
+
+    @Test
+    fun queueSwipePastTheThresholdRemovesTheRow() {
+        val removed = mutableListOf<Long>()
+        setQueue(onRemove = { removed.add(it) })
+
+        composeRule.onNodeWithTag("queue-swipe-reveal-3").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+
+        assertThat(removed).containsExactly(3L)
+    }
+
+    @Test
+    fun queueSwipeUnderTheThresholdKeepsTheRow() {
+        val removed = mutableListOf<Long>()
+        setQueue(onRemove = { removed.add(it) })
+        val row = composeRule.onNodeWithTag("queue-swipe-reveal-3")
+
+        row.performTouchInput {
+            swipe(
+                start = center,
+                end = center - Offset(width * 0.2f, 0f),
+                durationMillis = 300,
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Encore").assertExists()
+        assertThat(removed).isEmpty()
+    }
+
+    @Test
+    fun queueVerticalDragStillScrollsTheList() {
+        setQueue(state = longQueueState(currentOrderIndex = 0))
+        assertThat(queueScrollOffsets().all { it == 0f }).isTrue()
+
+        composeRule.onNodeWithTag("queue-swipe-reveal-1").performTouchInput {
+            swipeUp()
+        }
+        composeRule.waitForIdle()
+
+        assertThat(queueScrollOffsets().any { it > 0f }).isTrue()
+    }
+
+    @Test
+    fun queueJumpPillAppearsWhenTheCurrentRowIsOffScreen() {
+        // Not revealed yet: the sheet keeps the list at the top while the queue
+        // layer waits under now-playing, so the current row is off-screen.
+        setQueue(state = longQueueState(currentOrderIndex = 40), isRevealed = false)
+
+        composeRule.onNodeWithContentDescription("Jump to Track 41").assertExists()
+    }
+
+    @Test
+    fun queueHasNoJumpPillWhenEveryRowFits() {
+        setQueue()
+
+        assertThat(
+            composeRule.onAllNodesWithContentDescription("Jump to Night Ride")
+                .fetchSemanticsNodes(),
+        ).isEmpty()
+    }
+
+    @Test
+    fun queueWithoutASheetHostStillOpensAtTheCurrentRow() {
+        setQueue(state = longQueueState(currentOrderIndex = 40))
+
+        composeRule.onNodeWithText("Track 41").assertExists()
+        assertThat(composeRule.onAllNodesWithText("Track 1").fetchSemanticsNodes()).isEmpty()
     }
 
     @Test

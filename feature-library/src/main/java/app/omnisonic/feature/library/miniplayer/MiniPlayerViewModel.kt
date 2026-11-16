@@ -32,5 +32,7 @@ class MiniPlayerViewModel @Inject constructor(
 
     fun togglePlayPause() = controller.playOrPause()
 
+    fun previous() = controller.skipPrevious()
+
     fun next() = controller.skipNext()
 }

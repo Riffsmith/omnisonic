@@ -43,7 +43,8 @@
     <string name="now_playing_previous">Previous</string>
     <string name="now_playing_next">Next</string>
     <string name="now_playing_queue">Queue</string>
-    <string name="now_playing_favorite">Favorite</string>
+    <string name="now_playing_lyrics">Lyrics</string>
+    <string name="now_playing_no_lyrics">No lyrics for this track</string>
     <string name="now_playing_shuffle">Shuffle</string>
     <string name="now_playing_repeat">Repeat</string>
     <string name="now_playing_repeat_one">Repeat one</string>
@@ -66,4 +67,5 @@
     <string name="queue_empty_body">Start something from your library and it will line up here.</string>
     <string name="queue_open_library">Open library</string>
     <string name="queue_back">Go back</string>
+    <string name="queue_jump_to">Jump to %1$s</string>
 </resources>
