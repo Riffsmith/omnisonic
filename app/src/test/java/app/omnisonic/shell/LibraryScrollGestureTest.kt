@@ -145,7 +145,7 @@ class LibraryScrollGestureTest {
 
     @Test
     fun verticalDragScrollsASectionGridUnderTheNavHostOverlay() {
-        val nav = setShell(browseViewModel = LibraryBrowseViewModel(CountingBrowseSource(albumsPerPage = 60)))
+        val nav = setShell(browseViewModel = LibraryBrowseViewModel(CountingBrowseSource(albumsPerPage = 60), NoopPlaybackController()))
         composeRule.onNodeWithText("Albums").performClick()
         composeRule.waitForIdle()
         assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.SECTION)
@@ -180,7 +180,7 @@ class LibraryScrollGestureTest {
         // The device bug (task 4e): the NavHost-layer input absorber consumed
         // moves on the Main pass, so the grid's slop detector saw its Final
         // re-check consumed and cancelled the drag before slop was crossed.
-        val nav = setShell(browseViewModel = LibraryBrowseViewModel(CountingBrowseSource(albumsPerPage = 60)))
+        val nav = setShell(browseViewModel = LibraryBrowseViewModel(CountingBrowseSource(albumsPerPage = 60), NoopPlaybackController()))
         composeRule.onNodeWithText("Albums").performClick()
         composeRule.waitForIdle()
         assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.SECTION)
@@ -202,7 +202,7 @@ class LibraryScrollGestureTest {
             albumsPerPage = 1,
             hasMoreUntilCall = 3,
         )
-        setShell(browseViewModel = LibraryBrowseViewModel(source))
+        setShell(browseViewModel = LibraryBrowseViewModel(source, NoopPlaybackController()))
         composeRule.onNodeWithText("Albums").performClick()
         composeRule.waitForIdle()
 

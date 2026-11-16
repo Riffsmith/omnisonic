@@ -6,12 +6,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.os.Bundle
 import android.os.Looper
+import android.os.Process
+import androidx.media3.common.Player
 import androidx.media3.session.MediaButtonReceiver
+import androidx.media3.session.MediaSession
 import androidx.test.core.app.ApplicationProvider
 import app.omnisonic.MainActivity
 import app.omnisonic.playback.di.PlaybackStack
 import app.omnisonic.playback.queue.QueuePersistenceCoordinator
+import app.omnisonic.playback.service.NotificationActionMapper
 import app.omnisonic.playback.service.OmniPlaybackService
 import com.google.common.truth.Truth.assertThat
 import dagger.hilt.EntryPoint
@@ -132,6 +137,41 @@ class OmniPlaybackServiceTest {
             assertThat(matches.map { it.serviceInfo.name })
                 .contains(OmniPlaybackService::class.java.name)
         }
+    }
+
+    /**
+     * Regression: a controller must be granted the session's player commands.
+     * The deprecated `Callback.onConnect` default grants an empty player-command
+     * set, and media3 filters the timeline out of every update to a controller
+     * that cannot read it — which silently leaves media3's notification manager
+     * with an empty timeline, so no playback notification is ever posted.
+     */
+    @Test
+    fun connectGrantsControllersThePlayerCommandsAndNotificationCommands() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val service = Robolectric.buildService(OmniPlaybackService::class.java).create().get()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val session = requireNotNull(service.currentSession)
+        val callback = requireNotNull(service.currentCallback)
+        val controllerInfo = MediaSession.ControllerInfo.createTestOnlyControllerInfo(
+            context.packageName,
+            Process.myPid(),
+            Process.myUid(),
+            MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION,
+            MediaSession.ControllerInfo.LEGACY_CONTROLLER_INTERFACE_VERSION,
+            true,
+            Bundle.EMPTY,
+            true,
+        )
+
+        val result = callback.onConnect(session, controllerInfo)
+
+        assertThat(result.isAccepted).isTrue()
+        assertThat(result.availablePlayerCommands.contains(Player.COMMAND_GET_TIMELINE)).isTrue()
+        assertThat(result.availablePlayerCommands.contains(Player.COMMAND_GET_CURRENT_MEDIA_ITEM)).isTrue()
+        assertThat(result.availableSessionCommands.commands)
+            .containsAtLeastElementsIn(NotificationActionMapper.sessionCommands().commands)
     }
 
     @Test

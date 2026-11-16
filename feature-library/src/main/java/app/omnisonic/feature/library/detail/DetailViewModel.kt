@@ -12,6 +12,7 @@ import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.feature.library.browse.BrowseUiState
 import app.omnisonic.feature.library.browse.SectionPager
+import app.omnisonic.feature.library.playback.toQueueEntry
 import app.omnisonic.playback.api.controller.PlaybackController
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import dagger.hilt.android.lifecycle.HiltViewModel

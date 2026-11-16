@@ -28,17 +28,97 @@ Confidence:
   flush before the scope is cancelled (FIX-14).
 - [VERIFIED] `restoreQueueWithin` returns `false` when a stuck store exceeds
   the bound, leaving the empty in-memory queue (`ServiceQueueRestoreTest`).
+- [VERIFIED] Registration needs a controller bind (task 7e): media3
+  `MediaSessionService.addSession` is reached only from a controller connect
+  (`onBind` → stub → `onGetSession`), the legacy browse action, or a
+  media-button `onStartCommand`; a plain `startForegroundService` registers
+  nothing. `playback/service/PlaybackSessionHost` therefore builds one
+  process-lifetime `MediaController` against
+  `SessionToken(ComponentName(context, OmniPlaybackService::class.java))` from
+  `OmnisonicApplication.onCreate`, and the session in `onCreate` registers on
+  that connect. The controller is never released (releasing it unbinds the
+  service, which media3 then stops while nothing plays).
+- [VERIFIED] The session-host connect skips itself when `Build.FINGERPRINT`
+  contains `robolectric`: the shadow `bindService` delivers a null
+  `ComponentName` to `onServiceConnected` and media3 throws an NPE while the
+  looper drains, which broke every `:app` Robolectric test that boots the real
+  application class. Test-environment probe only; device behaviour is the real
+  bind.
+- [VERIFIED] Service-side restore is now the **fallback**, not the only path
+  (task 7c): the app applies the snapshot from `PlaybackLaunchRestore` at
+  launch, and `PlaybackController.restoreQueue()` applies at most one snapshot
+  per process — a service start after an app launch gets `false` instead of
+  re-applying it. A service start that is the first thing in the process (no
+  UI, system-initiated) still restores normally.
 - [INFERRED] legacy `MediaBrowserCompat` clients can discover and bind the
   service through the platform `MediaBrowserService` action; media3 maps the
   legacy connection onto the new session API.
-- [UNKNOWN] Launcher, lock-screen and Android Auto presentation, and
-  notification-tap behavior after process death on a real device.
+- [UNKNOWN] Launcher, lock-screen and Android Auto presentation,
+  notification-tap behavior after process death, and the observed
+  notification/FGS feel while playing on a real device (task 7e device
+  acceptance not run).
 
 Date: 2026-11-06
 
 Links: `controller-and-events.md`, `../remediation/PROGRESS.md`
 
 ---
+
+## Notification registration
+
+Media3 arms its notification machinery only when a controller connects to the
+service's session; the app UI talks to the in-process Hilt controller instead,
+so nothing used to bind the service and no notification was ever posted.
+
+`PlaybackSessionHost` (task 7e) closes that gap:
+
+```kotlin
+// OmnisonicApplication.onCreate
+playbackSessionHost.get().connect()
+
+// PlaybackSessionHost.connect() — one-shot, main thread, never released
+token = SessionToken(context, ComponentName(context, OmniPlaybackService::class.java))
+MediaController.Builder(context, token).buildAsync()
+```
+
+- The connect is one-shot per process (`PlaybackSessionHost` guard); a second
+  call is a no-op.
+- It runs on the main thread because `MediaController` connects on the
+  application looper.
+- A failed connect logs and leaves the app without a notification; it never
+  throws.
+- The controller reference is held for the process lifetime. Releasing it
+  would unbind the service, and media3 stops a service with no bound
+  controller while nothing is playing.
+- The connect is behind `ControllerConnector` (bound in
+  `PlaybackWiringModule` to `ServiceControllerConnector`) so tests can observe
+  the bind without a service.
+
+The bind also starts the service, so its `onCreate` restore runs at launch
+behind the exactly-once guard (`controller-and-events.md`); the app-init
+restore stays as a safety net for a failed or slow bind.
+
+Binding alone is not sufficient — the session's `onConnect` must also grant a
+usable player command set. `SessionCallback.onConnect` builds its result with
+`MediaSession.ConnectionResult.AcceptedResultBuilder(session, controllerInfo)`
+and only adds the notification buttons' custom session commands.
+
+- **Never build on the deprecated `super.onConnect`.** That default returns an
+  accepted result whose `availablePlayerCommands` is
+  `Player.Commands.EMPTY`. It looks harmless because playback keeps working
+  (the UI drives the in-process player), but media3 filters the timeline out of
+  every state update sent to a controller without `COMMAND_GET_TIMELINE`.
+- `MediaNotificationManager.shouldShowNotification` requires a non-empty
+  timeline **on its own internal controller**, so with the empty grant the
+  manager stays silent and no notification is ever posted, even though the
+  service is bound and the session is registered. [VERIFIED — RMX3085,
+  2026-11-12: controllers reported only `SET_TRACK_SELECTION_PARAMETERS`,
+  timeline 0, `startForegroundCount=0`; after the grant fix the notification
+  posts on id 1001 and the media FGS starts.]
+- A trusted controller gets `DEFAULT_PLAYER_COMMANDS`, an untrusted one the
+  read-only set; both include the read commands the notification needs.
+- `OmniPlaybackService.currentCallback` exposes the callback for the regression
+  test that asserts the grant (`OmniPlaybackServiceTest`).
 
 ## Manifest contract
 

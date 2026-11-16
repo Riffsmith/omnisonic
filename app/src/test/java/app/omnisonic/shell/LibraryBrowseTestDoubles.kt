@@ -25,4 +25,5 @@ internal class EmptyBrowseSource : LibraryBrowseSource {
     override suspend fun playlistCount() = 0
 }
 
-internal fun testBrowseViewModel(): LibraryBrowseViewModel = LibraryBrowseViewModel(EmptyBrowseSource())
+internal fun testBrowseViewModel(): LibraryBrowseViewModel =
+    LibraryBrowseViewModel(EmptyBrowseSource(), NoopPlaybackController())

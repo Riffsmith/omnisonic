@@ -32,6 +32,7 @@ internal class FakePlaybackController : PlaybackController {
 
     override val queueSources: QueueSources = QueueSources(emptyList())
 
+    val plays = mutableListOf<Pair<List<PlaybackQueueEntry>, Int>>()
     val playOrPauseCalls = mutableListOf<Unit>()
     val nextCalls = mutableListOf<Unit>()
     val previousCalls = mutableListOf<Unit>()
@@ -48,7 +49,9 @@ internal class FakePlaybackController : PlaybackController {
         startEntriesIndex: Int,
         sourceType: String?,
         sourceData: String?,
-    ) = Unit
+    ) {
+        plays += entries to startEntriesIndex
+    }
 
     override fun playOrPause() {
         playOrPauseCalls += Unit

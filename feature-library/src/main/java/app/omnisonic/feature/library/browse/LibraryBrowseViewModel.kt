@@ -8,8 +8,11 @@ import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.GenreEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.feature.library.playback.toQueueEntry
+import app.omnisonic.playback.api.controller.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -21,6 +24,7 @@ import javax.inject.Inject
 @HiltViewModel
 class LibraryBrowseViewModel @Inject constructor(
     source: LibraryBrowseSource,
+    private val controller: PlaybackController,
 ) : ViewModel() {
 
     private val albumsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::albums, source::albumCount, source.libraryChanges)
@@ -38,6 +42,20 @@ class LibraryBrowseViewModel @Inject constructor(
     fun load(section: LibrarySection) = pagerFor(section).loadInitial()
 
     fun loadMore(section: LibrarySection) = pagerFor(section).loadMore()
+
+    /**
+     * Plays from the tapped song row, mirroring the detail screens: only the
+     * loaded song window is queued, rows the stream resolver cannot address
+     * are skipped, and the start index re-anchors on the tapped row's
+     * provider identity (never on the row position).
+     */
+    fun playFrom(rowIndex: Int) {
+        val content = songs.value as? BrowseUiState.Content<SongEntity> ?: return
+        val song = content.items.getOrNull(rowIndex) ?: return
+        val entries = content.items.mapNotNull { it.toQueueEntry() }
+        val start = entries.indexOfFirst { it.externalId == song.externalId }.takeIf { it >= 0 } ?: return
+        viewModelScope.launch { controller.play(entries, start) }
+    }
 
     private fun pagerFor(section: LibrarySection): SectionPager<*> = when (section) {
         LibrarySection.ALBUMS -> albumsPager

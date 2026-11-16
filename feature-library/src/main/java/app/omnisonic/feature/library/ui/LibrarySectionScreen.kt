@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -319,10 +320,14 @@ private fun CoverTile(
     }
 }
 
-/** Alphabetical song list with the load-more footer. */
+/**
+ * Alphabetical song list with the load-more footer. Tapping a row plays it
+ * from the loaded window ([onSongClick] receives the row index).
+ */
 @Composable
 fun SongListBody(
     content: BrowseUiState.Content<SongEntity>,
+    onSongClick: (Int) -> Unit,
     onLoadMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -334,8 +339,8 @@ fun SongListBody(
             vertical = tokens.spacing.md,
         ),
     ) {
-        items(content.items, key = { it.id }) { song ->
-            SongRow(song)
+        itemsIndexed(content.items, key = { _, song -> song.id }) { index, song ->
+            SongRow(song = song, onClick = { onSongClick(index) })
         }
         if (content.hasMore) {
             item(key = LOAD_MORE_KEY) {
@@ -350,13 +355,14 @@ fun SongListBody(
 }
 
 @Composable
-private fun SongRow(song: SongEntity) {
+private fun SongRow(song: SongEntity, onClick: () -> Unit) {
     val tokens = OmnisonicTheme.tokens
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = tokens.layout.listRowMinHeight)
+            .clickable(onClick = onClick)
             .padding(vertical = tokens.spacing.sm),
     ) {
         CoverImage(

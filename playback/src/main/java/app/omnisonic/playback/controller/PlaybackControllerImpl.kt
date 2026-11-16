@@ -72,6 +72,14 @@ class PlaybackControllerImpl(
     private var eventObserver: Job? = null
     private var released = false
 
+    /**
+     * The persisted snapshot is applied at most once per process, whoever asks
+     * first (app launch vs. the media service starting). Set before the first
+     * suspension so a concurrent second caller on the same thread cannot slip
+     * into the Room read.
+     */
+    private var restoreAttempted = false
+
     private val scrobblePoints = ScrobblePointTracker(events)
 
     private val focus: AudioFocusOwner = focusOwnerFactory.create(
@@ -275,7 +283,11 @@ class PlaybackControllerImpl(
     }
 
     override suspend fun restoreQueue(): Boolean {
-        if (released) return false
+        if (released || restoreAttempted) return false
+        restoreAttempted = true
+        // A queue that already exists in memory wins over the snapshot: play
+        // may have started before a late caller (the service) got here.
+        if (queue.state.value.entries.isNotEmpty()) return false
         val restored = persistence.restoreInto(queue)
         if (restored) {
             engineLoaded = false

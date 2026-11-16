@@ -2,6 +2,7 @@ package app.omnisonic.playback.controller
 
 import app.omnisonic.playback.api.events.PauseReason
 import app.omnisonic.playback.api.events.PlaybackEvent
+import app.omnisonic.playback.api.events.TrackChangeCause
 import app.omnisonic.playback.api.player.EngineConfig
 import app.omnisonic.playback.api.player.OmniPlayer
 import app.omnisonic.playback.api.player.OmniPlayerListener
@@ -511,6 +512,45 @@ class PlaybackControllerImplTest {
         assertThat(f.controller.restoreQueue()).isFalse()
 
         assertThat(f.controller.playerState.value.current).isNull()
+    }
+
+    @Test
+    fun `restoreQueue applies a snapshot at most once per process`() = runTest {
+        val f = newFixture()
+        f.store.stored = QueueState(
+            entries = listOf(entry(7), entry(8)),
+            playIndex = 1,
+            positionMs = 12_000,
+        )
+
+        assertThat(f.controller.restoreQueue()).isTrue()
+        val restores = f.events.filterIsInstance<PlaybackEvent.TrackChanged>()
+            .count { it.cause == TrackChangeCause.RESTORE }
+
+        assertThat(f.controller.restoreQueue()).isFalse()
+
+        assertThat(f.events.filterIsInstance<PlaybackEvent.TrackChanged>())
+            .hasSize(restores)
+        assertThat(f.controller.playerState.value.current?.queueItemId).isEqualTo(8L)
+        assertThat(f.player.played).isEmpty()
+    }
+
+    @Test
+    fun `restoreQueue leaves a queue that play already started untouched`() = runTest {
+        val f = newFixture()
+        f.store.stored = QueueState(entries = listOf(entry(7)), playIndex = 0, positionMs = 95_000)
+
+        f.controller.play(listOf(entry(1), entry(2)))
+        runCurrent()
+        val playedBefore = f.player.played.map { it.queueItemId }
+
+        assertThat(f.controller.restoreQueue()).isFalse()
+
+        assertThat(f.controller.queueState.value.entries.map { it.queueItemId })
+            .containsExactly(1L, 2L)
+        assertThat(f.controller.playerState.value.current?.queueItemId).isEqualTo(1L)
+        assertThat(f.player.played.map { it.queueItemId }).isEqualTo(playedBefore)
+        assertThat(f.player.played.map { it.queueItemId }).doesNotContain(7L)
     }
 
     @Test

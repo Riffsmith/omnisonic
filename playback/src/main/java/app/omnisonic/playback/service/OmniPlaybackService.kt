@@ -64,6 +64,7 @@ class OmniPlaybackService : MediaLibraryService() {
     lateinit var persistence: QueuePersistenceCoordinator
 
     private var session: MediaLibrarySession? = null
+    private var sessionCallback: MediaSession.Callback? = null
     private var serviceScope: CoroutineScope? = null
     private var wakeLock: PlaybackWakeLock? = null
 
@@ -77,8 +78,10 @@ class OmniPlaybackService : MediaLibraryService() {
             }
             scope.launch { restoreQueueWithin(controller, RESTORE_TIMEOUT_MS) }
         }
+        val callback = SessionCallback(controller)
+        sessionCallback = callback
         val sessionBuilder =
-            MediaLibrarySession.Builder(this, playback.sessionPlayer, SessionCallback(controller))
+            MediaLibrarySession.Builder(this, playback.sessionPlayer, callback)
                 .setId(SESSION_ID)
         createSessionActivity()?.let(sessionBuilder::setSessionActivity)
         session = sessionBuilder.build()
@@ -90,6 +93,10 @@ class OmniPlaybackService : MediaLibraryService() {
     /** The published session, for diagnostics and test harnesses. */
     val currentSession: MediaLibrarySession?
         get() = session
+
+    /** The connection callback, for test harnesses that assert the grant. */
+    val currentCallback: MediaSession.Callback?
+        get() = sessionCallback
 
     override fun onTrimMemory(level: Int) {
         if (level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
@@ -106,6 +113,7 @@ class OmniPlaybackService : MediaLibraryService() {
         wakeLock = null
         session?.release()
         session = null
+        sessionCallback = null
         super.onDestroy()
     }
 
@@ -113,15 +121,23 @@ class OmniPlaybackService : MediaLibraryService() {
         private val controller: PlaybackController,
     ) : MediaLibrarySession.Callback {
 
+        /**
+         * Grants the controllers the session's own command set plus the
+         * notification buttons' custom commands. Never build on the deprecated
+         * `super.onConnect`: its default result carries an empty player command
+         * set, and media3 filters each timeline out of every update to a
+         * controller with no `COMMAND_GET_TIMELINE` — which leaves the
+         * notification manager with an empty timeline and no notification.
+         */
         override fun onConnect(
             session: MediaSession,
             controllerInfo: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
-            val result = super.onConnect(session, controllerInfo)
-            val commands = result.availableSessionCommands.buildUpon()
+            val base = MediaSession.ConnectionResult.AcceptedResultBuilder(session, controllerInfo)
+            val commands = base.build().availableSessionCommands.buildUpon()
                 .addSessionCommands(NotificationActionMapper.sessionCommands().commands)
                 .build()
-            return MediaSession.ConnectionResult.accept(commands, result.availablePlayerCommands)
+            return base.setAvailableSessionCommands(commands).build()
         }
 
         override fun onCustomCommand(
