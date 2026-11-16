@@ -35,9 +35,15 @@ Links: `decisions.md` (D-12) · `network/cleartext-policy.md` ·
   `ShellPreferencesStore.completeOnboardingStep`, which removes the step and
   sets `onboardingComplete` when the list is exhausted. Re-running setup from
   settings is idempotent for that flag.
-- On completion the shell navigates to `home` with
-  `popUpTo(providerSetup) { inclusive = true }`, so back cannot return to the
-  finished form.
+- On completion the shell branches on first run: as the start destination the
+  form hands over to the `librarySync` step (`providerSetup` → `librarySync` →
+  `home`); reached from settings, it goes straight to `home`. Either way the
+  navigation uses `popUpTo(providerSetup) { inclusive = true }`, so back cannot
+  return to the finished form. `[VERIFIED]` `ProviderSetupNavigationTest`.
+- `ShellUiState.hasProvider` is a live Room count
+  (`ProviderDao.countFlow()`), so the Home empty state ("Set up a provider"
+  button) clears as soon as the provider row is written — no restart needed.
+  `[VERIFIED]` `ProviderCountFlowTest`, `ShellViewModelTest`.
 - The screen shows a back affordance only when the route was pushed on top of
   another destination (reached from settings). During first run the setup route
   is the NavHost start destination, so there is nothing to pop and no back

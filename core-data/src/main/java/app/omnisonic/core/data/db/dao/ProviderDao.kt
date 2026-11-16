@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.ProviderEntity
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ProviderDao {
@@ -34,4 +35,8 @@ interface ProviderDao {
 
     @Query("SELECT COUNT(*) FROM providers")
     suspend fun count(): Int
+
+    /** Live provider count; re-emits on any `providers` write (shell empty-state gate). */
+    @Query("SELECT COUNT(*) FROM providers")
+    fun countFlow(): Flow<Int>
 }
