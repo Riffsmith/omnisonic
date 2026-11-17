@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -123,6 +124,8 @@ private fun ShellSettingsContent(
             Text(stringResource(R.string.settings_manage_providers))
         }
         LibrarySyncManagerSection(viewModel = syncViewModel)
+        SectionHeader(stringResource(R.string.settings_group_playback))
+        NotificationSettingsRow()
         SectionHeader(stringResource(R.string.settings_group_about))
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -131,6 +134,23 @@ private fun ShellSettingsContent(
             Text(stringResource(R.string.settings_version), style = MaterialTheme.typography.bodyMedium)
             Text(appVersion, style = MaterialTheme.typography.bodyMedium)
         }
+    }
+}
+
+/**
+ * Opens the system notification screen instead of holding an in-app switch:
+ * media-session notifications are exempt from `POST_NOTIFICATIONS`, so the
+ * platform screen is the one place that actually hides them.
+ */
+@Composable
+private fun NotificationSettingsRow() {
+    val context = LocalContext.current
+    TextButton(
+        onClick = {
+            context.startActivity(NotificationSettingsIntent.create(context.packageName))
+        },
+    ) {
+        Text(stringResource(R.string.settings_notification_settings))
     }
 }
 

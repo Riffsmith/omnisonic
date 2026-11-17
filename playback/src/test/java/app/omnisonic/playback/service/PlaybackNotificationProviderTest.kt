@@ -1,10 +1,12 @@
 package app.omnisonic.playback.service
 
 import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.app.PendingIntent
+import android.graphics.Bitmap
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.exoplayer.ExoPlayer
@@ -20,6 +22,7 @@ import app.omnisonic.playback.api.settings.NotificationAction
 import app.omnisonic.playback.settings.PlaybackSettingsStore
 import com.google.common.collect.ImmutableList
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -88,6 +91,7 @@ class PlaybackNotificationProviderTest {
     private lateinit var context: Context
     private lateinit var settings: PlaybackSettingsStore
     private lateinit var scope: CoroutineScope
+    private lateinit var artworkLoader: FakeArtworkLoader
     private lateinit var player: ExoPlayer
     private lateinit var session: MediaSession
     private lateinit var provider: PlaybackNotificationProvider
@@ -99,7 +103,8 @@ class PlaybackNotificationProviderTest {
         settingsDir = java.nio.file.Files.createTempDirectory("t11-settings").toFile()
         settings = PlaybackSettingsStore.createAt(File(settingsDir, "playback.preferences_pb"))
         scope = CoroutineScope(Dispatchers.Unconfined)
-        provider = PlaybackNotificationProvider(context, settings, scope)
+        artworkLoader = FakeArtworkLoader()
+        provider = PlaybackNotificationProvider(context, settings, scope, artworkLoader)
         player = ExoPlayer.Builder(context).build()
         session = MediaSession.Builder(context, player).build()
     }
@@ -112,20 +117,65 @@ class PlaybackNotificationProviderTest {
         runCatching { settingsDir.deleteRecursively() }
     }
 
-    private fun notification(): Notification {
+    private fun notification(callback: MediaNotification.Provider.Callback = NoopCallback): Notification {
         val factory = RecordingActionFactory(context)
-        return provider.createNotification(session, ImmutableList.of(), factory, NoopCallback).notification
+        return provider.createNotification(session, ImmutableList.of(), factory, callback).notification
     }
 
+    private fun setTrack(coverImageId: String?) {
+        val metadata = MediaMetadata.Builder()
+            .setTitle("Song title")
+            .setArtist("Song artist")
+            .apply {
+                if (coverImageId != null) {
+                    setExtras(NotificationArtworkMetadata.extras(providerId = 1L, imageId = coverImageId))
+                }
+            }
+            .build()
+        player.setMediaItem(
+            MediaItem.Builder()
+                .setMediaId("1")
+                .setUri("https://playback.test/stream.wav")
+                .setMediaMetadata(metadata)
+                .build(),
+        )
+    }
+
+    private fun Notification.hasLargeIcon(): Boolean =
+        extras.getParcelable<android.os.Parcelable>(Notification.EXTRA_LARGE_ICON) != null ||
+            extras.getParcelable<android.os.Parcelable>(Notification.EXTRA_LARGE_ICON_BIG) != null
+
     @Test
-    fun `channel is created with the playback spec`() {
+    fun `channel is created silent and without a badge`() {
         val manager = context.getSystemService(NotificationManager::class.java)
         val channel = manager.getNotificationChannel(PlaybackNotificationProvider.CHANNEL_ID)
 
         assertThat(channel).isNotNull()
-        assertThat(channel.importance).isEqualTo(NotificationManager.IMPORTANCE_DEFAULT)
+        // The legacy channel was IMPORTANCE_DEFAULT, which alerts on the first
+        // post of every playback session; the fix is the channel itself.
+        assertThat(channel.importance).isEqualTo(NotificationManager.IMPORTANCE_LOW)
+        assertThat(channel.sound).isNull()
         assertThat(channel.canShowBadge()).isFalse()
         assertThat(channel.lockscreenVisibility).isEqualTo(Notification.VISIBILITY_PRIVATE)
+    }
+
+    @Test
+    fun `legacy alerting channel is deleted on an existing install`() {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(
+                PlaybackNotificationProvider.LEGACY_CHANNEL_ID,
+                "Playback",
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ),
+        )
+
+        PlaybackNotificationProvider(context, settings, scope, artworkLoader)
+
+        assertThat(manager.getNotificationChannel(PlaybackNotificationProvider.LEGACY_CHANNEL_ID))
+            .isNull()
+        assertThat(manager.getNotificationChannel(PlaybackNotificationProvider.CHANNEL_ID))
+            .isNotNull()
     }
 
     @Test
@@ -173,6 +223,65 @@ class PlaybackNotificationProviderTest {
         assertThat(built.extras.getCharSequence(Notification.EXTRA_TITLE)).isEqualTo("Song title")
         assertThat(built.extras.getCharSequence(Notification.EXTRA_TEXT)).isEqualTo("Song artist")
         assertThat(built.extras.getCharSequence(Notification.EXTRA_SUB_TEXT)).isEqualTo("Song album")
+    }
+
+    @Test
+    fun `cover art is attached once the loader resolves and the cache is reused`() {
+        val bitmap = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        artworkLoader.results["cover-1"] = bitmap
+        setTrack("cover-1")
+        val callback = RecordingCallback()
+
+        val first = notification(callback)
+
+        assertThat(first.hasLargeIcon()).isFalse()
+        assertThat(artworkLoader.requests.map { it.imageId }).containsExactly("cover-1")
+        assertThat(callback.notifications).hasSize(1)
+        assertThat(callback.notifications.single().notificationId)
+            .isEqualTo(PlaybackNotificationProvider.NOTIFICATION_ID)
+        assertThat(callback.notifications.single().notification.hasLargeIcon()).isTrue()
+
+        val second = notification(callback)
+
+        assertThat(second.hasLargeIcon()).isTrue()
+        assertThat(artworkLoader.requests).hasSize(1)
+        assertThat(callback.notifications).hasSize(1)
+    }
+
+    @Test
+    fun `a missing cover is non-fatal and is not retried`() {
+        setTrack("cover-missing")
+        val callback = RecordingCallback()
+
+        val built = notification(callback)
+
+        assertThat(built.hasLargeIcon()).isFalse()
+        assertThat(callback.notifications).isEmpty()
+        assertThat(artworkLoader.requests).hasSize(1)
+
+        notification(callback)
+
+        assertThat(artworkLoader.requests).hasSize(1)
+    }
+
+    @Test
+    fun `a stale cover load does not repaint the notification`() {
+        artworkLoader.results["cover-a"] = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        artworkLoader.results["cover-b"] = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        val staleGate = CompletableDeferred<Unit>()
+        artworkLoader.gates["cover-a"] = staleGate
+        val callback = RecordingCallback()
+
+        setTrack("cover-a")
+        notification(callback)
+        setTrack("cover-b")
+        notification(callback)
+
+        assertThat(callback.notifications).hasSize(1)
+
+        staleGate.complete(Unit)
+
+        assertThat(callback.notifications).hasSize(1)
     }
 
     @Test
@@ -257,7 +366,27 @@ class PlaybackNotificationProviderTest {
         assertThat(info.name).isEqualTo(context.getString(R.string.notification_channel_playback))
     }
 
+    private class RecordingCallback : MediaNotification.Provider.Callback {
+        val notifications = mutableListOf<MediaNotification>()
+
+        override fun onNotificationChanged(notification: MediaNotification) {
+            notifications += notification
+        }
+    }
+
     private object NoopCallback : MediaNotification.Provider.Callback {
         override fun onNotificationChanged(notification: MediaNotification) = Unit
+    }
+}
+
+private class FakeArtworkLoader : NotificationArtworkLoader {
+    val requests = mutableListOf<NotificationArtworkIdentity>()
+    val results = mutableMapOf<String, Bitmap?>()
+    val gates = mutableMapOf<String, CompletableDeferred<Unit>>()
+
+    override suspend fun load(identity: NotificationArtworkIdentity): Bitmap? {
+        requests += identity
+        gates[identity.imageId]?.await()
+        return results[identity.imageId]
     }
 }

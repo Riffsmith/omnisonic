@@ -11,6 +11,8 @@
     <string name="settings_group_providers">Providers</string>
     <string name="settings_manage_providers">Manage providers</string>
     <string name="settings_group_library_sync">Library sync</string>
+    <string name="settings_group_playback">Playback</string>
+    <string name="settings_notification_settings">Notification settings</string>
     <string name="settings_group_about">About</string>
     <string name="settings_version">Version</string>
     <string name="provider_setup_title">Connect a server</string>

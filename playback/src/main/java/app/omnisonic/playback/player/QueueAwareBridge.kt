@@ -14,6 +14,7 @@ import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.queue.QueueState
+import app.omnisonic.playback.service.NotificationArtworkMetadata
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.flow.StateFlow
@@ -211,29 +212,32 @@ internal class QueueAwareBridge(
 
     private fun mediaItemDataFor(entry: PlaybackQueueEntry, isCurrent: Boolean, engine: Player): MediaItemData {
         val durationUs = entry.durationMs?.let { C.msToUs(it) } ?: C.TIME_UNSET
+        val metadata = metadataFor(entry)
         return MediaItemData.Builder(entry.queueItemId)
             .setMediaItem(
                 MediaItem.Builder()
                     .setMediaId(entry.queueItemId.toString())
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(entry.title)
-                            .setArtist(entry.artistName)
-                            .build(),
-                    )
+                    .setMediaMetadata(metadata)
                     .build(),
             )
-            .setMediaMetadata(
-                MediaMetadata.Builder()
-                    .setTitle(entry.title)
-                    .setArtist(entry.artistName)
-                    .build(),
-            )
+            .setMediaMetadata(metadata)
             .setTracks(tracksFor(entry, isCurrent, engine))
             .setDurationUs(durationUs)
             .setIsSeekable(!entry.isRadioStation)
             .setIsDynamic(entry.isRadioStation)
             .build()
+    }
+
+    /** Cover identity rides as extras; the notification resolves it, never a raw URL. */
+    private fun metadataFor(entry: PlaybackQueueEntry): MediaMetadata {
+        val builder = MediaMetadata.Builder()
+            .setTitle(entry.title)
+            .setArtist(entry.artistName)
+        val coverImageId = entry.coverImageId
+        if (!coverImageId.isNullOrBlank()) {
+            builder.setExtras(NotificationArtworkMetadata.extras(entry.providerId, coverImageId))
+        }
+        return builder.build()
     }
 
     private fun tracksFor(entry: PlaybackQueueEntry, isCurrent: Boolean, engine: Player): Tracks {

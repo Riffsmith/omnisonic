@@ -58,9 +58,10 @@ Confidence:
   notification/FGS feel while playing on a real device (task 7e device
   acceptance not run).
 
-Date: 2026-11-06
+Date: 2026-11-17
 
-Links: `controller-and-events.md`, `../remediation/PROGRESS.md`
+Links: `controller-and-events.md`, `../remediation/PROGRESS.md`,
+`notification-presentation-fixes.md` (P1 artwork/channel/settings fix brief)
 
 ---
 
@@ -119,6 +120,41 @@ and only adds the notification buttons' custom session commands.
   read-only set; both include the read commands the notification needs.
 - `OmniPlaybackService.currentCallback` exposes the callback for the regression
   test that asserts the grant (`OmniPlaybackServiceTest`).
+
+## Notification presentation contract (landed 2026-11-17; device gate open)
+
+[VERIFIED code + JVM] The notification now shows the current track's cover, is
+silent, and is reachable from Settings. The presentation contract is:
+
+- **Artwork:** `QueueAwareBridge` attaches the cover identity
+  (`providerId`/`coverImageId`/`sizePx` extras, `NotificationArtworkMetadata`) to
+  the exposed metadata; `PlaybackNotificationProvider` reads it, uses a cached
+  bitmap (≤4 identities, 512 px request) or starts exactly one load through the
+  injected `NotificationArtworkLoader` and repaints via
+  `MediaNotification.Provider.Callback.onNotificationChanged` with the same id
+  1001. A stale identity never repaints; a failure is non-fatal, logs once and
+  is not retried. The load runs on the engine scope, never on the session thread.
+  `:app` binds the Coil-backed loader (`CoilNotificationArtworkLoader`) so the
+  provider-routed client, the cover cache and local `content://` covers are all
+  reused.
+- **Channel:** `omnisonic.playback.v2` at `IMPORTANCE_LOW`, explicit
+  `setSound(null, null)`, no badge, lockscreen `VISIBILITY_PRIVATE`; the legacy
+  `omnisonic.playback` channel is deleted after v2 exists. `setOnlyAlertOnce(true)`
+  and the fixed id remain. An upgraded install therefore ends with one silent
+  channel.
+- **Permission:** Android 13+ exempts media-session notifications from
+  `POST_NOTIFICATIONS`; the app declares the permission and never requests it.
+  A fresh install showing the media notification without a grant is expected
+  behaviour. [VERIFIED — platform docs + media3 source]
+- **Show/hide path:** Settings → Playback → "Notification settings" opens
+  `ACTION_APP_NOTIFICATION_SETTINGS` for the app package. There is deliberately
+  no in-app switch (it would desync from the system state) and no runtime
+  permission prompt.
+
+Device acceptance (silence on the first post, artwork in the shade/lock screen,
+channel migration on an installed build, Settings → system screen) is still
+`[UNKNOWN device]`; brief and acceptance checklist:
+`notification-presentation-fixes.md`.
 
 ## Manifest contract
 

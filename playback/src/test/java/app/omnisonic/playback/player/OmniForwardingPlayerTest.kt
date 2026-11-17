@@ -22,6 +22,8 @@ import app.omnisonic.playback.api.stream.ResolvedStream
 import app.omnisonic.playback.cache.MediaDataSourceFactoryProvider
 import app.omnisonic.playback.cache.PlaybackCacheManager
 import app.omnisonic.playback.engine.ExoEngineFactory
+import app.omnisonic.playback.service.NotificationArtworkIdentity
+import app.omnisonic.playback.service.NotificationArtworkMetadata
 import app.omnisonic.playback.settings.PlaybackSettingsStore
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
@@ -229,6 +231,37 @@ class OmniForwardingPlayerTest {
             val window = player.currentTimeline.getWindow(index, androidx.media3.common.Timeline.Window())
             assertThat(window.mediaItem.localConfiguration).isNull()
             assertThat(window.mediaItem.mediaId).isEqualTo("${index + 1}")
+        }
+    }
+
+    @Test
+    fun `exposed metadata carries the cover identity of the current entry`() {
+        val p = newPlayer()
+        port.state.value = QueueState(
+            entries = listOf(
+                PlaybackQueueEntry(
+                    providerId = 7L,
+                    externalId = "ext-1",
+                    queueItemId = 1,
+                    title = "With cover",
+                    coverImageId = "cover-9",
+                ),
+                queueEntry(2),
+            ),
+            playIndex = 0,
+        )
+        await("cover metadata published") {
+            NotificationArtworkMetadata.identityFrom(p.exposedPlayer().mediaMetadata) != null
+        }
+
+        val identity = NotificationArtworkMetadata.identityFrom(p.exposedPlayer().mediaMetadata)
+        assertThat(identity).isEqualTo(
+            NotificationArtworkIdentity(providerId = 7L, imageId = "cover-9"),
+        )
+
+        port.state.value = port.state.value.copy(playIndex = 1)
+        await("coverless entry published") {
+            NotificationArtworkMetadata.identityFrom(p.exposedPlayer().mediaMetadata) == null
         }
     }
 

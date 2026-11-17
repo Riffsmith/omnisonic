@@ -2,6 +2,7 @@ package app.omnisonic.image
 
 import android.content.Context
 import app.omnisonic.core.data.providers.ProviderClientRegistry
+import app.omnisonic.playback.service.NotificationArtworkLoader
 import app.omnisonic.provider.api.CoverImageKey
 import coil3.ImageLoader
 import dagger.Module
@@ -27,4 +28,8 @@ object ImageLoaderModule {
             registry.providerFor(key.providerId)?.coverArtUrl(key.imageId, key.sizePx)
         },
     )
+
+    @Provides
+    @Singleton
+    fun notificationArtworkLoader(loader: CoilNotificationArtworkLoader): NotificationArtworkLoader = loader
 }
