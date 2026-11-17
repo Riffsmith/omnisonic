@@ -2,6 +2,11 @@ package app.omnisonic.core.data.search
 
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.ProfileScope
+import app.omnisonic.core.data.db.entity.AlbumEntity
+import app.omnisonic.core.data.db.entity.ArtistEntity
+import app.omnisonic.core.data.db.entity.GenreEntity
+import app.omnisonic.core.data.db.entity.PlaylistEntity
+import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.core.data.network.ProviderStatusTracker
 import app.omnisonic.provider.api.ProviderStatus
 import javax.inject.Inject
@@ -93,6 +98,68 @@ class SearchRepository @Inject constructor(
             },
         )
     }
+
+    /** Builds the stored recents snapshot for a tapped song result. */
+    suspend fun recentPickFor(song: SongEntity): RecentPick = RecentPick(
+        kind = RecentPickKind.SONG,
+        id = song.id,
+        providerId = song.providerId,
+        externalId = song.externalId,
+        title = song.title,
+        subtitle = song.displayArtist,
+        imagePath = song.imagePath ?: albumArtFor(song.albumId),
+        durationMs = song.durationMs,
+    )
+
+    suspend fun recentPickFor(album: AlbumEntity): RecentPick = RecentPick(
+        kind = RecentPickKind.ALBUM,
+        id = album.id,
+        providerId = album.providerId,
+        title = album.title,
+        subtitle = album.displayArtist,
+        imagePath = album.imagePath,
+        durationMs = album.durationMs,
+    )
+
+    suspend fun recentPickFor(artist: ArtistEntity): RecentPick = RecentPick(
+        kind = RecentPickKind.ARTIST,
+        id = artist.id,
+        providerId = artist.providerId,
+        title = artist.title,
+        imagePath = artist.imagePath,
+    )
+
+    suspend fun recentPickFor(genre: GenreEntity): RecentPick = RecentPick(
+        kind = RecentPickKind.GENRE,
+        id = genre.id,
+        providerId = genre.providerId,
+        title = genre.title,
+    )
+
+    suspend fun recentPickFor(playlist: PlaylistEntity): RecentPick = RecentPick(
+        kind = RecentPickKind.PLAYLIST,
+        id = playlist.id,
+        providerId = playlist.providerId,
+        title = playlist.title,
+        imagePath = playlist.imagePath,
+        durationMs = playlist.durationMs,
+    )
+
+    /**
+     * Re-reads the pick's catalog row by id. Returns null when the row was
+     * deleted; the stored snapshot is not rewritten here so a click never
+     * writes to the preferences store.
+     */
+    suspend fun resolveRecentPick(pick: RecentPick): RecentPick? = when (pick.kind) {
+        RecentPickKind.SONG -> db.songDao().selectById(pick.id)?.let { recentPickFor(it) }
+        RecentPickKind.ALBUM -> db.albumDao().selectById(pick.id)?.let { recentPickFor(it) }
+        RecentPickKind.ARTIST -> db.artistDao().selectById(pick.id)?.let { recentPickFor(it) }
+        RecentPickKind.GENRE -> db.genreDao().selectById(pick.id)?.let { recentPickFor(it) }
+        RecentPickKind.PLAYLIST -> db.playlistDao().selectById(pick.id)?.let { recentPickFor(it) }
+    }
+
+    private suspend fun albumArtFor(albumId: Long?): String? =
+        albumId?.let { db.albumDao().selectById(it)?.imagePath }
 
     private suspend fun effectiveScope(base: ProfileScope): ProfileScope {
         // A search is the first work many sessions run; refresh so the status

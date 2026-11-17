@@ -71,7 +71,7 @@ class SearchPerformanceTest : DatabaseTestBase() {
         every { preferences } returns flowOf(
             SearchPreferences(
                 enabledCategories = SearchCategory.entries.toSet(),
-                recentSearches = emptyList(),
+                recentPicks = emptyList(),
                 pageSize = SearchPreferencesStore.DEFAULT_PAGE_SIZE,
             ),
         )

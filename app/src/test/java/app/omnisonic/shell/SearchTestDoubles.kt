@@ -1,5 +1,12 @@
 package app.omnisonic.shell
 
+import app.omnisonic.core.data.db.entity.AlbumEntity
+import app.omnisonic.core.data.db.entity.ArtistEntity
+import app.omnisonic.core.data.db.entity.GenreEntity
+import app.omnisonic.core.data.db.entity.PlaylistEntity
+import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.search.RecentPick
+import app.omnisonic.core.data.search.RecentPickKind
 import app.omnisonic.core.data.search.SearchCategory
 import app.omnisonic.core.data.search.SearchPreferences
 import app.omnisonic.core.data.search.SearchResults
@@ -16,7 +23,7 @@ internal class EmptySearchSource : SearchSource {
     private val prefs = MutableStateFlow(
         SearchPreferences(
             enabledCategories = SearchCategory.entries.toSet(),
-            recentSearches = emptyList(),
+            recentPicks = emptyList(),
             pageSize = 30,
         ),
     )
@@ -30,25 +37,38 @@ internal class EmptySearchSource : SearchSource {
         categories: Set<SearchCategory>,
     ): SearchResults = SearchResults.empty(query, categories, offset, limit)
 
-    override suspend fun recordRecentSearch(query: String) = Unit
+    override suspend fun recordSongPick(song: SongEntity) = Unit
 
-    override suspend fun removeRecentSearch(query: String) = Unit
+    override suspend fun recordAlbumPick(album: AlbumEntity) = Unit
 
-    override suspend fun clearRecentSearches() {
-        prefs.update { it.copy(recentSearches = emptyList()) }
+    override suspend fun recordArtistPick(artist: ArtistEntity) = Unit
+
+    override suspend fun recordGenrePick(genre: GenreEntity) = Unit
+
+    override suspend fun recordPlaylistPick(playlist: PlaylistEntity) = Unit
+
+    override suspend fun recordRecentPick(pick: RecentPick) = Unit
+
+    override suspend fun removeRecentPick(kind: RecentPickKind, id: Long) = Unit
+
+    override suspend fun clearRecentPicks() {
+        prefs.update { it.copy(recentPicks = emptyList()) }
     }
 
+    override suspend fun resolveRecentPick(pick: RecentPick): RecentPick? = null
+
     override suspend fun setCategoryEnabled(category: SearchCategory, enabled: Boolean) {
-        prefs.update { prefs ->
-            prefs.copy(
+        prefs.update { current ->
+            current.copy(
                 enabledCategories = if (enabled) {
-                    prefs.enabledCategories + category
+                    current.enabledCategories + category
                 } else {
-                    prefs.enabledCategories - category
+                    current.enabledCategories - category
                 },
             )
         }
     }
 }
 
-internal fun testSearchViewModel(): SearchViewModel = SearchViewModel(EmptySearchSource())
+internal fun testSearchViewModel(): SearchViewModel =
+    SearchViewModel(EmptySearchSource(), NoopPlaybackController())

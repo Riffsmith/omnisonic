@@ -1,6 +1,10 @@
 package app.omnisonic.core.data.search
 
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.google.common.truth.Truth.assertThat
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -30,13 +34,29 @@ class SearchPreferencesStoreTest {
         scope = null
     }
 
-    private fun newStore(file: File = File(tempDir, "search-${System.nanoTime()}.preferences_pb")): SearchPreferencesStore {
+    private fun newDataStore(file: File): DataStore<Preferences> {
         val storeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope = storeScope
-        return SearchPreferencesStore(
-            PreferenceDataStoreFactory.create(scope = storeScope, produceFile = { file }),
-        )
+        return PreferenceDataStoreFactory.create(scope = storeScope, produceFile = { file })
     }
+
+    private fun newStore(file: File = File(tempDir, "search-${System.nanoTime()}.preferences_pb")) =
+        SearchPreferencesStore(newDataStore(file))
+
+    private fun songPick(
+        id: Long,
+        title: String = "Song $id",
+        imagePath: String? = "cover-$id.jpg",
+    ) = RecentPick(
+        kind = RecentPickKind.SONG,
+        id = id,
+        providerId = 1,
+        externalId = "ext-$id",
+        title = title,
+        subtitle = "Artist $id",
+        imagePath = imagePath,
+        durationMs = 200_000L,
+    )
 
     @Test
     fun `fresh store yields defaults`() = runTest {
@@ -45,7 +65,7 @@ class SearchPreferencesStoreTest {
         val prefs = store.preferences.first()
 
         assertThat(prefs.enabledCategories).isEqualTo(SearchCategory.entries.toSet())
-        assertThat(prefs.recentSearches).isEmpty()
+        assertThat(prefs.recentPicks).isEmpty()
         assertThat(prefs.pageSize).isEqualTo(SearchPreferencesStore.DEFAULT_PAGE_SIZE)
     }
 
@@ -73,48 +93,101 @@ class SearchPreferencesStoreTest {
     }
 
     @Test
-    fun `recent searches keep the newest first and dedupe case-insensitively`() = runTest {
+    fun `picks round-trip artwork subtitle external id and duration`() = runTest {
         val store = newStore()
+        val pick = songPick(id = 4, title = "Doomsday", imagePath = "dooms.jpg")
 
-        store.recordRecentSearch("  night drive  ")
-        store.recordRecentSearch("Night Drive")
-        store.recordRecentSearch("rain")
+        store.recordRecentPick(pick)
 
-        assertThat(store.preferences.first().recentSearches).containsExactly("rain", "Night Drive").inOrder()
+        assertThat(store.preferences.first().recentPicks).containsExactly(pick)
     }
 
     @Test
-    fun `blank queries are not recorded`() = runTest {
+    fun `picks keep the newest first and dedupe by kind and id`() = runTest {
         val store = newStore()
 
-        store.recordRecentSearch("   ")
+        store.recordRecentPick(songPick(id = 1, title = "Old title"))
+        store.recordRecentPick(songPick(id = 2, title = "Night Drive"))
+        store.recordRecentPick(songPick(id = 1, title = "New title"))
 
-        assertThat(store.preferences.first().recentSearches).isEmpty()
+        val picks = store.preferences.first().recentPicks
+        assertThat(picks.map { it.title }).containsExactly("New title", "Night Drive").inOrder()
     }
 
     @Test
-    fun `recent searches are capped at the newest ten`() = runTest {
+    fun `picks of different kinds with the same row id are distinct`() = runTest {
         val store = newStore()
 
-        repeat(12) { index -> store.recordRecentSearch("query-$index") }
+        store.recordRecentPick(songPick(id = 7))
+        store.recordRecentPick(
+            RecentPick(RecentPickKind.ALBUM, id = 7, providerId = 1, title = "Album 7"),
+        )
 
-        val recents = store.preferences.first().recentSearches
-        assertThat(recents).hasSize(SearchPreferencesStore.MAX_RECENT_SEARCHES)
-        assertThat(recents.first()).isEqualTo("query-11")
-        assertThat(recents.last()).isEqualTo("query-2")
+        assertThat(store.preferences.first().recentPicks.map { it.kind })
+            .containsExactly(RecentPickKind.ALBUM, RecentPickKind.SONG).inOrder()
     }
 
     @Test
-    fun `recent searches can be removed one by one or cleared`() = runTest {
+    fun `picks are capped at the newest ten`() = runTest {
         val store = newStore()
-        store.recordRecentSearch("keep")
-        store.recordRecentSearch("drop")
 
-        store.removeRecentSearch("drop")
-        assertThat(store.preferences.first().recentSearches).containsExactly("keep")
+        repeat(12) { index -> store.recordRecentPick(songPick(id = index.toLong())) }
 
-        store.clearRecentSearches()
-        assertThat(store.preferences.first().recentSearches).isEmpty()
+        val picks = store.preferences.first().recentPicks
+        assertThat(picks).hasSize(SearchPreferencesStore.MAX_RECENT_PICKS)
+        assertThat(picks.first().id).isEqualTo(11L)
+        assertThat(picks.last().id).isEqualTo(2L)
+    }
+
+    @Test
+    fun `picks can be removed by identity or cleared`() = runTest {
+        val store = newStore()
+        store.recordRecentPick(songPick(id = 1))
+        store.recordRecentPick(songPick(id = 2))
+
+        store.removeRecentPick(RecentPickKind.SONG, 1)
+        assertThat(store.preferences.first().recentPicks.map { it.id }).containsExactly(2L)
+
+        store.clearRecentPicks()
+        assertThat(store.preferences.first().recentPicks).isEmpty()
+    }
+
+    @Test
+    fun `malformed pick json decodes to an empty list`() = runTest {
+        val dataStore = newDataStore(File(tempDir, "malformed.preferences_pb"))
+        dataStore.edit { it[PICKS_KEY] = "{not-json" }
+
+        assertThat(SearchPreferencesStore(dataStore).preferences.first().recentPicks).isEmpty()
+    }
+
+    @Test
+    fun `an unknown pick kind is skipped while valid picks survive`() = runTest {
+        val dataStore = newDataStore(File(tempDir, "unknown-kind.preferences_pb"))
+        dataStore.edit {
+            it[PICKS_KEY] = """
+                [
+                  {"kind":"SONG","id":1,"providerId":1,"title":"Keep"},
+                  {"kind":"PODCAST","id":2,"providerId":1,"title":"Future"},
+                  {"kind":"ALBUM","id":3,"providerId":1,"title":"Also keep"}
+                ]
+            """.trimIndent()
+        }
+
+        val picks = SearchPreferencesStore(dataStore).preferences.first().recentPicks
+
+        assertThat(picks.map { it.title }).containsExactly("Keep", "Also keep").inOrder()
+    }
+
+    @Test
+    fun `legacy query recents are deleted on first access and never become picks`() = runTest {
+        val dataStore = newDataStore(File(tempDir, "legacy.preferences_pb"))
+        dataStore.edit { it[LEGACY_KEY] = "[\"dooms\",\"bowie\"]" }
+        val store = SearchPreferencesStore(dataStore)
+
+        assertThat(store.preferences.first().recentPicks).isEmpty()
+
+        val raw = dataStore.data.first()
+        assertThat(raw.contains(LEGACY_KEY)).isFalse()
     }
 
     @Test
@@ -137,7 +210,7 @@ class SearchPreferencesStoreTest {
             PreferenceDataStoreFactory.create(scope = firstScope, produceFile = { file }),
         )
         first.setCategoryEnabled(SearchCategory.SONGS, false)
-        first.recordRecentSearch("night drive")
+        first.recordRecentPick(songPick(id = 9, title = "Night Drive"))
         first.setPageSize(50)
         firstScope.cancel()
         withTimeoutOrNull(2_000) { while (firstJob.children.any()) delay(10) }
@@ -146,7 +219,12 @@ class SearchPreferencesStoreTest {
         val prefs = second.preferences.first()
 
         assertThat(prefs.enabledCategories).doesNotContain(SearchCategory.SONGS)
-        assertThat(prefs.recentSearches).containsExactly("night drive")
+        assertThat(prefs.recentPicks.map { it.title }).containsExactly("Night Drive")
         assertThat(prefs.pageSize).isEqualTo(50)
+    }
+
+    private companion object {
+        val PICKS_KEY = stringPreferencesKey("search.recent_picks")
+        val LEGACY_KEY = stringPreferencesKey("search.recent_searches")
     }
 }

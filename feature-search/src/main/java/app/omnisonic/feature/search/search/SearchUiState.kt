@@ -1,5 +1,6 @@
 package app.omnisonic.feature.search.search
 
+import app.omnisonic.core.data.search.RecentPick
 import app.omnisonic.core.data.search.SearchCategory
 import app.omnisonic.core.data.search.SearchPage
 import app.omnisonic.core.data.search.SearchPreferences
@@ -13,12 +14,14 @@ data class SearchUiState(
     val submittedQuery: String = "",
     val phase: SearchPhase = SearchPhase.IDLE,
     val results: SearchResults? = null,
-    val recentSearches: List<String> = emptyList(),
+    val recentPicks: List<RecentPick> = emptyList(),
     val enabledCategories: Set<SearchCategory> = SearchCategory.entries.toSet(),
     val pageSize: Int = 30,
     val hasMore: Boolean = false,
     val appending: Boolean = false,
     val appendFailed: Boolean = false,
+    /** A newer query is running while the previous rows stay visible. */
+    val refreshing: Boolean = false,
 ) {
     val isActive: Boolean get() = submittedQuery.isNotBlank()
 }
@@ -54,7 +57,7 @@ internal fun SearchResults.appendWith(next: SearchResults): SearchResults = Sear
 )
 
 internal fun SearchPreferences.toUi(state: SearchUiState): SearchUiState = state.copy(
-    recentSearches = recentSearches,
+    recentPicks = recentPicks,
     enabledCategories = enabledCategories,
     pageSize = pageSize,
 )

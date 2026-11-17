@@ -35,6 +35,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -63,9 +64,13 @@ import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.GenreEntity
 import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.search.RecentPick
+import app.omnisonic.core.data.search.RecentPickKind
 import app.omnisonic.core.data.search.SearchCategory
+import app.omnisonic.core.data.search.SearchResults
 import app.omnisonic.feature.search.R
 import app.omnisonic.feature.search.search.SearchFocusRules
+import app.omnisonic.feature.search.search.SearchNavigation
 import app.omnisonic.feature.search.search.SearchPhase
 import app.omnisonic.feature.search.search.SearchUiState
 import app.omnisonic.feature.search.search.SearchViewModel
@@ -91,6 +96,16 @@ fun SearchRoute(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(viewModel) {
+        viewModel.navigation.collect { destination ->
+            when (destination) {
+                is SearchNavigation.Album -> onOpenAlbum(destination.id)
+                is SearchNavigation.Artist -> onOpenArtist(destination.id)
+                is SearchNavigation.Genre -> onOpenGenre(destination.id)
+                is SearchNavigation.Playlist -> onOpenPlaylist(destination.id)
+            }
+        }
+    }
     SearchScreen(
         state = state,
         config = config,
@@ -99,15 +114,16 @@ fun SearchRoute(
         onSubmit = viewModel::submit,
         onClearQuery = viewModel::clearQuery,
         onToggleCategory = viewModel::toggleCategory,
-        onRecentSearch = viewModel::selectRecentSearch,
-        onRemoveRecentSearch = viewModel::removeRecentSearch,
-        onClearRecentSearches = viewModel::clearRecentSearches,
+        onRecentPick = viewModel::selectRecentPick,
+        onRemoveRecentPick = viewModel::removeRecentPick,
+        onClearRecentPicks = viewModel::clearRecentPicks,
         onRetry = viewModel::retry,
         onLoadMore = viewModel::loadMore,
-        onOpenAlbum = onOpenAlbum,
-        onOpenArtist = onOpenArtist,
-        onOpenGenre = onOpenGenre,
-        onOpenPlaylist = onOpenPlaylist,
+        onPlaySong = viewModel::playSong,
+        onOpenAlbum = viewModel::onAlbumTap,
+        onOpenArtist = viewModel::onArtistTap,
+        onOpenGenre = viewModel::onGenreTap,
+        onOpenPlaylist = viewModel::onPlaylistTap,
         modifier = modifier,
     )
 }
@@ -121,11 +137,12 @@ fun SearchScreen(
     onSubmit: () -> Unit,
     onClearQuery: () -> Unit,
     onToggleCategory: (SearchCategory) -> Unit,
-    onRecentSearch: (String) -> Unit,
-    onRemoveRecentSearch: (String) -> Unit,
-    onClearRecentSearches: () -> Unit,
+    onRecentPick: (RecentPick) -> Unit,
+    onRemoveRecentPick: (RecentPickKind, Long) -> Unit,
+    onClearRecentPicks: () -> Unit,
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
+    onPlaySong: (Long) -> Unit,
     onOpenAlbum: (Long) -> Unit,
     onOpenArtist: (Long) -> Unit,
     onOpenGenre: (Long) -> Unit,
@@ -152,9 +169,9 @@ fun SearchScreen(
                 SearchPhase.IDLE -> IdleBody(
                     state = state,
                     showRecent = config.showRecentSearches,
-                    onRecentSearch = onRecentSearch,
-                    onRemoveRecentSearch = onRemoveRecentSearch,
-                    onClearRecentSearches = onClearRecentSearches,
+                    onRecentPick = onRecentPick,
+                    onRemoveRecentPick = onRemoveRecentPick,
+                    onClearRecentPicks = onClearRecentPicks,
                 )
 
                 SearchPhase.SEARCHING -> CenteredBody {
@@ -200,6 +217,7 @@ fun SearchScreen(
                 SearchPhase.RESULTS -> ResultsBody(
                     state = state,
                     onLoadMore = onLoadMore,
+                    onPlaySong = onPlaySong,
                     onOpenAlbum = onOpenAlbum,
                     onOpenArtist = onOpenArtist,
                     onOpenGenre = onOpenGenre,
@@ -312,12 +330,12 @@ private fun WrappedChips(padding: PaddingValues, content: @Composable () -> Unit
 private fun IdleBody(
     state: SearchUiState,
     showRecent: Boolean,
-    onRecentSearch: (String) -> Unit,
-    onRemoveRecentSearch: (String) -> Unit,
-    onClearRecentSearches: () -> Unit,
+    onRecentPick: (RecentPick) -> Unit,
+    onRemoveRecentPick: (RecentPickKind, Long) -> Unit,
+    onClearRecentPicks: () -> Unit,
 ) {
     val tokens = OmnisonicTheme.tokens
-    if (!showRecent || state.recentSearches.isEmpty()) {
+    if (!showRecent || state.recentPicks.isEmpty()) {
         CenteredBody {
             Text(
                 text = stringResource(R.string.search_idle_body),
@@ -330,6 +348,7 @@ private fun IdleBody(
         return
     }
 
+    val thumb = tokens.imagery.listThumbSize
     LazyColumn(
         contentPadding = PaddingValues(
             start = tokens.layout.pagePadding,
@@ -350,42 +369,68 @@ private fun IdleBody(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onClearRecentSearches) {
+                TextButton(onClick = onClearRecentPicks) {
                     Text(stringResource(R.string.search_recent_clear))
                 }
             }
         }
-        items(state.recentSearches, key = { it }) { recent ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = tokens.layout.listRowMinHeight)
-                    .clickable { onRecentSearch(recent) },
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Search,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(tokens.imagery.uiIconSize),
-                )
-                Spacer(Modifier.width(tokens.spacing.md))
-                Text(
-                    text = recent,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = { onRemoveRecentSearch(recent) }) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = stringResource(R.string.search_recent_remove, recent),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+        items(state.recentPicks, key = { "recent-${it.kind.name}-${it.id}" }) { pick ->
+            RecentPickRow(
+                pick = pick,
+                thumb = thumb,
+                onClick = { onRecentPick(pick) },
+                onRemove = { onRemoveRecentPick(pick.kind, pick.id) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecentPickRow(
+    pick: RecentPick,
+    thumb: Dp,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val tokens = OmnisonicTheme.tokens
+    val kindLabel = stringResource(pick.kind.labelRes)
+    val subtitle = listOfNotNull(kindLabel, pick.subtitle?.takeIf { it.isNotBlank() })
+        .joinToString(" · ")
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = tokens.layout.listRowMinHeight)
+            .clickable(onClick = onClick),
+    ) {
+        SearchCover(
+            cover = pick.imagePath?.let { CoverImageKey(pick.providerId, it) },
+            size = thumb,
+            placeholderIcon = pick.kind.placeholderIcon,
+        )
+        Spacer(Modifier.width(tokens.spacing.md))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = pick.title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        IconButton(onClick = onRemove) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = stringResource(R.string.search_recent_remove, pick.title),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -394,6 +439,7 @@ private fun IdleBody(
 private fun ResultsBody(
     state: SearchUiState,
     onLoadMore: () -> Unit,
+    onPlaySong: (Long) -> Unit,
     onOpenAlbum: (Long) -> Unit,
     onOpenArtist: (Long) -> Unit,
     onOpenGenre: (Long) -> Unit,
@@ -403,6 +449,37 @@ private fun ResultsBody(
     val results = state.results ?: return
     val thumb = tokens.imagery.listThumbSize
 
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (state.refreshing) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        ResultsList(
+            state = state,
+            results = results,
+            thumb = thumb,
+            onLoadMore = onLoadMore,
+            onPlaySong = onPlaySong,
+            onOpenAlbum = onOpenAlbum,
+            onOpenArtist = onOpenArtist,
+            onOpenGenre = onOpenGenre,
+            onOpenPlaylist = onOpenPlaylist,
+        )
+    }
+}
+
+@Composable
+private fun ResultsList(
+    state: SearchUiState,
+    results: SearchResults,
+    thumb: Dp,
+    onLoadMore: () -> Unit,
+    onPlaySong: (Long) -> Unit,
+    onOpenAlbum: (Long) -> Unit,
+    onOpenArtist: (Long) -> Unit,
+    onOpenGenre: (Long) -> Unit,
+    onOpenPlaylist: (Long) -> Unit,
+) {
+    val tokens = OmnisonicTheme.tokens
     LazyColumn(
         contentPadding = PaddingValues(
             start = tokens.layout.pagePadding,
@@ -428,10 +505,7 @@ private fun ResultsBody(
                 SongRow(
                     song = song,
                     thumb = thumb,
-                    onClick = {
-                        val albumId = song.albumId
-                        if (albumId != null) onOpenAlbum(albumId)
-                    },
+                    onClick = { onPlaySong(song.id) },
                 )
             }
         }
@@ -665,4 +739,22 @@ private val SearchCategory.labelRes: Int
         SearchCategory.SONGS -> R.string.search_category_songs
         SearchCategory.GENRES -> R.string.search_category_genres
         SearchCategory.PLAYLISTS -> R.string.search_category_playlists
+    }
+
+private val RecentPickKind.labelRes: Int
+    get() = when (this) {
+        RecentPickKind.SONG -> R.string.search_category_songs
+        RecentPickKind.ALBUM -> R.string.search_category_albums
+        RecentPickKind.ARTIST -> R.string.search_category_artists
+        RecentPickKind.GENRE -> R.string.search_category_genres
+        RecentPickKind.PLAYLIST -> R.string.search_category_playlists
+    }
+
+private val RecentPickKind.placeholderIcon: ImageVector
+    get() = when (this) {
+        RecentPickKind.SONG -> Icons.Filled.MusicNote
+        RecentPickKind.ALBUM -> Icons.Filled.Album
+        RecentPickKind.ARTIST -> Icons.Filled.Person
+        RecentPickKind.GENRE -> Icons.Filled.LibraryMusic
+        RecentPickKind.PLAYLIST -> Icons.Filled.PlaylistPlay
     }

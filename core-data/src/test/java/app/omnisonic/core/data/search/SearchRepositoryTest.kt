@@ -36,7 +36,7 @@ class SearchRepositoryTest : DatabaseTestBase() {
         every { preferences } returns flowOf(
             SearchPreferences(
                 enabledCategories = categories,
-                recentSearches = emptyList(),
+                recentPicks = emptyList(),
                 pageSize = SearchPreferencesStore.DEFAULT_PAGE_SIZE,
             ),
         )
@@ -367,5 +367,65 @@ class SearchRepositoryTest : DatabaseTestBase() {
 
         val results = repository.search("shared", categories = allCategories)
         assertThat(results.songs.items.map { it.providerId }).containsExactly(1L)
+    }
+
+    @Test
+    fun recentPickResolvesTheCurrentRowAndMissingRowsReturnNull() = runDbTest {
+        newProvider(id = 1)
+        val song = SongEntity(
+            id = 1,
+            providerId = 1,
+            externalId = "song-1",
+            title = "Doomsday",
+            displayArtist = "Artist",
+            imagePath = "track.jpg",
+            durationMs = 200_000L,
+            updatedAt = 1_000,
+        )
+        songDao.upsert(song)
+        val repository = repository()
+
+        val resolved = repository.resolveRecentPick(
+            RecentPick(RecentPickKind.SONG, id = 1, providerId = 1, title = "Old snapshot"),
+        )
+
+        assertThat(resolved?.title).isEqualTo("Doomsday")
+        assertThat(resolved?.externalId).isEqualTo("song-1")
+        assertThat(resolved?.imagePath).isEqualTo("track.jpg")
+
+        songDao.deleteById(1)
+        assertThat(
+            repository.resolveRecentPick(
+                RecentPick(RecentPickKind.SONG, id = 1, providerId = 1, title = "Gone"),
+            ),
+        ).isNull()
+    }
+
+    @Test
+    fun songPickWithoutArtworkUsesItsAlbumImage() = runDbTest {
+        newProvider(id = 1)
+        albumDao.upsert(
+            AlbumEntity(
+                id = 5,
+                providerId = 1,
+                externalId = "album-5",
+                title = "Album",
+                imagePath = "album.jpg",
+                updatedAt = 1_000,
+            ),
+        )
+        val song = SongEntity(
+            id = 1,
+            providerId = 1,
+            externalId = "song-1",
+            albumId = 5,
+            title = "Track",
+            updatedAt = 1_000,
+        )
+        songDao.upsert(song)
+
+        val pick = repository().recentPickFor(song)
+
+        assertThat(pick.imagePath).isEqualTo("album.jpg")
     }
 }
