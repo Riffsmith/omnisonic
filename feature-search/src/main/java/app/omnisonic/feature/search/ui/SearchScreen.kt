@@ -65,6 +65,7 @@ import app.omnisonic.core.data.db.entity.PlaylistEntity
 import app.omnisonic.core.data.db.entity.SongEntity
 import app.omnisonic.core.data.search.SearchCategory
 import app.omnisonic.feature.search.R
+import app.omnisonic.feature.search.search.SearchFocusRules
 import app.omnisonic.feature.search.search.SearchPhase
 import app.omnisonic.feature.search.search.SearchUiState
 import app.omnisonic.feature.search.search.SearchViewModel
@@ -136,52 +137,17 @@ fun SearchScreen(
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(isActive) {
-        if (isActive && config.autofocusOnEntry && state.phase == SearchPhase.IDLE) {
+        if (!isActive) {
+            focusManager.clearFocus()
+            return@LaunchedEffect
+        }
+        if (SearchFocusRules.shouldRequestFocus(isActive, state.phase, config.autofocusOnEntry)) {
             focusRequester.requestFocus()
         }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = state.query,
-            onValueChange = onQueryChange,
-            placeholder = { Text(stringResource(R.string.search_hint)) },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-            trailingIcon = {
-                if (state.query.isNotEmpty()) {
-                    IconButton(onClick = onClearQuery) {
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.search_clear),
-                        )
-                    }
-                }
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = {
-                    focusManager.clearFocus()
-                    onSubmit()
-                },
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    start = tokens.layout.pagePadding,
-                    end = tokens.layout.pagePadding,
-                    top = tokens.spacing.md,
-                )
-                .focusRequester(focusRequester),
-        )
-
-        CategoryChips(
-            enabled = state.enabledCategories,
-            layout = config.chipLayout,
-            onToggle = onToggleCategory,
-        )
-
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (state.phase) {
                 SearchPhase.IDLE -> IdleBody(
                     state = state,
@@ -240,6 +206,50 @@ fun SearchScreen(
                     onOpenPlaylist = onOpenPlaylist,
                 )
             }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background),
+        ) {
+            CategoryChips(
+                enabled = state.enabledCategories,
+                layout = config.chipLayout,
+                onToggle = onToggleCategory,
+            )
+            OutlinedTextField(
+                value = state.query,
+                onValueChange = onQueryChange,
+                placeholder = { Text(stringResource(R.string.search_hint)) },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = onClearQuery) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.search_clear),
+                            )
+                        }
+                    }
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(
+                    onSearch = {
+                        focusManager.clearFocus()
+                        onSubmit()
+                    },
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = tokens.layout.pagePadding,
+                        end = tokens.layout.pagePadding,
+                        bottom = tokens.spacing.md,
+                    )
+                    .focusRequester(focusRequester),
+            )
         }
     }
 }

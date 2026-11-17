@@ -75,7 +75,10 @@ internal fun MainTabsPager(
             MainTab.LIBRARY -> LibraryHubScreen(onOpenSection = onOpenSection)
             MainTab.SEARCH -> SearchRoute(
                 viewModel = searchViewModel,
-                isActive = state.currentPage == page,
+                // Settled, user-selected state: a tab tap animates through
+                // Search, and the transient currentPage must never autofocus
+                // that pass-through (search-tab-fixes.md B1).
+                isActive = state.settledPage == page && !state.isScrollInProgress,
                 onOpenAlbum = onOpenAlbum,
                 onOpenArtist = onOpenArtist,
                 onOpenGenre = onOpenGenre,

@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -185,6 +186,32 @@ class MainTabsPagerTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Version").assertExists()
         composeRule.onNode(tabItem("Settings")).assert(isSelected())
+    }
+
+    /**
+     * The pager is stepped frame by frame: after it settles on Settings the
+     * Search page is disposed, so a post-settle "nothing focused" check would
+     * pass even with the transient-currentPage bug (search-tab-fixes.md §B1).
+     */
+    @Test
+    fun directSettingsTapNeverFocusesTheSearchField() {
+        setContent()
+
+        composeRule.mainClock.autoAdvance = false
+        composeRule.onNode(tabItem("Settings")).performClick()
+
+        var focusedDuringAnimation = 0
+        repeat(120) {
+            composeRule.mainClock.advanceTimeByFrame()
+            focusedDuringAnimation +=
+                composeRule.onAllNodes(isFocused()).fetchSemanticsNodes().size
+        }
+
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Version").assertExists()
+        composeRule.onNode(tabItem("Settings")).assert(isSelected())
+        assertThat(focusedDuringAnimation).isEqualTo(0)
     }
 
     @Test

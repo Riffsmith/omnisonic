@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.List
@@ -318,7 +320,15 @@ fun OmnisonicShell(
             },
     ) {
         if (isLandscape && navLayout == NavigationLayout.RAIL) {
-            Row(modifier = Modifier.fillMaxSize()) {
+            // Insets are applied once, here: content, mini-player and rail move
+            // above the IME together (search-tab-fixes.md §B2). Navigation bars
+            // are handled too because targetSdk 36 is edge-to-edge.
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .imePadding(),
+            ) {
                 ShellNavRail(
                     tabs = state.tabs,
                     pagerState = pagerState,
@@ -354,7 +364,12 @@ fun OmnisonicShell(
                 }
             }
         } else {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .imePadding(),
+            ) {
                 ShellContentArea(
                     state = state,
                     pagerState = pagerState,
