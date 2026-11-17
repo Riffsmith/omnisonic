@@ -1,5 +1,31 @@
 # Now-playing + queue screens (`:feature-library`, Phase 5 task 6)
 
+Purpose: pin down the now-playing and queue screens — the controller-only
+state mapping (`PlayerCoreState` + `QueueState` → UI state), the
+`QueueCommandPort` edit surface, the layout slots, and the shipped gestures
+with their button twins.
+
+How derived: own implementation for Phase 5 task 6 to the slot specs in
+`reference/docs/UI_SPEC.md` §3.8/§3.9 with the §1.3 button-twin rule; revised
+by tasks 7f/7g (2026-11-12, D-19) and by the out-of-band player work of
+2026-11-16 (D-22/D-23/D-24 sheet detents, lyrics pane and return latch;
+D-26 queue row swipe). Sheet motion itself is owned by `ui/player-sheet.md`
+and the row swipe by `ui/queue-swipe.md`.
+
+Confidence: state mapping, command dispatch, queue-edit semantics and the
+render/golden coverage are `[VERIFIED]` (`NowPlayingViewModelTest`,
+`QueueViewModelTest`, `PlayerScreensRenderTest`, `PlayerScreensGoldenTest`);
+gesture/transition feel on hardware is `[UNKNOWN]` device; the Phase 9 block
+model, effects renderer and per-slot configuration are reserved, not built.
+
+Date: 2026-11-16 (task 6 shipped 2026-11-11; header added 2026-11-17)
+
+Links: `player-sheet.md` (owns sheet motion + detents), `queue-swipe.md` (owns
+row swipe), `player-queue-return.md` (owns the return gesture), `gesture-contract.md`
+(ownership + twins), `../decisions.md` (D-19…D-26), `../playback/controller-and-events.md`
+
+---
+
 Status: Phase 5 task 6, shipped 2026-11-11. Revised 2026-11-16: the lyrics pane
 (D-23), the queue/now-playing detents of the anchored player sheet (D-22), and
 the queue row's threshold-commit swipe (`ui/queue-swipe.md`, D-26).

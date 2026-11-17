@@ -1,5 +1,35 @@
 # Player sheet — three detents, one spring, sheet-owned settle
 
+Purpose: the canonical spec for the shell-level player sheet — the
+peek → now-playing → queue continuum, the sheet-owned release-final state
+machine (D-25), gesture ownership on every surface, the configurable swipe-up
+slot, and the back chain.
+
+How derived: own design for the out-of-band player-navigation item (D-22,
+2026-11-16; return-latch revision D-24; release-final rewrite D-25) after the
+user device reports of 2026-11-15/16; nav-compose 2.8.2's lack of a seekable
+transition was verified by disassembly (`javap` over the pinned AAR); the
+post-lift park defect was measured on the RMX3085 and is the reason for the
+D-25 single-writer state machine. Supersedes the D-19/D-20 settle design in
+this file and absorbs the motion sections of `ui/player-ux-fixes.md` §3-§5.
+
+Confidence: the state machine, pure rules, handoff and back chain are
+`[VERIFIED]` (`PlayerSheetRulesTest`, `PlayerSheetReleaseTest`,
+`QueuePullHandoffTest`, `MiniPlayerShellTest`, `MiniPlayerPeekTest`,
+`PlayerSheetVelocityTest`); the RMX3085 real-finger checks passed after D-25
+(`[VERIFIED]`, user run 2026-11-16); the moto g32 feel, the bar swap distance
+and predictive back remain `[UNKNOWN]` or out of scope (§9).
+
+Date: 2026-11-16 (header added 2026-11-17)
+
+Links: `gesture-contract.md` (ownership rules this sheet obeys),
+`player-queue-return.md` (D-21/D-24 return gesture + latch),
+`player-screens.md` (the two surfaces the sheet hosts), `queue-swipe.md`
+(D-26, orthogonal horizontal gesture), `player-ux-fixes.md` (superseded motion
+record), `../decisions.md` (D-19…D-25)
+
+---
+
 Status: shipped 2026-11-16 as the out-of-band player-navigation item D-22 (the
 lyrics pane is D-23, the return-latch revision D-24). Revised the same day by
 D-25: the `AnchoredDraggableState` façade was replaced by a sheet-owned state

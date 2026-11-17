@@ -1,5 +1,29 @@
 # Detail screens — album / artist / genre / playlist (`:feature-library`, Phase 5 task 5)
 
+Purpose: pin down the four detail screens — the header model, the per-kind
+scoped paged body reads (link tables, genre JSON matching, playlist positions),
+the Loading/Missing/Error states, and the playback actions.
+
+How derived: own implementation for Phase 5 task 5 to the slot spec in
+`reference/docs/UI_SPEC.md` §3.5, over the task-3 `*Raw` + `ProfileScope`
+wrapper convention (`docs/omnisonic/search/data-layer.md`) and the task-4
+browse paging (`docs/omnisonic/ui/library-browse.md`); the header favorite
+slot is a deliberate deferral recorded in the same session (open question with
+a proposed default, `.agents/memory/open-questions.md`).
+
+Confidence: query shapes, ordering, distinct-credit collapsing, genre
+exact-element matching and the per-destination view-model lifecycle are
+`[VERIFIED]` by `DetailRepositoryTest` and the render tests; navigation
+transitions and detail feel on hardware are `[UNKNOWN]` device items.
+
+Date: 2026-11-10 (header added 2026-11-17)
+
+Links: `library-browse.md` (paging + cover contract shared by the bodies),
+`player-screens.md` (the play actions feed the same controller port),
+`../search/data-layer.md`, `../decisions.md` (D-16 live-refresh dependency)
+
+---
+
 Status: Phase 5 task 5, shipped 2026-11-10. Spec: `reference/docs/UI_SPEC.md` §3.5
 (header model, body per type, states, actions). Data contract: the task-3
 `*Raw` + `ProfileScope` wrapper convention
