@@ -23,6 +23,9 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
+/** Baseline id for rows a simulated sync inserted ahead of the loaded window. */
+private const val NEW_ROW_ID_BASE = 100_000L
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryBrowseViewModelTest {
 
@@ -337,6 +340,129 @@ class LibraryBrowseViewModelTest {
         assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0, 0).inOrder()
     }
 
+    @Test
+    fun `append after a mid-sync insert keeps ids unique`() = runTest {
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
+        val viewModel = viewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+        assertThat((viewModel.albums.value as BrowseUiState.Content).items).hasSize(60)
+
+        // The walk inserted six albums ahead of the loaded window, so the
+        // OFFSET=60 window now starts six rows behind where it did.
+        source.shift = 6
+        viewModel.loadMore(LibrarySection.ALBUMS)
+
+        val content = viewModel.albums.value as BrowseUiState.Content
+        assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0, 60).inOrder()
+        assertThat(content.items.map { it.id }).containsNoDuplicates()
+        assertThat(content.items).hasSize(114)
+        assertThat(content.appending).isFalse()
+        assertThat(content.hasMore).isTrue()
+    }
+
+    @Test
+    fun `a fully duplicate page advances the cursor instead of refetching forever`() = runTest {
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 190))
+        val viewModel = viewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+
+        // The shift swallowed the whole window: the page repeats ids 1..60.
+        source.shift = 60
+        viewModel.loadMore(LibrarySection.ALBUMS)
+
+        val repeated = viewModel.albums.value as BrowseUiState.Content
+        assertThat(repeated.items.map { it.id }).containsNoDuplicates()
+        assertThat(repeated.items).hasSize(60)
+        assertThat(repeated.appending).isFalse()
+        assertThat(repeated.hasMore).isTrue()
+
+        viewModel.loadMore(LibrarySection.ALBUMS)
+
+        assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0, 60, 120).inOrder()
+        val content = viewModel.albums.value as BrowseUiState.Content
+        assertThat(content.items.map { it.id }).containsNoDuplicates()
+        assertThat(content.items).hasSize(120)
+    }
+
+    @Test
+    fun `a raw empty page ends paging instead of spinning the footer`() = runTest {
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
+        val viewModel = viewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+
+        source.emptyPagesAt = setOf(60)
+        viewModel.loadMore(LibrarySection.ALBUMS)
+
+        val content = viewModel.albums.value as BrowseUiState.Content
+        assertThat(content.items).hasSize(60)
+        assertThat(content.hasMore).isFalse()
+        assertThat(content.appending).isFalse()
+    }
+
+    @Test
+    fun `invalidation while the section scrolls refreshes once when scrolling stops`() = runTest {
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
+        val viewModel = viewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+
+        viewModel.setScrolling(LibrarySection.ALBUMS, true)
+        source.totals = mapOf(FakeSection.ALBUMS to 200)
+        source.changes.emit(Unit)
+        runCurrent()
+
+        assertThat((viewModel.albums.value as BrowseUiState.Content).items).hasSize(60)
+        assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0)
+
+        viewModel.setScrolling(LibrarySection.ALBUMS, false)
+        runCurrent()
+
+        assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0, 0).inOrder()
+        val content = viewModel.albums.value as BrowseUiState.Content
+        assertThat(content.totalCount).isEqualTo(200)
+        assertThat(content.items).hasSize(60)
+    }
+
+    @Test
+    fun `a refresh pending from an in-flight load waits while scrolling`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 3), pageGate = gate)
+        val viewModel = viewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+
+        // The invalidation lands while the initial load still runs, so it can
+        // only be replayed when that job finishes — by which time the user
+        // has started scrolling.
+        source.totals = mapOf(FakeSection.ALBUMS to 90)
+        source.changes.emit(Unit)
+        runCurrent()
+        viewModel.setScrolling(LibrarySection.ALBUMS, true)
+
+        gate.complete(Unit)
+        runCurrent()
+
+        assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0)
+
+        viewModel.setScrolling(LibrarySection.ALBUMS, false)
+        runCurrent()
+
+        assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0, 0).inOrder()
+        assertThat((viewModel.albums.value as BrowseUiState.Content).totalCount).isEqualTo(90)
+    }
+
+    @Test
+    fun `scroll end without an invalidation fetches nothing`() = runTest {
+        val source = FakeBrowseSource(totals = mapOf(FakeSection.ALBUMS to 130))
+        val viewModel = viewModel(source)
+        viewModel.load(LibrarySection.ALBUMS)
+
+        viewModel.setScrolling(LibrarySection.ALBUMS, true)
+        runCurrent()
+        viewModel.setScrolling(LibrarySection.ALBUMS, false)
+        runCurrent()
+
+        assertThat(source.pageOffsets.getValue(FakeSection.ALBUMS)).containsExactly(0)
+    }
+
     private enum class FakeSection { ALBUMS, ARTISTS, SONGS, GENRES, PLAYLISTS }
 
     private class FakeBrowseSource(
@@ -344,7 +470,17 @@ class LibraryBrowseViewModelTest {
         var failPagesAt: Set<Int> = emptySet(),
         var pageGate: CompletableDeferred<Unit>? = null,
         var nullExternalIdIndexes: Set<Int> = emptySet(),
+        /** Rows inserted ahead of the loaded window (a simulated sync write). */
+        var shift: Int = 0,
+        /** Offsets answered with an empty page even though `hasMore` is true. */
+        var emptyPagesAt: Set<Int> = emptySet(),
     ) : LibraryBrowseSource {
+
+        private fun rowId(position: Int): Long =
+            if (position < shift) NEW_ROW_ID_BASE + position else (position - shift + 1).toLong()
+
+        private fun rowLabel(prefix: String, position: Int): String =
+            if (position < shift) "$prefix new ${position + 1}" else "$prefix ${position - shift + 1}"
 
         val changes = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
 
@@ -369,9 +505,12 @@ class LibraryBrowseViewModelTest {
             pageGate?.await()
             if (shouldFail(offset)) throw IOException("album page failed")
             val total = totals.getOrDefault(FakeSection.ALBUMS, 0)
+            if (offset in emptyPagesAt) {
+                return BrowsePage(items = emptyList(), offset = offset, limit = limit, hasMore = true)
+            }
             return BrowsePage(
                 items = indexes(offset, limit, total).map { n ->
-                    AlbumEntity(id = n + 1L, providerId = 1, title = "Album ${n + 1}", updatedAt = 0)
+                    AlbumEntity(id = rowId(n), providerId = 1, title = rowLabel("Album", n), updatedAt = 0)
                 },
                 offset = offset,
                 limit = limit,
@@ -385,7 +524,7 @@ class LibraryBrowseViewModelTest {
             val total = totals.getOrDefault(FakeSection.ARTISTS, 0)
             return BrowsePage(
                 items = indexes(offset, limit, total).map { n ->
-                    ArtistEntity(id = n + 1L, providerId = 1, title = "Artist ${n + 1}", updatedAt = 0)
+                    ArtistEntity(id = rowId(n), providerId = 1, title = rowLabel("Artist", n), updatedAt = 0)
                 },
                 offset = offset,
                 limit = limit,
@@ -400,10 +539,10 @@ class LibraryBrowseViewModelTest {
             return BrowsePage(
                 items = indexes(offset, limit, total).map { n ->
                     SongEntity(
-                        id = n + 1L,
+                        id = rowId(n),
                         providerId = 1,
-                        externalId = if (n in nullExternalIdIndexes) null else "e-${n + 1}",
-                        title = "Song ${n + 1}",
+                        externalId = if (n in nullExternalIdIndexes) null else "e-${rowId(n)}",
+                        title = rowLabel("Song", n),
                         displayArtist = "Artist",
                         updatedAt = 0,
                     )
@@ -420,7 +559,7 @@ class LibraryBrowseViewModelTest {
             val total = totals.getOrDefault(FakeSection.GENRES, 0)
             return BrowsePage(
                 items = indexes(offset, limit, total).map { n ->
-                    GenreEntity(id = n + 1L, providerId = 1, title = "Genre ${n + 1}", updatedAt = 0)
+                    GenreEntity(id = rowId(n), providerId = 1, title = rowLabel("Genre", n), updatedAt = 0)
                 },
                 offset = offset,
                 limit = limit,
@@ -434,7 +573,7 @@ class LibraryBrowseViewModelTest {
             val total = totals.getOrDefault(FakeSection.PLAYLISTS, 0)
             return BrowsePage(
                 items = indexes(offset, limit, total).map { n ->
-                    PlaylistEntity(id = n + 1L, providerId = 1, title = "Playlist ${n + 1}", type = 0, updatedAt = 0)
+                    PlaylistEntity(id = rowId(n), providerId = 1, title = rowLabel("Playlist", n), type = 0, updatedAt = 0)
                 },
                 offset = offset,
                 limit = limit,

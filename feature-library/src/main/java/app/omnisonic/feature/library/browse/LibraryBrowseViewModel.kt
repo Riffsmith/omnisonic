@@ -27,11 +27,46 @@ class LibraryBrowseViewModel @Inject constructor(
     private val controller: PlaybackController,
 ) : ViewModel() {
 
-    private val albumsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::albums, source::albumCount, source.libraryChanges)
-    private val artistsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::artists, source::artistCount, source.libraryChanges)
-    private val songsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::songs, source::songCount, source.libraryChanges)
-    private val genresPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::genres, source::genreCount, source.libraryChanges)
-    private val playlistsPager = SectionPager(viewModelScope, BrowseRepository.DEFAULT_PAGE_LIMIT, source::playlists, source::playlistCount, source.libraryChanges)
+    private val albumsPager = SectionPager(
+        scope = viewModelScope,
+        pageSize = BrowseRepository.DEFAULT_PAGE_LIMIT,
+        loadPage = source::albums,
+        loadCount = source::albumCount,
+        keyOf = { it.id },
+        changes = source.libraryChanges,
+    )
+    private val artistsPager = SectionPager(
+        scope = viewModelScope,
+        pageSize = BrowseRepository.DEFAULT_PAGE_LIMIT,
+        loadPage = source::artists,
+        loadCount = source::artistCount,
+        keyOf = { it.id },
+        changes = source.libraryChanges,
+    )
+    private val songsPager = SectionPager(
+        scope = viewModelScope,
+        pageSize = BrowseRepository.DEFAULT_PAGE_LIMIT,
+        loadPage = source::songs,
+        loadCount = source::songCount,
+        keyOf = { it.id },
+        changes = source.libraryChanges,
+    )
+    private val genresPager = SectionPager(
+        scope = viewModelScope,
+        pageSize = BrowseRepository.DEFAULT_PAGE_LIMIT,
+        loadPage = source::genres,
+        loadCount = source::genreCount,
+        keyOf = { it.id },
+        changes = source.libraryChanges,
+    )
+    private val playlistsPager = SectionPager(
+        scope = viewModelScope,
+        pageSize = BrowseRepository.DEFAULT_PAGE_LIMIT,
+        loadPage = source::playlists,
+        loadCount = source::playlistCount,
+        keyOf = { it.id },
+        changes = source.libraryChanges,
+    )
 
     val albums: StateFlow<BrowseUiState<AlbumEntity>> = albumsPager.state
     val artists: StateFlow<BrowseUiState<ArtistEntity>> = artistsPager.state
@@ -42,6 +77,13 @@ class LibraryBrowseViewModel @Inject constructor(
     fun load(section: LibrarySection) = pagerFor(section).loadInitial()
 
     fun loadMore(section: LibrarySection) = pagerFor(section).loadMore()
+
+    /**
+     * Scroll gate (Fix 2): a catalog change that lands while the user scrolls
+     * the section waits instead of replacing the window under their finger.
+     */
+    fun setScrolling(section: LibrarySection, scrolling: Boolean) =
+        pagerFor(section).setScrolling(scrolling)
 
     /**
      * Plays from the tapped song row, mirroring the detail screens: only the

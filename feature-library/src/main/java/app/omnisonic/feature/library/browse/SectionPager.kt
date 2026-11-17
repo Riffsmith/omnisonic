@@ -14,25 +14,40 @@ import kotlinx.coroutines.launch
 /**
  * Load-more paging engine behind one section's [BrowseUiState]. Hand-rolled
  * LIMIT/OFFSET windows: the first page also fetches the total count, further
- * pages start at the currently accumulated size, and `hasMore` comes from the
+ * pages continue from an explicit cursor, and `hasMore` comes from the
  * repository's fetch-one-past-the-window probe.
+ *
+ * Overlap safety: a live sync inserts rows at arbitrary positions, so the
+ * OFFSET window behind the loaded list can shift between two fetches and a
+ * page can repeat rows the list already shows. Duplicate rows are fatal for
+ * the Compose lazy bodies, which key every item by row id, so appends dedupe
+ * the fetched page against the loaded window via [keyOf]. The cursor always
+ * advances by the **raw** fetched count — a fully-duplicate page must still
+ * move it forward, or `hasMore` would keep re-fetching the same offset with a
+ * spinning footer — and a raw empty page ends paging defensively. Rows a
+ * shift skipped stay absent until the next [changes] refresh re-reads the
+ * window.
  *
  * Guards: `loadInitial` is idempotent while a page loads or content already
  * exists (only [BrowseUiState.Error] re-enters), and `loadMore` ignores calls
  * while any job is running or `hasMore` is false. A failed append keeps the
  * loaded items and raises [BrowseUiState.Content.appendFailed]; `loadMore`
- * retries it.
+ * retries the same cursor.
  *
  * [changes] drives live refresh (D-16): a catalog write re-fetches the window
  * the pager currently shows plus its count, so a sync fills the section in
  * front of the user. Pages that were never opened ignore changes, and a change
- * that lands mid-load is replayed once the in-flight job finishes.
+ * that lands mid-load is replayed once the in-flight job finishes. While the
+ * user is scrolling ([setScrolling], D-27) a change is deferred instead and
+ * replayed once when scrolling stops, so the sync never replaces the window
+ * under the finger.
  */
 internal class SectionPager<T>(
     private val scope: CoroutineScope,
     private val pageSize: Int,
     private val loadPage: suspend (offset: Int, limit: Int) -> BrowsePage<T>,
     private val loadCount: suspend () -> Int,
+    private val keyOf: (T) -> Long,
     changes: Flow<Unit> = emptyFlow(),
 ) {
 
@@ -42,6 +57,9 @@ internal class SectionPager<T>(
     private var job: Job? = null
     private var started = false
     private var refreshPending = false
+    private var scrolling = false
+    private var refreshDeferred = false
+    private var nextOffset = 0
 
     init {
         scope.launch {
@@ -64,6 +82,7 @@ internal class SectionPager<T>(
                     if (page.items.isEmpty()) {
                         BrowseUiState.Empty
                     } else {
+                        nextOffset = page.items.size
                         BrowseUiState.Content(
                             items = page.items,
                             totalCount = count,
@@ -81,15 +100,18 @@ internal class SectionPager<T>(
         @Suppress("UNCHECKED_CAST")
         val content = _state.value as? BrowseUiState.Content<T> ?: return
         if (!content.hasMore || content.appending || job?.isActive == true) return
-        val requestOffset = content.items.size
+        val requestOffset = nextOffset
         _state.value = content.copy(appending = true, appendFailed = false)
         job = scope.launch {
             _state.value = runCatching { loadPage(requestOffset, pageSize) }.fold(
                 onSuccess = { page ->
                     val current = _state.value as? BrowseUiState.Content<T> ?: content
+                    val known = current.items.mapTo(HashSet(current.items.size)) { keyOf(it) }
+                    val fresh = page.items.filterNot { keyOf(it) in known }
+                    nextOffset = requestOffset + page.items.size
                     current.copy(
-                        items = current.items + page.items,
-                        hasMore = page.hasMore,
+                        items = current.items + fresh,
+                        hasMore = page.hasMore && page.items.isNotEmpty(),
                         appending = false,
                         appendFailed = false,
                     )
@@ -103,8 +125,27 @@ internal class SectionPager<T>(
         }
     }
 
+    /**
+     * Scroll gate (D-27). While a section's list is scrolling, an invalidation
+     * only marks the window stale; the refresh runs once when scrolling stops,
+     * so the sync never re-reads (and clamps) the window under the user's
+     * finger. A stale flag set before the section is left is replayed on the
+     * next entry, which also reports scrolling as stopped.
+     */
+    fun setScrolling(scrolling: Boolean) {
+        this.scrolling = scrolling
+        if (!scrolling && refreshDeferred) {
+            refreshDeferred = false
+            refresh()
+        }
+    }
+
     private fun refresh() {
         if (!started) return
+        if (scrolling) {
+            refreshDeferred = true
+            return
+        }
         if (job?.isActive == true) {
             refreshPending = true
             return
@@ -112,10 +153,20 @@ internal class SectionPager<T>(
         launchRefresh()
     }
 
+    /**
+     * Replays an invalidation that arrived during an in-flight job. The replay
+     * re-checks the scroll gate: the user may have started scrolling while the
+     * job ran, in which case the refresh is deferred to scroll end instead of
+     * bypassing Fix 2.
+     */
     private fun replayPendingRefresh() {
         if (!refreshPending) return
         refreshPending = false
-        launchRefresh()
+        if (scrolling) {
+            refreshDeferred = true
+        } else {
+            launchRefresh()
+        }
     }
 
     private fun launchRefresh() {
@@ -135,10 +186,11 @@ internal class SectionPager<T>(
             }.getOrNull()
             if (fresh != null) {
                 val (page, count) = fresh
-                _state.value = if (page.items.isEmpty()) {
-                    BrowseUiState.Empty
+                if (page.items.isEmpty()) {
+                    _state.value = BrowseUiState.Empty
                 } else {
-                    BrowseUiState.Content(
+                    nextOffset = page.items.size
+                    _state.value = BrowseUiState.Content(
                         items = page.items,
                         totalCount = count,
                         hasMore = page.hasMore,

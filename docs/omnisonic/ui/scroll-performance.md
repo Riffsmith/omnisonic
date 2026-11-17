@@ -461,8 +461,22 @@ the end" — the page-boundary shape) and remains a real 10k-library scaling
 defect. Keep P2.1/P2.3 (cheap) and P2.2 (the schema-v2 sortKey migration —
 user confirmation still pending, §9.2).
 
-**P2.1 `refresh()` must never shrink the window under the user.** Options, in
-order of preference:
+**Crash note (2026-11-17, hotfix landed):** the OFFSET shift this section
+calls a jank / correctness caveat has a fatal form — a shifted page can
+duplicate a row in the loaded window, and the section lists' stable lazy keys
+turn that into a Compose `Key "…" was already used` crash during a live sync
+walk. `ui/sync-scroll-crash.md` records the mechanism, the JVM reproduction
+and the device protocol (P0 in `progress/KNOWN_ISSUES.md`, device-unverified).
+The hotfix shipped **Fix 1** (overlap-proof append: explicit cursor, id
+dedupe, empty-page stop) and **Fix 2** (the P2.3 scroll gate) — see the status
+lines under P2.1/P2.3 below. P2.2 keyset paging remains the durable fix for
+the shift and the O(n) page cost, and stays deferred.
+
+**P2.1 `refresh()` must never shrink the window under the user.** Status
+(2026-11-17): the **scroll-pause half of option 3 has shipped** (D-27); the
+window-replacement/`stale`-on-entry half and options 1/2/4 remain open — a
+refresh still re-reads the loaded window and can clamp it at
+`MAX_PAGE_LIMIT`. Options, in order of preference:
 
 1. Keep the loaded window intact: re-fetch only the pages that are already
    loaded **and** whose content can have shifted, splicing them in — complex.
@@ -476,9 +490,12 @@ order of preference:
 4. Refresh only the section the user can see (add an `active` flag set by the
    section destination), and coalesce to 1 s while a sync is running.
 
-Test: `SectionPagerTest` — scroll past 200 items, deliver an invalidation,
-assert the list length and the state are unchanged (and the stale flag is set
-for option 3).
+Test: the shipped scroll-pause half is covered in
+`LibraryBrowseViewModelTest` (`invalidation while the section scrolls
+refreshes once when scrolling stops`, `a refresh pending from an in-flight
+load waits while scrolling`, `scroll end without an invalidation fetches
+nothing`). The >200-item clamp case remains uncovered and is part of the open
+half. (`SectionPagerTest` does not exist — this line was stale.)
 
 **P2.2 Make the browse ordering index-friendly, then move to keyset paging.**
 Ordering by `COALESCE(...)` defeats every index. Preferred shape (Room-friendly,
@@ -508,12 +525,16 @@ Test: `BrowsePagingTest` grows a keyset case (insert rows, page by seek, no
 duplicates/gaps, ordering stable); migration test opens v1 with rows and
 asserts the backfill + index.
 
-**P2.3 Do not refresh while a scroll is in flight.** `SectionPager` gets a
-`setActive(Boolean)` (called from `LaunchedEffect` in the section route) and a
-`setScrolling(Boolean)` (from `LazyListState.isScrollInProgress` via
-`snapshotFlow`); invalidation sets `stale` instead of launching while
-scrolling or inactive. This is the cheap version of P2.1 option 4 and the
-guard against sync-time churn.
+**P2.3 Do not refresh while a scroll is in flight.** **Shipped 2026-11-17**
+as the scroll half of the P0 hotfix (D-27): `SectionPager.setScrolling`
+deferes invalidations while the section list scrolls and replays one refresh
+at scroll end, including when a pending replay would otherwise have fired
+after an in-flight load. `LibrarySectionScreen` observes
+`LazyGridState`/`LazyListState.isScrollInProgress` through `snapshotFlow` and
+reports `false` on dispose so leaving a section cannot park the deferral.
+Still open: the inactive/never-opened half (`setActive`), and option 4's
+1-second coalescing while a sync runs. This is the cheap version of P2.1
+option 4 and the guard against sync-time churn.
 
 ### P3 — Cold-start compilation (`:baseline-profile`, `:app`)
 

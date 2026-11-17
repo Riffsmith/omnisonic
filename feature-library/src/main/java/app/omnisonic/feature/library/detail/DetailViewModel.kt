@@ -178,11 +178,12 @@ class DetailViewModel @Inject constructor(
         _state.value = DetailUiState.Artist(header, BrowseUiState.Loading, BrowseUiState.Loading)
         val tracks = createTracksPager { offset, limit -> source.artistTracks(id, offset, limit) }
         val albums = SectionPager(
-            viewModelScope,
-            BrowseRepository.DEFAULT_PAGE_LIMIT,
-            { offset, limit -> source.artistAlbums(id, offset, limit) },
-            { header.albumCount },
-            source.libraryChanges,
+            scope = viewModelScope,
+            pageSize = BrowseRepository.DEFAULT_PAGE_LIMIT,
+            loadPage = { offset, limit -> source.artistAlbums(id, offset, limit) },
+            loadCount = { header.albumCount },
+            keyOf = { it.id },
+            changes = source.libraryChanges,
         )
         albumsPager = albums
         observeTracks { tracksState ->
@@ -209,11 +210,12 @@ class DetailViewModel @Inject constructor(
     private fun startPlaylistBody(id: Long, header: PlaylistEntity) {
         _state.value = DetailUiState.Playlist(header, BrowseUiState.Loading)
         val pager = SectionPager(
-            viewModelScope,
-            BrowseRepository.DEFAULT_PAGE_LIMIT,
-            { offset, limit -> source.playlistEntries(id, offset, limit) },
-            { header.entryCount },
-            source.libraryChanges,
+            scope = viewModelScope,
+            pageSize = BrowseRepository.DEFAULT_PAGE_LIMIT,
+            loadPage = { offset, limit -> source.playlistEntries(id, offset, limit) },
+            loadCount = { header.entryCount },
+            keyOf = { it.id },
+            changes = source.libraryChanges,
         )
         entriesPager = pager
         bodyJobs += viewModelScope.launch {
@@ -230,11 +232,12 @@ class DetailViewModel @Inject constructor(
         loadPage: suspend (offset: Int, limit: Int) -> BrowsePage<SongEntity>,
     ): SectionPager<SongEntity> {
         val pager = SectionPager(
-            viewModelScope,
-            BrowseRepository.DEFAULT_PAGE_LIMIT,
-            loadPage,
-            { trackedCount },
-            source.libraryChanges,
+            scope = viewModelScope,
+            pageSize = BrowseRepository.DEFAULT_PAGE_LIMIT,
+            loadPage = loadPage,
+            loadCount = { trackedCount },
+            keyOf = { it.id },
+            changes = source.libraryChanges,
         )
         tracksPager = pager
         return pager

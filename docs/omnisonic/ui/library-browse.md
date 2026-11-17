@@ -1,5 +1,37 @@
 # Library browse UI + paging (`:feature-library`, Phase 5 task 4)
 
+Purpose: pin down the library hub and section screens and their data contract —
+the browse queries and paged reads, the `SectionPager` state machine, the
+cover-request pipeline, and the sync plumbing the screens consume (live
+refresh, resume, cover sizing).
+
+How derived: own implementation for Phase 5 task 4 to the slot spec in
+`reference/docs/UI_SPEC.md` §3.4 (states §1.4, token discipline §1.5) over the
+task-3 query conventions (`docs/omnisonic/search/data-layer.md`); tasks 4b/4c
+added the sync-progress/live-refresh/resume/cover-sizing plumbing (D-16/D-17)
+from the 2026-11-09 live-device findings; tasks 4d/4e and the scroll
+investigation (`ui/scroll-performance.md`) came from the later device sessions;
+task 7d added the Songs row tap.
+
+Confidence: browse query shapes, ordering, paging windows, the
+`ProfileScope` pass-through and the D-27 overlap-proof append/scroll gate are
+`[VERIFIED]` by `BrowsePagingTest`, `ProfileScopeQueryTest`,
+`LibraryBrowseViewModelTest` and the render tests; the no-hidden/
+offline-folding scope choice is `[INFERRED]` (no visibility UI exists yet,
+Phase 9); scroll feel, frame time on a 10k grid and the live-sync crash as a
+*device* incident are `[UNKNOWN]` device items (`progress/KNOWN_ISSUES.md`;
+mechanism + JVM proof in `ui/sync-scroll-crash.md`).
+
+Date: 2026-11-11 (task 4 shipped 2026-11-09; header added 2026-11-17)
+
+Links: `detail-screens.md` (consumes this paging contract), `scroll-performance.md`
+(authoritative scroll backlog), `sync-scroll-crash.md` (live-sync crash
+mechanism, JVM proof and device gate), `../search/data-layer.md` (query
+conventions), `../providers/library-sync-ux.md` (sync progress/UX),
+`../decisions.md` (D-16/D-17/D-27)
+
+---
+
 Status: Phase 5 task 4, shipped 2026-11-09. Spec: `reference/docs/UI_SPEC.md` §3.4
 (hub + section slots, states, paging), §1.4 (state triplet), §1.5 (token
 discipline). Data contract: `docs/omnisonic/search/data-layer.md` (the
@@ -29,10 +61,16 @@ discipline). Data contract: `docs/omnisonic/search/data-layer.md` (the
   exclusion today. There is no hide-provider UI yet (Phase 9), so the two
   behaviors are indistinguishable in practice; revisit when the visibility
   UI lands. [INFERRED]
-- **OFFSET paging caveat:** windows are `LIMIT/OFFSET` over the live table
-  (K7, no Paging 3). A sync running mid-scroll can shift rows between pages;
-  the deterministic no-duplicate guarantee holds only for a stable library —
-  [VERIFIED] for static data in `BrowsePagingTest`.
+- **OFFSET paging caveat (D-27):** windows are still `LIMIT/OFFSET` over the
+  live table (K7, no Paging 3), so a sync running mid-scroll can shift rows
+  between pages and skip rows that later windows would have shown. What the
+  hotfix removes is the fatal consequence: appends dedupe by row id against
+  the loaded window and carry an explicit cursor, so a shifted/overlapping
+  page can no longer create duplicate lazy keys (the `Key "…" was already
+  used` crash class). It does **not** make traversal gap-free or the page
+  cost O(log n) — keyset paging remains `ui/scroll-performance.md` §5 P2.2 —
+  [VERIFIED] for static data in `BrowsePagingTest` and for the overlap cases
+  in `LibraryBrowseViewModelTest`.
 
 ## UI layer (`:feature-library`)
 
@@ -56,6 +94,16 @@ discipline). Data contract: `docs/omnisonic/search/data-layer.md` (the
   the window currently shown plus its count. A refresh request that arrives
   mid-load is replayed once the in-flight job finishes; a section that was
   never opened ignores it.
+- **Overlap-proof append (D-27):** every pager takes `keyOf: (T) -> Long`
+  (the row id for all five entities and for the three detail pagers) and
+  tracks an explicit `nextOffset` cursor instead of deriving the offset from
+  `items.size`. An append filters the fetched page against the ids already
+  loaded and advances the cursor by the **raw** fetched count, so a
+  fully-duplicate page still makes progress, the footer clears and the same
+  offset is never re-fetched forever. A raw empty page sets `hasMore =
+  false`; a failed append leaves the cursor untouched so retry requests the
+  same window. A successful refresh resets the cursor to the replacement
+  window's size. [VERIFIED: `LibraryBrowseViewModelTest`].
 - **`BrowseUiState<T>`** — the §1.4 triplet: `Loading`, `Content(items,
   totalCount, hasMore, appending, appendFailed)`, `Empty`, `Error`. An
   append failure keeps the loaded items and raises `appendFailed`; the
@@ -109,6 +157,17 @@ discipline). Data contract: `docs/omnisonic/search/data-layer.md` (the
   instead of staying a point-in-time snapshot.
   [VERIFIED: `LibraryInvalidationTest` (insert → flow) and
   `LibraryBrowseViewModelTest` (refresh paths)]
+- **Scroll gate (D-27, Fix 2):** a refresh that arrives while the visible
+  list is scrolling is deferred, not applied, so the sync cannot replace or
+  clamp the window under the user's finger. `LibrarySectionScreen`'s
+  `ScrollGateReporter` observes `isScrollInProgress` on the section's
+  `LazyGridState` / `LazyListState` and calls `LibraryBrowseViewModel
+  .setScrolling(section, …)`; one refresh replays when scrolling stops. The
+  observer reports `false` when the body leaves composition, and a pending
+  in-flight replay re-checks the gate, so leaving the section cannot park a
+  stale window forever. Multiple invalidations during one scroll coalesce
+  into that single replay. [VERIFIED: `LibraryBrowseViewModelTest` scroll
+  cases]
 
 ## Deferred from §3.4 (logged, not dropped)
 

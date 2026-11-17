@@ -18,19 +18,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -219,6 +226,45 @@ private fun Modifier.placeholderBackground(): Modifier {
     )
 }
 
+/**
+ * Reports the list's scroll-in-progress flag so a live refresh can wait for
+ * the finger to lift (D-27); reports `false` again when the body leaves
+ * composition, so leaving mid-fling cannot park a deferred refresh forever.
+ *
+ * The effects are keyed on `Unit` and read the callback through
+ * [rememberUpdatedState]: route callbacks are recreated on every recomposition
+ * and must not restart the observer or emit a spurious `false` (which would
+ * flush a deferred refresh mid-scroll).
+ */
+@Composable
+private fun ScrollGateReporter(
+    listState: LazyListState,
+    onScrollInProgress: ((Boolean) -> Unit)?,
+) = ScrollGateReporter({ listState.isScrollInProgress }, onScrollInProgress)
+
+@Composable
+private fun ScrollGateReporter(
+    gridState: LazyGridState,
+    onScrollInProgress: ((Boolean) -> Unit)?,
+) = ScrollGateReporter({ gridState.isScrollInProgress }, onScrollInProgress)
+
+@Composable
+private fun ScrollGateReporter(
+    isScrolling: () -> Boolean,
+    onScrollInProgress: ((Boolean) -> Unit)?,
+) {
+    val currentIsScrolling = rememberUpdatedState(isScrolling)
+    val currentReport = rememberUpdatedState(onScrollInProgress)
+    LaunchedEffect(Unit) {
+        snapshotFlow { currentIsScrolling.value() }.collect { scrolling ->
+            currentReport.value?.invoke(scrolling)
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { currentReport.value?.invoke(false) }
+    }
+}
+
 /** Cover grid for albums/artists/genres/playlists with the load-more footer. */
 @Composable
 fun <T> CoverGridBody(
@@ -230,11 +276,15 @@ fun <T> CoverGridBody(
     titleInsideTile: (T) -> Boolean = { false },
     onClick: ((T) -> Unit)?,
     onLoadMore: () -> Unit,
+    onScrollInProgress: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
+    val gridState = rememberLazyGridState()
+    ScrollGateReporter(gridState, onScrollInProgress)
     LazyVerticalGrid(
         columns = GridCells.Fixed(tokenGridColumns()),
+        state = gridState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             horizontal = tokens.layout.pagePadding,
@@ -329,10 +379,14 @@ fun SongListBody(
     content: BrowseUiState.Content<SongEntity>,
     onSongClick: (Int) -> Unit,
     onLoadMore: () -> Unit,
+    onScrollInProgress: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
+    val listState = rememberLazyListState()
+    ScrollGateReporter(listState, onScrollInProgress)
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             horizontal = tokens.layout.pagePadding,

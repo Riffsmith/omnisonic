@@ -44,6 +44,7 @@ fun LibrarySectionRoute(
                     subtitle = { it.displayArtist },
                     onClick = { onOpenAlbum(it.id) },
                     onLoadMore = { viewModel.loadMore(section) },
+                    onScrollInProgress = { viewModel.setScrolling(section, it) },
                 )
             }
         }
@@ -65,6 +66,7 @@ fun LibrarySectionRoute(
                     subtitle = null,
                     onClick = { onOpenArtist(it.id) },
                     onLoadMore = { viewModel.loadMore(section) },
+                    onScrollInProgress = { viewModel.setScrolling(section, it) },
                 )
             }
         }
@@ -87,6 +89,7 @@ fun LibrarySectionRoute(
                     titleInsideTile = { true },
                     onClick = { onOpenGenre(it.id) },
                     onLoadMore = { viewModel.loadMore(section) },
+                    onScrollInProgress = { viewModel.setScrolling(section, it) },
                 )
             }
         }
@@ -104,6 +107,7 @@ fun LibrarySectionRoute(
                     content = content,
                     onSongClick = viewModel::playFrom,
                     onLoadMore = { viewModel.loadMore(section) },
+                    onScrollInProgress = { viewModel.setScrolling(section, it) },
                 )
             }
         }
@@ -125,6 +129,7 @@ fun LibrarySectionRoute(
                     subtitle = null,
                     onClick = { onOpenPlaylist(it.id) },
                     onLoadMore = { viewModel.loadMore(section) },
+                    onScrollInProgress = { viewModel.setScrolling(section, it) },
                 )
             }
         }
