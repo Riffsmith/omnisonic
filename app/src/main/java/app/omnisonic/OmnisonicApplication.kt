@@ -3,6 +3,7 @@ package app.omnisonic
 import android.app.Application
 import android.content.Context
 import app.omnisonic.core.data.providers.LibrarySyncLauncher
+import app.omnisonic.log.CrashLogInstaller
 import app.omnisonic.playback.service.PlaybackSessionHost
 import app.omnisonic.playback.startup.PlaybackLaunchRestore
 import coil3.ImageLoader
@@ -18,6 +19,9 @@ class OmnisonicApplication : Application(), SingletonImageLoader.Factory {
     lateinit var imageLoader: Provider<ImageLoader>
 
     @Inject
+    lateinit var crashLogInstaller: CrashLogInstaller
+
+    @Inject
     lateinit var librarySyncLauncher: Provider<LibrarySyncLauncher>
 
     @Inject
@@ -28,6 +32,8 @@ class OmnisonicApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        // First, so a crash during sync or playback restore still reaches crash.log.
+        crashLogInstaller.install()
         librarySyncLauncher.get().resumeIncomplete()
         playbackLaunchRestore.get().restore()
         playbackSessionHost.get().connect()

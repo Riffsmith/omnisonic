@@ -12,6 +12,7 @@ import app.omnisonic.core.data.sync.LibrarySyncControl
 import app.omnisonic.core.data.sync.LibrarySyncStatusRepository
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.model.runCatchingCancellable
+import app.omnisonic.core.network.NetworkLogGate
 import app.omnisonic.provider.api.ProviderRegistry
 import app.omnisonic.provider.local.LocalMediaProviderFactory
 import app.omnisonic.provider.navidrome.SubsonicProviderFactory
@@ -82,12 +83,16 @@ object ProviderWiringModule {
         mapper: ProviderConfigMapper,
         statusTracker: ProviderStatusTracker,
         logger: OmnisonicLogger,
+        networkLog: NetworkLogGate,
+        @NetworkLogger networkLogger: OmnisonicLogger,
     ): ProviderClientRegistry =
         ProviderClientRegistry(
             database = database,
             providerRegistry = providerRegistry,
             mapper = mapper,
             logger = logger,
+            networkLog = networkLog,
+            networkLogger = networkLogger,
             onCredentialsUnreadable = { providerId ->
                 statusTracker.markCredentialsUnreadable(providerId)
             },

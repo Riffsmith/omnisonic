@@ -102,6 +102,8 @@ dependencies {
     implementation(project(":feature-settings"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.media3.session)
+    // FileProvider for the log export share sheet.
+    implementation(libs.androidx.core)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)

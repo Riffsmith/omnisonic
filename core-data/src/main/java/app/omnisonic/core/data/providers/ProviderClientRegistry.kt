@@ -5,6 +5,7 @@ import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.network.ClientProfile
 import app.omnisonic.core.network.ConnectionSpec
 import app.omnisonic.core.network.HttpClientFactory
+import app.omnisonic.core.network.NetworkLogGate
 import app.omnisonic.core.network.pkcs12KeyStore
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.ProviderConnection
@@ -30,11 +31,13 @@ class ProviderClientRegistry(
     private val providerRegistry: ProviderRegistry,
     private val mapper: ProviderConfigMapper,
     private val logger: OmnisonicLogger,
+    private val networkLog: NetworkLogGate = NetworkLogGate.DISABLED,
+    private val networkLogger: OmnisonicLogger = logger,
     private val mediaClientFactory: (ConnectionSpec) -> OkHttpClient = { spec ->
-        HttpClientFactory(logger).create(spec)
+        HttpClientFactory(logger, networkLog = networkLog, networkLogger = networkLogger).create(spec)
     },
     private val apiClientFactory: (ConnectionSpec) -> OkHttpClient = { spec ->
-        HttpClientFactory(logger).create(spec)
+        HttpClientFactory(logger, networkLog = networkLog, networkLogger = networkLogger).create(spec)
     },
     private val onCredentialsUnreadable: suspend (Long) -> Unit = {},
 ) {

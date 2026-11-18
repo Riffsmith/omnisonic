@@ -18,6 +18,8 @@ class HttpClientFactory(
     private val logger: OmnisonicLogger,
     private val decoder: ResponseDecoder = ZstdGzipResponseDecoder,
     private val zstdProbe: ZstdProbe = ZstdSupport,
+    private val networkLog: NetworkLogGate = NetworkLogGate.DISABLED,
+    private val networkLogger: OmnisonicLogger = logger,
 ) {
 
     /**
@@ -37,6 +39,7 @@ class HttpClientFactory(
             .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
             .retryOnConnectionFailure(true)
             .addInterceptor(logging())
+            .addInterceptor(NetworkLogInterceptor(networkLogger, networkLog))
             .addInterceptor(headerInjector(spec.headers))
 
         when (spec.profile) {
