@@ -20,6 +20,7 @@ import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
 import app.omnisonic.feature.settings.ui.label
+import app.omnisonic.log.LogExport
 import app.omnisonic.style.GestureTwin
 import app.omnisonic.style.OmnisonicTheme
 import app.omnisonic.style.gestureTwins
@@ -89,6 +90,7 @@ internal fun MainTabsPager(
                 onOpenProviders = onOpenSetup,
                 syncViewModel = syncManagerViewModel,
                 viewModel = settingsViewModel,
+                onShareLogs = { LogExport.shareIntent(context)?.let(context::startActivity) },
             )
         }
     }

@@ -15,6 +15,8 @@ import app.omnisonic.playback.api.renderer.PlaybackRenderer
 import app.omnisonic.playback.api.settings.NotificationAction
 import app.omnisonic.playback.api.source.NoOpQueueSources
 import app.omnisonic.playback.api.source.QueueSources
+import app.omnisonic.core.model.log.LogSink
+import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.playback.focus.AudioFocusHelper
 import app.omnisonic.playback.focus.AudioFocusOwner
 import app.omnisonic.playback.focus.FocusOwnerFactory
@@ -48,6 +50,7 @@ class PlaybackControllerImpl(
     override val queueSources: QueueSources = NoOpQueueSources(),
     private val tickIntervalMs: Long = DEFAULT_TICK_INTERVAL_MS,
     private val positionReader: () -> Long = { player.exposedPlayer().currentPosition },
+    private val logger: OmnisonicLogger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
 ) : PlaybackController {
 
     private val _playerState = MutableStateFlow(PlayerCoreState())
@@ -175,6 +178,7 @@ class PlaybackControllerImpl(
         queue.setQueue(entries, startEntriesIndex, sourceType, sourceData)
         val state = queue.state.value
         val entry = state.currentEntry ?: return
+        logger.info(TAG, "play: ${entries.size} entries from index $startEntriesIndex")
         events.emit(PlaybackEvent.Started(entry, state.positionMs))
         startTicker()
         publishState()
@@ -194,6 +198,7 @@ class PlaybackControllerImpl(
 
     override fun stop() {
         if (released) return
+        logger.info(TAG, "stop")
         playIntent = false
         queue.clearQueue(keepCurrent = false)
         goIdle()
@@ -205,6 +210,7 @@ class PlaybackControllerImpl(
         if (queue.state.value.currentEntry == null) return
         val duration = queue.state.value.currentEntry?.durationMs
         val target = if (duration != null) positionMs.coerceIn(0L, duration) else positionMs.coerceAtLeast(0L)
+        logger.info(TAG, "seek to $target ms")
         queue.seekTo(target)
         this.positionMs = target
         events.emit(PlaybackEvent.Position(queue.state.value.currentEntry, target, enginePlaying))
@@ -213,53 +219,70 @@ class PlaybackControllerImpl(
 
     override fun setPlaybackSpeed(scale: Float) {
         if (released) return
+        logger.info(TAG, "speed $scale")
         queue.setPlaybackSpeed(scale)
     }
 
     override fun setPlaybackPitch(pitch: Float) {
         if (released) return
+        logger.info(TAG, "pitch $pitch")
         queue.setPlaybackPitch(pitch)
     }
 
     override fun skipNext() {
-        if (startQueueCommand()) queue.skipNext(manual = true)
+        if (startQueueCommand()) {
+            logger.info(TAG, "skip next")
+            queue.skipNext(manual = true)
+        }
     }
 
     override fun skipPrevious() {
-        if (startQueueCommand()) queue.skipPrevious()
+        if (startQueueCommand()) {
+            logger.info(TAG, "skip previous")
+            queue.skipPrevious()
+        }
     }
 
     override fun jumpToOrderIndex(orderIndex: Int) {
-        if (startQueueCommand()) queue.jumpToEntry(orderIndex)
+        if (startQueueCommand()) {
+            logger.info(TAG, "jump to order index $orderIndex")
+            queue.jumpToEntry(orderIndex)
+        }
     }
 
     override fun setRepeatMode(mode: RepeatMode) {
         if (released) return
+        logger.info(TAG, "repeat ${mode.name.lowercase()}")
         queue.setRepeatMode(mode)
     }
 
     override fun setShuffleEnabled(enabled: Boolean) {
         if (released) return
+        logger.info(TAG, "shuffle $enabled")
         queue.setShuffleEnabled(enabled)
     }
 
     override fun removeFromQueue(queueItemId: Long) {
         if (released) return
+        logger.info(TAG, "remove queue item $queueItemId")
         queue.removeEntry(queueItemId)
     }
 
     override fun insertIntoQueue(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int) {
         if (released) return
+        logger.info(TAG, "insert queue item ${entry.queueItemId} at $orderIndex")
         queue.insertEntry(entry, entriesIndex, orderIndex)
     }
 
     override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) {
         if (released) return
+        logger.info(TAG, "move queue item $queueItemId to $toEntriesIndex")
         queue.moveEntry(queueItemId, toEntriesIndex)
     }
 
     override fun clearQueueExceptCurrent() {
         if (released) return
+        logger.info(TAG, "clear queue except current")
         queue.clearQueue(keepCurrent = true)
     }
 
@@ -295,6 +318,7 @@ class PlaybackControllerImpl(
         if (queue.state.value.entries.isNotEmpty()) return false
         val restored = persistence.restoreInto(queue)
         if (restored) {
+            logger.info(TAG, "restored queue snapshot")
             engineLoaded = false
             playIntent = false
             idle = false
@@ -323,6 +347,7 @@ class PlaybackControllerImpl(
         if (released || playIntent) return
         val entry = queue.state.value.currentEntry ?: return
         if (!focus.requestFocus()) return
+        logger.info(TAG, "resume")
         playIntent = true
         idle = false
         if (engineLoaded) {
@@ -340,6 +365,7 @@ class PlaybackControllerImpl(
     private fun pauseInternal(reason: PauseReason, flushSnapshot: Boolean, fade: Boolean) {
         if (released || !playIntent) return
         val entry = queue.state.value.currentEntry
+        logger.info(TAG, "pause (${reason.name.lowercase()})")
         playIntent = false
         stopTicker()
         if (fade) player.fadePause() else player.pause()
@@ -419,5 +445,6 @@ class PlaybackControllerImpl(
 
     companion object {
         const val DEFAULT_TICK_INTERVAL_MS = 500L
+        private const val TAG = "Playback"
     }
 }

@@ -15,6 +15,9 @@
     <string name="settings_notification_settings">Notification settings</string>
     <string name="settings_group_about">About</string>
     <string name="settings_version">Version</string>
+    <string name="settings_share_logs">Share logs</string>
+    <string name="settings_network_logging">Log network requests</string>
+    <string name="settings_network_logging_summary">Records the request method, URL, status and timing. Requests and responses are never recorded, credentials are redacted, and it stays off unless you turn it on.</string>
     <string name="provider_setup_title">Connect a server</string>
     <string name="provider_setup_intro">Omnisonic plays music from your own server. Enter the connection details for a Subsonic-compatible service such as Navidrome.</string>
     <string name="provider_setup_back">Back</string>

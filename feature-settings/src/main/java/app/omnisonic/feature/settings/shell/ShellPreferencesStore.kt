@@ -34,6 +34,7 @@ data class ShellPreferences(
     val landscapeNavOverride: NavigationLayout?,
     val onboardingSteps: List<String>,
     val onboardingComplete: Boolean,
+    val networkLoggingEnabled: Boolean = false,
 )
 
 /**
@@ -58,6 +59,7 @@ class ShellPreferencesStore(
                 landscapeNavOverride = prefs[Keys.NAV_OVERRIDE_LANDSCAPE]?.let(::readNavLayout),
                 onboardingSteps = parseSteps(prefs[Keys.ONBOARDING_STEPS]),
                 onboardingComplete = prefs[Keys.ONBOARDING_COMPLETE] ?: false,
+                networkLoggingEnabled = prefs[Keys.NETWORK_LOGGING] ?: false,
             )
         }
 
@@ -71,6 +73,11 @@ class ShellPreferencesStore(
             val key = if (isLandscape) Keys.NAV_OVERRIDE_LANDSCAPE else Keys.NAV_OVERRIDE_PORTRAIT
             if (layout == null) prefs.remove(key) else prefs[key] = layout.name
         }
+    }
+
+    /** Opt-in; HTTP logging stays off until the user turns it on. */
+    suspend fun setNetworkLogging(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[Keys.NETWORK_LOGGING] = enabled }
     }
 
     suspend fun completeOnboardingStep(step: String) {
@@ -90,6 +97,7 @@ class ShellPreferencesStore(
         val NAV_OVERRIDE_LANDSCAPE = stringPreferencesKey("shell.nav_override_landscape")
         val ONBOARDING_STEPS = stringPreferencesKey("shell.onboarding_steps")
         val ONBOARDING_COMPLETE = booleanPreferencesKey("shell.onboarding_complete")
+        val NETWORK_LOGGING = booleanPreferencesKey("shell.network_logging")
     }
 
     companion object {

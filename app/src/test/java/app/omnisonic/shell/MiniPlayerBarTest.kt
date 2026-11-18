@@ -265,6 +265,7 @@ class MiniPlayerShellTest {
                     sheetState = sheetState,
                     nowPlayingViewModelProvider = { testNowPlayingViewModel() },
                     queueViewModelProvider = { queueViewModel },
+                    detailViewModelProvider = { testDetailViewModel() },
                 )
             }
         }
@@ -614,6 +615,61 @@ class MiniPlayerShellTest {
         awaitSheetAt(PlayerSheetStops.PEEK)
         assertThat(sheet.isVisible).isFalse()
         assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.LIBRARY)
+    }
+
+    /**
+     * Regression for the open P1 "Navigation from the queue/nps screen"
+     * (ui/player-sheet-back-navigation.md): the NavHost registers its own back
+     * callback and, being composed after the shell's sheet handler, wins the
+     * LIFO dispatch while the back stack is deeper than its root — so system
+     * back walked the hidden route beneath the expanded sheet. The old code
+     * pops album -> library on the first press with the sheet still up.
+     */
+    @Test
+    fun systemBackOverTheSheetDoesNotWalkTheRouteBeneath() {
+        val nav = setShell(playingState())
+        nav.navigate(ShellRoutes.album(1L))
+        composeRule.waitForIdle()
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.ALBUM)
+
+        composeRule.onNodeWithContentDescription("Expand player").performClick()
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+
+        pressBack()
+
+        // The sheet owns back while visible: collapse to peek, route untouched.
+        awaitSheetAt(PlayerSheetStops.PEEK)
+        assertThat(sheet.isVisible).isFalse()
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.ALBUM)
+
+        pressBack()
+
+        // Sheet at peek no longer owns back; the route pops now.
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.LIBRARY)
+    }
+
+    @Test
+    fun systemBackOnTheQueueOverADeepStack() {
+        val nav = setShell(playingState(), queueState = shortQueue())
+        nav.navigate(ShellRoutes.album(1L))
+        composeRule.waitForIdle()
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.ALBUM)
+
+        openQueue()
+        val depth = nav.currentBackStack.value.size
+
+        pressBack()
+
+        awaitSheetAt(PlayerSheetStops.NOW_PLAYING)
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.ALBUM)
+        assertThat(nav.currentBackStack.value.size).isEqualTo(depth)
+
+        pressBack()
+
+        awaitSheetAt(PlayerSheetStops.PEEK)
+        assertThat(sheet.isVisible).isFalse()
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.ALBUM)
+        assertThat(nav.currentBackStack.value.size).isEqualTo(depth)
     }
 
     @Test

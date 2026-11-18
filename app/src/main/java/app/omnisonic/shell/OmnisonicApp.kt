@@ -1,7 +1,8 @@
 package app.omnisonic.shell
 
 import android.content.res.Configuration
-import androidx.activity.compose.BackHandler
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,6 +29,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -45,6 +47,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -118,9 +121,20 @@ fun OmnisonicApp(
                 syncManagerViewModel = syncManagerViewModel,
                 searchViewModel = searchViewModel,
                 miniPlayerState = miniPlayer,
-                onMiniPlayerTogglePlayPause = miniPlayerViewModel::togglePlayPause,
-                onMiniPlayerPrevious = miniPlayerViewModel::previous,
-                onMiniPlayerNext = miniPlayerViewModel::next,
+                onMiniPlayerTogglePlayPause = {
+                    viewModel.logUserAction("mini-player:toggle")
+                    miniPlayerViewModel.togglePlayPause()
+                },
+                onMiniPlayerPrevious = {
+                    viewModel.logUserAction("mini-player:previous")
+                    miniPlayerViewModel.previous()
+                },
+                onMiniPlayerNext = {
+                    viewModel.logUserAction("mini-player:next")
+                    miniPlayerViewModel.next()
+                },
+                onRouteChanged = viewModel::logNavigation,
+                onUserAction = viewModel::logUserAction,
             )
         }
     }
@@ -152,6 +166,8 @@ fun OmnisonicShell(
     detailViewModelProvider: @Composable () -> DetailViewModel = { hiltViewModel() },
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel = { hiltViewModel() },
     queueViewModelProvider: @Composable () -> QueueViewModel = { hiltViewModel() },
+    onRouteChanged: (String) -> Unit = {},
+    onUserAction: (String) -> Unit = {},
 ) {
     val controller = navController ?: rememberNavController()
     val backStackEntry by controller.currentBackStackEntryAsState()
@@ -184,6 +200,7 @@ fun OmnisonicShell(
         }
     }
     val onTabTapped: (MainTab) -> Unit = { tab ->
+        onUserAction("tab:${tab.id}")
         val index = state.tabs.indexOf(tab)
         if (index >= 0) {
             scope.launch { pagerState.animateScrollToPage(index) }
@@ -217,6 +234,7 @@ fun OmnisonicShell(
 
     val swipeZoneRegistry = rememberSwipeZoneRegistry()
     val currentRoute = backStackEntry?.destination?.route ?: state.startRoute
+    LaunchedEffect(currentRoute) { onRouteChanged(currentRoute) }
     val showMiniPlayer = miniPlayerState.isVisible && currentRoute != ShellRoutes.NOW_PLAYING
 
     // The player is a shell-level sheet (ui/player-sheet.md §1): it slides with
@@ -252,14 +270,40 @@ fun OmnisonicShell(
     val swipeUpTargetRevealed by remember(sheet) {
         derivedStateOf { sheet.swipeUpTargetRevealed }
     }
-    BackHandler(enabled = sheet.isVisible) { sheet.onBack() }
+    // The sheet owns back while it is visible (D-34). Navigation's own back
+    // handling is registered by the NavHost and is enabled whenever the back
+    // stack is deeper than its root, so it wins the dispatcher's newest-first
+    // dispatch and pops the hidden route instead of closing the sheet.
+    // `NavHostController.enableOnBackPressed` does not reach that handler on
+    // navigation-compose 2.8.2 (the NavHost registers its own predictive-back
+    // callback), so the sheet's callback is added at the visibility edge —
+    // after anything the shell composed before it — and removed again at peek.
+    val backDispatcherOwner = LocalOnBackPressedDispatcherOwner.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val sheetVisible = sheet.isVisible
+    DisposableEffect(backDispatcherOwner, lifecycleOwner, sheet, sheetVisible) {
+        val dispatcher = backDispatcherOwner?.onBackPressedDispatcher
+        if (!sheetVisible || dispatcher == null) return@DisposableEffect onDispose {}
+        val callback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = sheet.onBack()
+        }
+        dispatcher.addCallback(lifecycleOwner, callback)
+        onDispose { callback.remove() }
+    }
 
     val nowPlayingSheet: @Composable () -> Unit = {
         NowPlayingRoute(
             viewModel = nowPlayingViewModelProvider(),
-            onCollapse = { sheet.close() },
-            onOpenQueue = { sheet.openSwipeUpTarget() },
+            onCollapse = {
+                onUserAction("player:collapse")
+                sheet.close()
+            },
+            onOpenQueue = {
+                onUserAction("player:open-queue")
+                sheet.openSwipeUpTarget()
+            },
             onOpenLibrary = {
+                onUserAction("player:open-library")
                 sheet.close()
                 controller.navigateTo(ShellRoutes.LIBRARY)
             },
@@ -272,8 +316,12 @@ fun OmnisonicShell(
     val swipeUpTargetSheet: @Composable () -> Unit = {
         QueueRoute(
             viewModel = queueViewModelProvider(),
-            onBack = { sheet.openNowPlaying() },
+            onBack = {
+                onUserAction("queue:back-to-player")
+                sheet.openNowPlaying()
+            },
             onOpenLibrary = {
+                onUserAction("queue:open-library")
                 sheet.close()
                 controller.navigateTo(ShellRoutes.LIBRARY)
             },
@@ -290,7 +338,10 @@ fun OmnisonicShell(
                 onTogglePlayPause = onMiniPlayerTogglePlayPause,
                 onPrevious = onMiniPlayerPrevious,
                 onNext = onMiniPlayerNext,
-                onExpand = { sheet.openNowPlaying() },
+                onExpand = {
+                    onUserAction("mini-player:expand")
+                    sheet.openNowPlaying()
+                },
                 modifier = miniModifier,
                 sheetDrag = sheetDrag,
                 sheetPosition = { sheet.position },

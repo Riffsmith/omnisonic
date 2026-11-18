@@ -58,6 +58,10 @@ class ShellSettingsViewModel @Inject constructor(
         viewModelScope.launch { store.setNavOverride(isLandscape, layout) }
     }
 
+    fun setNetworkLogging(enabled: Boolean) {
+        viewModelScope.launch { store.setNetworkLogging(enabled) }
+    }
+
     fun setTabVisible(tabs: List<MainTab>, tab: MainTab, visible: Boolean) {
         setVisibleTabs(TabOrdering.setVisible(tabs, tab, visible))
     }

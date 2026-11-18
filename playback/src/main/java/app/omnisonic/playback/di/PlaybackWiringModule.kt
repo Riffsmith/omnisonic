@@ -6,6 +6,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import app.omnisonic.core.data.providers.ProviderClientRegistry
 import app.omnisonic.core.data.repository.SongRepository
+import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.playback.api.controller.PlaybackController
 import app.omnisonic.playback.api.equalizer.PeqConfig
 import app.omnisonic.playback.api.graph.BrowseTreeProvider
@@ -181,6 +182,7 @@ object PlaybackWiringModule {
         streamResolver: StreamResolver,
         coordinator: QueuePersistenceCoordinator,
         queueSources: QueueSources,
+        logger: OmnisonicLogger,
     ): PlaybackStack {
         val bus = PlaybackEventBusImpl()
         val playerProxy = LateBoundOmniPlayer()
@@ -193,7 +195,17 @@ object PlaybackWiringModule {
         val focusFactory = FocusOwnerFactory { callbacks ->
             AudioFocusHelper(context, callbacks, settings.transientLossAction, scope)
         }
-        val controller = PlaybackControllerImpl(scope, renderer, player, queue, bus, coordinator, focusFactory, queueSources)
+        val controller = PlaybackControllerImpl(
+            scope,
+            renderer,
+            player,
+            queue,
+            bus,
+            coordinator,
+            focusFactory,
+            queueSources,
+            logger = logger,
+        )
         playerProxy.bind(player)
         port.bind(controller)
         return PlaybackStack(controller, player.exposedPlayer())

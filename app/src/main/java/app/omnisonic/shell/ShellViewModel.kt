@@ -3,6 +3,9 @@ package app.omnisonic.shell
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.omnisonic.core.data.db.OmnisonicDatabase
+import app.omnisonic.core.model.log.LogSink
+import app.omnisonic.core.model.log.OmnisonicLogger
+import app.omnisonic.log.AppEventLog
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.OnboardingGate
 import app.omnisonic.feature.settings.shell.ShellPreferencesStore
@@ -27,7 +30,14 @@ data class ShellUiState(
 class ShellViewModel @Inject constructor(
     shellPreferences: ShellPreferencesStore,
     database: OmnisonicDatabase,
+    private val appEventLog: AppEventLog = AppEventLog(
+        OmnisonicLogger(LogSink { _, _, _, _ -> }),
+    ),
 ) : ViewModel() {
+
+    fun logNavigation(route: String) = appEventLog.navigation(route)
+
+    fun logUserAction(action: String) = appEventLog.userAction(action)
 
     private val providerCount = database.providerDao().countFlow()
 

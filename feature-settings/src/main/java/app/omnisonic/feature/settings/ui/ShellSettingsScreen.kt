@@ -18,6 +18,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,6 +50,7 @@ fun ShellSettingsScreen(
     onOpenProviders: () -> Unit,
     syncViewModel: LibrarySyncManagerViewModel,
     viewModel: ShellSettingsViewModel = hiltViewModel(),
+    onShareLogs: () -> Unit = {},
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
     val current = prefs
@@ -64,6 +66,8 @@ fun ShellSettingsScreen(
         onSetNavOverride = viewModel::setNavOverride,
         onOpenProviders = onOpenProviders,
         syncViewModel = syncViewModel,
+        onShareLogs = onShareLogs,
+        onSetNetworkLogging = viewModel::setNetworkLogging,
     )
 }
 
@@ -76,6 +80,8 @@ private fun ShellSettingsContent(
     onSetNavOverride: (Boolean, NavigationLayout?) -> Unit,
     onOpenProviders: () -> Unit,
     syncViewModel: LibrarySyncManagerViewModel,
+    onShareLogs: () -> Unit,
+    onSetNetworkLogging: (Boolean) -> Unit,
 ) {
     val tokens = OmnisonicTheme.tokens
     val spacing = tokens.spacing
@@ -134,6 +140,45 @@ private fun ShellSettingsContent(
             Text(stringResource(R.string.settings_version), style = MaterialTheme.typography.bodyMedium)
             Text(appVersion, style = MaterialTheme.typography.bodyMedium)
         }
+        TextButton(onClick = onShareLogs) {
+            Text(stringResource(R.string.settings_share_logs))
+        }
+        NetworkLoggingRow(
+            enabled = prefs.networkLoggingEnabled,
+            onSetEnabled = onSetNetworkLogging,
+        )
+    }
+}
+
+/**
+ * Opt-in HTTP logging. The summary states the privacy consequence next to the
+ * switch, because the log file is shareable from the row above.
+ */
+@Composable
+private fun NetworkLoggingRow(
+    enabled: Boolean,
+    onSetEnabled: (Boolean) -> Unit,
+) {
+    val tokens = OmnisonicTheme.tokens
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = tokens.spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.settings_network_logging),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = stringResource(R.string.settings_network_logging_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = enabled, onCheckedChange = onSetEnabled)
     }
 }
 
