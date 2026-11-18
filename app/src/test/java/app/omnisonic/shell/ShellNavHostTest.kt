@@ -86,6 +86,7 @@ class ShellNavHostTest {
                     detailViewModelProvider = { testDetailViewModel() },
                     nowPlayingViewModelProvider = { testNowPlayingViewModel() },
                     queueViewModelProvider = { testQueueViewModel() },
+                    historyViewModelProvider = { testHistoryViewModel() },
                     modifier = Modifier,
                 )
             }

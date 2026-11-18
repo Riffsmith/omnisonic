@@ -15,6 +15,11 @@
     <string name="library_retry">Retry</string>
     <string name="library_load_more_failed">Some items could not be loaded.</string>
 
+    <string name="library_hub_recent_plays">Recent plays</string>
+    <string name="history_title">Recent plays</string>
+    <string name="history_empty">Nothing played yet. Plays you listen to will show up here.</string>
+    <string name="history_skipped">Skipped</string>
+
     <string name="detail_play">Play</string>
     <string name="detail_shuffle">Shuffle</string>
     <string name="detail_missing_title">Gone from the server</string>

@@ -62,6 +62,7 @@ import androidx.navigation.navArgument
 import app.omnisonic.feature.library.browse.LibraryBrowseViewModel
 import app.omnisonic.feature.library.browse.LibrarySection
 import app.omnisonic.feature.library.detail.DetailViewModel
+import app.omnisonic.feature.library.history.HistoryViewModel
 import app.omnisonic.feature.library.miniplayer.MiniPlayerUiState
 import app.omnisonic.feature.library.miniplayer.MiniPlayerViewModel
 import app.omnisonic.feature.library.nowplaying.NowPlayingViewModel
@@ -69,6 +70,7 @@ import app.omnisonic.feature.library.queue.QueueViewModel
 import app.omnisonic.feature.library.ui.AlbumDetailRoute
 import app.omnisonic.feature.library.ui.ArtistDetailRoute
 import app.omnisonic.feature.library.ui.GenreDetailRoute
+import app.omnisonic.feature.library.ui.HistoryRoute
 import app.omnisonic.feature.library.ui.LibrarySectionRoute
 import app.omnisonic.feature.library.ui.MiniPlayerBar
 import app.omnisonic.feature.library.ui.NowPlayingRoute
@@ -170,6 +172,7 @@ fun OmnisonicShell(
     detailViewModelProvider: @Composable () -> DetailViewModel = { hiltViewModel() },
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel = { hiltViewModel() },
     queueViewModelProvider: @Composable () -> QueueViewModel = { hiltViewModel() },
+    historyViewModelProvider: @Composable () -> HistoryViewModel = { hiltViewModel() },
     onRouteChanged: (String) -> Unit = {},
     onUserAction: (String) -> Unit = {},
 ) {
@@ -407,9 +410,11 @@ fun OmnisonicShell(
                         detailViewModelProvider = detailViewModelProvider,
                         nowPlayingViewModelProvider = nowPlayingViewModelProvider,
                         queueViewModelProvider = queueViewModelProvider,
+                        historyViewModelProvider = historyViewModelProvider,
                         onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                         onTabTapped = onTabTapped,
                         onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
+                        onOpenHistory = { controller.navigateTo(ShellRoutes.HISTORY) },
                         onOpenAlbum = { controller.navigateTo(ShellRoutes.album(it)) },
                         onOpenArtist = { controller.navigateTo(ShellRoutes.artist(it)) },
                         onOpenGenre = { controller.navigateTo(ShellRoutes.genre(it)) },
@@ -442,9 +447,11 @@ fun OmnisonicShell(
                     detailViewModelProvider = detailViewModelProvider,
                     nowPlayingViewModelProvider = nowPlayingViewModelProvider,
                     queueViewModelProvider = queueViewModelProvider,
+                    historyViewModelProvider = historyViewModelProvider,
                     onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                     onTabTapped = onTabTapped,
                     onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
+                    onOpenHistory = { controller.navigateTo(ShellRoutes.HISTORY) },
                     onOpenAlbum = { controller.navigateTo(ShellRoutes.album(it)) },
                     onOpenArtist = { controller.navigateTo(ShellRoutes.artist(it)) },
                     onOpenGenre = { controller.navigateTo(ShellRoutes.genre(it)) },
@@ -497,9 +504,11 @@ private fun ShellContentArea(
     detailViewModelProvider: @Composable () -> DetailViewModel,
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel,
     queueViewModelProvider: @Composable () -> QueueViewModel,
+    historyViewModelProvider: @Composable () -> HistoryViewModel,
     onOpenSetup: () -> Unit,
     onTabTapped: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
+    onOpenHistory: () -> Unit,
     onOpenAlbum: (Long) -> Unit,
     onOpenArtist: (Long) -> Unit,
     onOpenGenre: (Long) -> Unit,
@@ -518,6 +527,7 @@ private fun ShellContentArea(
             detailViewModelProvider = detailViewModelProvider,
             nowPlayingViewModelProvider = nowPlayingViewModelProvider,
             queueViewModelProvider = queueViewModelProvider,
+            historyViewModelProvider = historyViewModelProvider,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 0f else 1f)
@@ -536,6 +546,7 @@ private fun ShellContentArea(
             onOpenSetup = onOpenSetup,
             onSelectTab = onTabTapped,
             onOpenSection = onOpenSection,
+            onOpenHistory = onOpenHistory,
             onOpenAlbum = onOpenAlbum,
             onOpenArtist = onOpenArtist,
             onOpenGenre = onOpenGenre,
@@ -630,6 +641,7 @@ internal fun ShellNavHost(
     detailViewModelProvider: @Composable () -> DetailViewModel = { hiltViewModel() },
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel = { hiltViewModel() },
     queueViewModelProvider: @Composable () -> QueueViewModel = { hiltViewModel() },
+    historyViewModelProvider: @Composable () -> HistoryViewModel = { hiltViewModel() },
     // Destination-scoped on purpose: the step resolves the provider row in init,
     // so it must be created when the route opens, never at app launch.
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
@@ -774,6 +786,9 @@ internal fun ShellNavHost(
                 onBack = { navController.popBackStack() },
                 onOpenLibrary = { navController.navigateTo(ShellRoutes.LIBRARY) },
             )
+        }
+        composable(ShellRoutes.HISTORY) {
+            HistoryRoute(viewModel = historyViewModelProvider())
         }
     }
 }

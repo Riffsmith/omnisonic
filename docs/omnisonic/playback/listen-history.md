@@ -129,6 +129,32 @@ of the process.
 at playback-stack assembly, so it runs for the process lifetime. Threshold and
 resume floors are constructor parameters (task 9 injects the settings values).
 
+## Read side (task 4)
+
+[VERIFIED by `RecentPlaysQueryTest` (5) + `PlayHistoryRepositoryTest` (3)] The
+recent-plays list reads `play_events` directly — newest first on the absolute
+`playedAtMs` stamp with row-id tie-break so LIMIT/OFFSET windows stay stable —
+through `PlayEventDao.recentPlaysRaw`/`recentPlays` (ProfileScope convention: the
+raw query projects `excludedProviderIdsCsv`, the wrapper takes the scope), LEFT
+JOINed to `songs`/`albums` for title/artist/album/cover. A pruned song row never
+hides its events; the row falls back to `externalId`. Pages are LIMIT/OFFSET
+windows over `PlayHistoryRepository.recentPlays`, using the same `fetchPage`
+one-past-the-window probe as browse (limit clamped to the shared 1..200 bounds),
+plus `recentCount` for the header. A debounced `play_events` invalidation feed
+(`PlayHistoryRepository.changes`, same 250 ms quiet period as
+`LibraryInvalidation`) drives the live refresh of an open list.
+
+[VERIFIED by `HistoryViewModelTest` (6) + `HistoryScreenTest` (4)] The UI is a
+destination-scoped `HistoryViewModel` (one `SectionPager` over the `HistorySource`
+seam, keyed on event id) rendered by `HistoryRoute`/`HistoryScreen` at the
+`history` route (route table extended, never renamed), entered from the library
+hub's "Recent plays" row. Header shows the title and total count; rows show
+cover, song title (or external id), a skipped marker plus artist · album, the
+absolute played-at and the duration; loading/empty/error states and the load-more
+footer follow the section-screen contract. Rows are display-only until the
+history-controls task. Device feel [UNKNOWN] — no device attached in the task-4
+session.
+
 ## Deferred
 
 - The album rule and the supporting-credit toggle are process-memory defaults;

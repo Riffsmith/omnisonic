@@ -22,6 +22,7 @@ object ShellRoutes {
     const val PLAYLIST = "playlist/{playlistId}"
     const val NOW_PLAYING = "nowplaying"
     const val QUEUE = "queue"
+    const val HISTORY = "history"
 
     const val ARG_SECTION = "section"
     const val ARG_ALBUM_ID = "albumId"
@@ -50,5 +51,6 @@ object ShellRoutes {
         PLAYLIST,
         NOW_PLAYING,
         QUEUE,
+        HISTORY,
     )
 }

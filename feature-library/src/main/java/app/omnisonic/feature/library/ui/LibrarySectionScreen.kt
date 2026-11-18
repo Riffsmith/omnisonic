@@ -237,19 +237,19 @@ private fun Modifier.placeholderBackground(): Modifier {
  * flush a deferred refresh mid-scroll).
  */
 @Composable
-private fun ScrollGateReporter(
+internal fun ScrollGateReporter(
     listState: LazyListState,
     onScrollInProgress: ((Boolean) -> Unit)?,
 ) = ScrollGateReporter({ listState.isScrollInProgress }, onScrollInProgress)
 
 @Composable
-private fun ScrollGateReporter(
+internal fun ScrollGateReporter(
     gridState: LazyGridState,
     onScrollInProgress: ((Boolean) -> Unit)?,
 ) = ScrollGateReporter({ gridState.isScrollInProgress }, onScrollInProgress)
 
 @Composable
-private fun ScrollGateReporter(
+internal fun ScrollGateReporter(
     isScrolling: () -> Boolean,
     onScrollInProgress: ((Boolean) -> Unit)?,
 ) {

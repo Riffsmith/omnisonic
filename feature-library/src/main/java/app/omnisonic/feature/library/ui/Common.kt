@@ -26,6 +26,11 @@ internal fun formatDuration(durationMs: Long): String {
     return "%d:%02d".format(minutes, seconds)
 }
 
+/** Absolute local date+time of a play stamp (the history list never shows relative times). */
+internal fun formatPlayedAt(playedAtMs: Long): String =
+    java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+        .format(java.util.Date(playedAtMs))
+
 /**
  * Load-more footer: doubles as the paging trigger — when it first enters
  * composition with more pages pending it requests the next page once; a failed

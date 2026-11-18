@@ -5,11 +5,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -17,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
@@ -31,32 +35,72 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import app.omnisonic.feature.library.R
 import app.omnisonic.feature.library.browse.LibrarySection
 import app.omnisonic.style.OmnisonicTheme
 
 /**
- * Library hub (UI_SPEC.md §3.4): one entry per section, fixed Phase 5 order,
- * navigates to `library/{section}`.
+ * Library hub (UI_SPEC.md §3.4): the recent-plays entry on top, then one tile
+ * per section in the fixed Phase 5 order. Section tiles navigate to
+ * `library/{section}`; the history entry navigates to its own route.
  */
 @Composable
 fun LibraryHubScreen(
     onOpenSection: (LibrarySection) -> Unit,
+    onOpenHistory: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(tokens.layout.gridColumnsFor(isLandscape)),
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(tokens.layout.pagePadding),
-        horizontalArrangement = Arrangement.spacedBy(tokens.layout.gridSpacing),
-        verticalArrangement = Arrangement.spacedBy(tokens.layout.gridSpacing),
-    ) {
-        items(LibrarySection.DEFAULT_ORDER, key = { it.id }) { section ->
-            SectionEntry(
-                section = section,
-                onClick = { onOpenSection(section) },
-            )
+    Column(modifier = modifier.fillMaxSize()) {
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = tokens.layout.pagePadding,
+                    top = tokens.layout.pagePadding,
+                    end = tokens.layout.pagePadding,
+                )
+                .clickable(role = Role.Button, onClick = onOpenHistory),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(tokens.spacing.md),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.History,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.height(tokens.imagery.uiIconSize),
+                )
+                Spacer(Modifier.width(tokens.spacing.md))
+                Text(
+                    text = stringResource(R.string.library_hub_recent_plays),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        Spacer(Modifier.height(tokens.layout.gridSpacing))
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(tokens.layout.gridColumnsFor(isLandscape)),
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(
+                start = tokens.layout.pagePadding,
+                end = tokens.layout.pagePadding,
+                bottom = tokens.layout.pagePadding,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(tokens.layout.gridSpacing),
+            verticalArrangement = Arrangement.spacedBy(tokens.layout.gridSpacing),
+        ) {
+            items(LibrarySection.DEFAULT_ORDER, key = { it.id }) { section ->
+                SectionEntry(
+                    section = section,
+                    onClick = { onOpenSection(section) },
+                )
+            }
         }
     }
 }

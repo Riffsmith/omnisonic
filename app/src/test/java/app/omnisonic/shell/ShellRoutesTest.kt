@@ -27,6 +27,7 @@ class ShellRoutesTest {
             "playlist/{playlistId}",
             "nowplaying",
             "queue",
+            "history",
         ).inOrder()
     }
 

@@ -49,6 +49,7 @@ internal fun MainTabsPager(
     onOpenSetup: () -> Unit,
     onSelectTab: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
+    onOpenHistory: () -> Unit,
     onOpenAlbum: (Long) -> Unit,
     onOpenArtist: (Long) -> Unit,
     onOpenGenre: (Long) -> Unit,
@@ -75,7 +76,10 @@ internal fun MainTabsPager(
     ) { page ->
         when (val tab = tabs[page]) {
             MainTab.HOME -> HomePlaceholder(hasProvider = hasProvider, onSetup = onOpenSetup)
-            MainTab.LIBRARY -> LibraryHubScreen(onOpenSection = onOpenSection)
+            MainTab.LIBRARY -> LibraryHubScreen(
+                onOpenSection = onOpenSection,
+                onOpenHistory = onOpenHistory,
+            )
             MainTab.SEARCH -> SearchRoute(
                 viewModel = searchViewModel,
                 // Settled, user-selected state: a tab tap animates through
