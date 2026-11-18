@@ -138,7 +138,7 @@ interface OutboxStore {
 
 class OutboxDrainer(
     private val store: OutboxStore,
-    private val providerLocator: (Long) -> MediaProvider?,
+    private val providerLocator: suspend (Long) -> MediaProvider?,
     private val clock: () -> Long = System::currentTimeMillis,
     private val runGate: ProviderRunGate = AllowAllRunGate,
     private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),

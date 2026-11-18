@@ -2,9 +2,12 @@ package app.omnisonic.core.data.db
 
 import android.content.Context
 import android.net.ConnectivityManager
+import app.omnisonic.core.data.db.dao.OutboxDao
 import app.omnisonic.core.data.json.OmnisonicJson
 import app.omnisonic.core.data.network.ConnectivityManagerNetworkMonitor
 import app.omnisonic.core.data.network.NetworkMonitor
+import app.omnisonic.core.data.providers.DefaultTraitsSource
+import app.omnisonic.core.data.providers.ProviderTraitsSource
 import app.omnisonic.core.data.security.AesGcmCredentialCodec
 import app.omnisonic.core.data.security.AndroidKeystoreKeySource
 import app.omnisonic.core.data.security.CredentialCodec
@@ -27,6 +30,16 @@ object DatabaseModule {
 
     @Provides
     fun moshi(): Moshi = OmnisonicJson.moshi
+
+    @Provides
+    fun outboxDao(database: OmnisonicDatabase): OutboxDao = database.outboxDao()
+
+    /**
+     * Default until a provider advertises user-data reporting; the outbox queue
+     * asks per provider at enqueue time.
+     */
+    @Provides
+    fun providerTraitsSource(): ProviderTraitsSource = DefaultTraitsSource
 
     @Provides
     fun credentialCodec(): CredentialCodec =

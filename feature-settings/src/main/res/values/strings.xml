@@ -11,6 +11,24 @@
     <string name="settings_group_providers">Providers</string>
     <string name="settings_manage_providers">Manage providers</string>
     <string name="settings_group_library_sync">Library sync</string>
+    <string name="settings_group_pending_sync">Pending sync</string>
+    <string name="pending_sync_empty">Everything is synced.</string>
+    <string name="pending_sync_retry">Retry now</string>
+    <string name="pending_sync_retrying">Retrying…</string>
+    <string name="pending_sync_unknown_provider">Provider %1$d</string>
+    <string name="pending_sync_last_error">Last error: %1$s</string>
+    <plurals name="pending_sync_count">
+        <item quantity="one">%1$d change waiting to sync</item>
+        <item quantity="other">%1$d changes waiting to sync</item>
+    </plurals>
+    <plurals name="pending_sync_provider_count">
+        <item quantity="one">%1$d change queued</item>
+        <item quantity="other">%1$d changes queued</item>
+    </plurals>
+    <plurals name="pending_sync_provider_failed">
+        <item quantity="one">%1$d failed</item>
+        <item quantity="other">%1$d failed</item>
+    </plurals>
     <string name="settings_group_playback">Playback</string>
     <string name="settings_notification_settings">Notification settings</string>
     <string name="settings_group_about">About</string>

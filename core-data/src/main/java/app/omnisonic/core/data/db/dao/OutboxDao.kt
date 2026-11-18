@@ -5,6 +5,20 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.OutboxItemEntity
+import kotlinx.coroutines.flow.Flow
+
+/** Pending-row count per provider for the settings "pending sync" view. */
+data class OutboxProviderCountRow(
+    val providerId: Long,
+    val pendingCount: Int,
+    val failingCount: Int,
+)
+
+/** Most-backed-off failure per provider; shown as that provider's last error. */
+data class OutboxProviderErrorRow(
+    val providerId: Long,
+    val lastError: String,
+)
 
 @Dao
 interface OutboxDao {
@@ -83,6 +97,40 @@ interface OutboxDao {
 
     @Query("DELETE FROM outbox_items")
     suspend fun deleteAll()
+
+    /**
+     * Parked rows become due again for a manual retry. The attempts counter is
+     * reset so the next failure starts from the base back-off; `lastError`
+     * stays until the row is cleaned up successfully.
+     */
+    @Query("UPDATE outbox_items SET attempts = 0, nextAttemptAt = 0")
+    suspend fun clearAllBackoff()
+
+    @Query(
+        """
+        SELECT providerId,
+               COUNT(*) AS pendingCount,
+               SUM(CASE WHEN lastError IS NOT NULL THEN 1 ELSE 0 END) AS failingCount
+        FROM outbox_items
+        GROUP BY providerId
+        """,
+    )
+    fun observeProviderCounts(): Flow<List<OutboxProviderCountRow>>
+
+    @Query(
+        """
+        SELECT o.providerId AS providerId, o.lastError AS lastError
+        FROM outbox_items o
+        WHERE o.lastError IS NOT NULL
+          AND o.id = (
+              SELECT i.id FROM outbox_items i
+              WHERE i.providerId = o.providerId AND i.lastError IS NOT NULL
+              ORDER BY i.nextAttemptAt DESC, i.id DESC
+              LIMIT 1
+          )
+        """,
+    )
+    fun observeProviderErrors(): Flow<List<OutboxProviderErrorRow>>
 
     @Query("SELECT COUNT(*) FROM outbox_items")
     suspend fun count(): Int

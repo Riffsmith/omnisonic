@@ -100,6 +100,7 @@ class MainTabsPagerTest {
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),
+                    pendingSyncViewModel = testPendingSyncViewModel(),
                     searchViewModel = testSearchViewModel(),
                     navController = rememberNavController().also { nav = it },
                 )

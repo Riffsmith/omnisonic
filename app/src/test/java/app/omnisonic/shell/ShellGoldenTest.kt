@@ -44,6 +44,7 @@ class ShellGoldenTest {
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),
+                    pendingSyncViewModel = testPendingSyncViewModel(),
                     searchViewModel = testSearchViewModel(),
                 )
             }

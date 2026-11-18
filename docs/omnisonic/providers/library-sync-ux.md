@@ -130,6 +130,29 @@ still navigates. [VERIFIED: `LibrarySyncStepViewModelTest` (12),
   database directly. [VERIFIED: `LibrarySyncLauncherTest` providers-mapping +
   full/diff timestamp cases; `:app:assembleDebug` proves the graph]
 
+## Shipped — Phase 6 task 3 (2026-11-18): pending-sync section [VERIFIED by unit tests]
+
+- The settings screen gained a **Pending sync** group under the library sync
+  manager: the total queued user-data changes, one row per provider (name,
+  queued count, failed count, newest `lastError`) and a **Retry now** button
+  that is disabled while a drain runs. Empty outbox renders "Everything is
+  synced."
+- Read model: `OutboxPendingRepository` combines three aggregate Room queries
+  (per-provider counts, newest error per provider, provider identities in
+  display order) — the screen never loads queued rows one by one, and counts
+  refresh through Room invalidation. `PendingSyncViewModel` is a dedicated
+  shell-threaded VM (same pattern as `LibrarySyncManagerViewModel`), not folded
+  into the sync manager. Rows for a deleted provider (no FK on `outbox_items`)
+  fall back to `Provider <id>`.
+- Drain triggers: app foreground (`MainActivity.onStart`), after a committed
+  play and after a committed favorite; each is a fire-and-forget
+  `OutboxSyncControl.requestDrain()`. Manual retry clears `attempts`/
+  `nextAttemptAt` (parked rows become due) but keeps `lastError` until the row
+  succeeds. Contract detail: `docs/omnisonic/storage/outbox-contract.md`.
+  [VERIFIED: `PendingSyncViewModelTest` (4), `PendingSyncSectionTest` (2),
+  `OutboxSyncTest` (4), `OutboxPendingRepositoryTest` (3),
+  `FavoritesRepositoryTest` trigger assertion. Device feel [UNKNOWN].]
+
 ## Second device session (2026-11-10, release build) — verification + defects
 
 The release (R8-minified) build ran on the RMX3085 for the first time. What
@@ -185,3 +208,11 @@ screen names — Omnisonic-original coinages, no verbatim collision in
 `d.lyrics.show.sync.buttons.bar` lyrics toggle). The studied app's own sync
 progress surface, if any, was not reconstructed — do not borrow names from it
 regardless [UNKNOWN]. User-facing copy is written fresh.
+
+Phase 6 task 3 re-ran the naming diff on 2026-11-18: `OutboxSync`,
+`OutboxSyncControl`, `OutboxSyncState`/`OutboxSyncReport`,
+`OutboxPendingRepository`/`OutboxPendingProvider`, `PendingSyncViewModel`/
+`PendingSyncUiState`, `PendingSyncSection`, `OutboxDao.observeProviderCounts`/
+`observeProviderErrors`/`clearAllBackoff`, `ProviderDao.observeIdentities` and
+the `pending_sync_*` string resources — all Omnisonic coinages, zero hits in
+`theme_keys.json`.

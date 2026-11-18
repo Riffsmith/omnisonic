@@ -36,6 +36,8 @@ import app.omnisonic.feature.settings.shell.ShellPreferences
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerSection
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
+import app.omnisonic.feature.settings.sync.PendingSyncSection
+import app.omnisonic.feature.settings.sync.PendingSyncViewModel
 import app.omnisonic.style.NavigationLayout
 import app.omnisonic.style.OmnisonicTheme
 
@@ -49,6 +51,7 @@ fun ShellSettingsScreen(
     appVersion: String,
     onOpenProviders: () -> Unit,
     syncViewModel: LibrarySyncManagerViewModel,
+    pendingSyncViewModel: PendingSyncViewModel,
     viewModel: ShellSettingsViewModel = hiltViewModel(),
     onShareLogs: () -> Unit = {},
 ) {
@@ -66,6 +69,7 @@ fun ShellSettingsScreen(
         onSetNavOverride = viewModel::setNavOverride,
         onOpenProviders = onOpenProviders,
         syncViewModel = syncViewModel,
+        pendingSyncViewModel = pendingSyncViewModel,
         onShareLogs = onShareLogs,
         onSetNetworkLogging = viewModel::setNetworkLogging,
     )
@@ -80,6 +84,7 @@ private fun ShellSettingsContent(
     onSetNavOverride: (Boolean, NavigationLayout?) -> Unit,
     onOpenProviders: () -> Unit,
     syncViewModel: LibrarySyncManagerViewModel,
+    pendingSyncViewModel: PendingSyncViewModel,
     onShareLogs: () -> Unit,
     onSetNetworkLogging: (Boolean) -> Unit,
 ) {
@@ -130,6 +135,7 @@ private fun ShellSettingsContent(
             Text(stringResource(R.string.settings_manage_providers))
         }
         LibrarySyncManagerSection(viewModel = syncViewModel)
+        PendingSyncSection(viewModel = pendingSyncViewModel)
         SectionHeader(stringResource(R.string.settings_group_playback))
         NotificationSettingsRow()
         SectionHeader(stringResource(R.string.settings_group_about))

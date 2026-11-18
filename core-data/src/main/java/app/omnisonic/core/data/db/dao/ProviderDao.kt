@@ -6,6 +6,12 @@ import androidx.room.Upsert
 import app.omnisonic.core.data.db.entity.ProviderEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Provider id + display name for rows that only need identity (pending sync view). */
+data class ProviderIdentityRow(
+    val id: Long,
+    val name: String,
+)
+
 @Dao
 interface ProviderDao {
 
@@ -39,4 +45,7 @@ interface ProviderDao {
     /** Live provider count; re-emits on any `providers` write (shell empty-state gate). */
     @Query("SELECT COUNT(*) FROM providers")
     fun countFlow(): Flow<Int>
+
+    @Query("SELECT id, name FROM providers ORDER BY displayOrder, id")
+    fun observeIdentities(): Flow<List<ProviderIdentityRow>>
 }

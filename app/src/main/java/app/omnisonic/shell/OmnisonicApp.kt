@@ -83,6 +83,7 @@ import app.omnisonic.feature.settings.shell.ShellNavigationResolver
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncStepRoute
 import app.omnisonic.feature.settings.sync.LibrarySyncStepViewModel
+import app.omnisonic.feature.settings.sync.PendingSyncViewModel
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.ui.label
@@ -100,6 +101,7 @@ fun OmnisonicApp(
     viewModel: ShellViewModel = hiltViewModel(),
     providerSetupViewModel: ProviderSetupViewModel = hiltViewModel(),
     syncManagerViewModel: LibrarySyncManagerViewModel = hiltViewModel(),
+    pendingSyncViewModel: PendingSyncViewModel = hiltViewModel(),
     miniPlayerViewModel: MiniPlayerViewModel = hiltViewModel(),
     searchViewModel: SearchViewModel = hiltViewModel(),
 ) {
@@ -119,6 +121,7 @@ fun OmnisonicApp(
                 providerSetupViewModel = providerSetupViewModel,
                 browseViewModel = hiltViewModel(),
                 syncManagerViewModel = syncManagerViewModel,
+                pendingSyncViewModel = pendingSyncViewModel,
                 searchViewModel = searchViewModel,
                 miniPlayerState = miniPlayer,
                 onMiniPlayerTogglePlayPause = {
@@ -155,6 +158,7 @@ fun OmnisonicShell(
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
+    pendingSyncViewModel: PendingSyncViewModel,
     searchViewModel: SearchViewModel,
     miniPlayerState: MiniPlayerUiState = MiniPlayerUiState(),
     onMiniPlayerTogglePlayPause: () -> Unit = {},
@@ -398,6 +402,7 @@ fun OmnisonicShell(
                         browseViewModel = browseViewModel,
                         syncStepViewModelProvider = syncStepViewModelProvider,
                         syncManagerViewModel = syncManagerViewModel,
+                        pendingSyncViewModel = pendingSyncViewModel,
                         searchViewModel = searchViewModel,
                         detailViewModelProvider = detailViewModelProvider,
                         nowPlayingViewModelProvider = nowPlayingViewModelProvider,
@@ -432,6 +437,7 @@ fun OmnisonicShell(
                     browseViewModel = browseViewModel,
                     syncStepViewModelProvider = syncStepViewModelProvider,
                     syncManagerViewModel = syncManagerViewModel,
+                    pendingSyncViewModel = pendingSyncViewModel,
                     searchViewModel = searchViewModel,
                     detailViewModelProvider = detailViewModelProvider,
                     nowPlayingViewModelProvider = nowPlayingViewModelProvider,
@@ -486,6 +492,7 @@ private fun ShellContentArea(
     browseViewModel: LibraryBrowseViewModel,
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
+    pendingSyncViewModel: PendingSyncViewModel,
     searchViewModel: SearchViewModel,
     detailViewModelProvider: @Composable () -> DetailViewModel,
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel,
@@ -524,6 +531,7 @@ private fun ShellContentArea(
             hasProvider = state.hasProvider,
             settingsViewModel = settingsViewModel,
             syncManagerViewModel = syncManagerViewModel,
+            pendingSyncViewModel = pendingSyncViewModel,
             searchViewModel = searchViewModel,
             onOpenSetup = onOpenSetup,
             onSelectTab = onTabTapped,

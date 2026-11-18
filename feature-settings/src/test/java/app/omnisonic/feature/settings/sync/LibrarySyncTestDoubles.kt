@@ -6,6 +6,9 @@ import app.omnisonic.core.data.sync.LibrarySyncOutcome
 import app.omnisonic.core.data.sync.LibrarySyncPhase
 import app.omnisonic.core.data.sync.LibrarySyncProgress
 import app.omnisonic.core.data.sync.LibrarySyncProvider
+import app.omnisonic.core.data.sync.OutboxSyncControl
+import app.omnisonic.core.data.sync.OutboxSyncReport
+import app.omnisonic.core.data.sync.OutboxSyncState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -88,3 +91,33 @@ internal fun terminalProgress(
         else -> LibrarySyncOutcome.SKIPPED
     },
 )
+
+/** Records retry/trigger calls; publishes drain state on demand. */
+internal class FakeOutboxSyncControl(
+    initial: OutboxSyncState = OutboxSyncState(),
+) : OutboxSyncControl {
+
+    private val _state = MutableStateFlow(initial)
+    override val state: StateFlow<OutboxSyncState> = _state
+
+    var drainRequests: Int = 0
+        private set
+    var retryCalls: Int = 0
+        private set
+
+    override fun requestDrain() {
+        drainRequests += 1
+    }
+
+    override fun retryNow() {
+        retryCalls += 1
+    }
+
+    override suspend fun drainNow(): OutboxSyncReport? = null
+
+    override suspend fun retryAllNow(): OutboxSyncReport? = null
+
+    fun publish(state: OutboxSyncState) {
+        _state.value = state
+    }
+}

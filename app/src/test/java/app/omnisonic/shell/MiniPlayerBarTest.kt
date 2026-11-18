@@ -259,6 +259,7 @@ class MiniPlayerShellTest {
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),
+                    pendingSyncViewModel = testPendingSyncViewModel(),
                     searchViewModel = testSearchViewModel(),
                     miniPlayerState = miniPlayerState,
                     navController = rememberNavController().also { nav = it },

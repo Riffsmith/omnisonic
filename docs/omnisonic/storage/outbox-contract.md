@@ -1,8 +1,9 @@
 # Outbox contract — `storage/outbox-contract.md`
 
 Purpose: pins the outbox wire contract (payload JSON shape), the media-type and
-action vocabularies, the due-ordering rule, and the failure semantics for
-structurally broken rows.
+action vocabularies, the due-ordering rule, the failure semantics for
+structurally broken rows, and the drain schedule plus the pending-sync read
+model the settings screen renders.
 
 How derived: audit finding in the pre-release review (duplicate
 payload classes with Moshi-ignored drift, mixed media-type vocabulary, missing
@@ -11,16 +12,21 @@ order is a recorded design decision. The concurrent-enqueue rules come from the
 pre-Phase-5 remediation finding that a drain deleted plays enqueued while a
 submission was in flight. The play-count invariant and chunked submission come
 from the remediation finding that an uncapped delta and a capped timestamp list
-could disagree. See `../decisions.md`.
+could disagree. The trigger set (foreground start, post-write, manual retry) is
+a Phase 6 task-3 design decision; `OutboxQueue`'s enqueue completion is
+deliberately not a trigger because it fires inside the write transaction. See
+`../decisions.md`.
 
 Confidence: all behaviours [VERIFIED] by the listed tests; the per-item action
-order is a design decision recorded in `../decisions.md`.
+order, the trigger set and the manual-retry back-off clear are design decisions
+recorded in `../decisions.md`.
 
-Date: 2026-11-06
+Date: 2026-11-18
 
 Links: `provider-api` `Outbox.kt` (`OutboxActionPayload`, `OutboxActions`,
 `OutboxStore`, `OutboxDrainer`), `core-data` `OutboxQueue`, `OutboxDao`,
-`RoomOutboxStore`, `../decisions.md`.
+`RoomOutboxStore`, `OutboxSync`, `OutboxPendingRepository`, `feature-settings`
+`PendingSyncViewModel`, `PendingSyncSection`, `../decisions.md`.
 
 ---
 
@@ -141,3 +147,60 @@ Links: `provider-api` `Outbox.kt` (`OutboxActionPayload`, `OutboxActions`,
   status tracker clear a stale `AUTH_FAILED` marker. [VERIFIED by
   `OutboxDrainerTest` and `OutboxDrainEndToEndTest` — `successful task reports
   authentication success`, `a successful drain clears a prior auth failure`.]
+
+## Drain schedule and coalescing
+
+- Triggers are: app foreground (`MainActivity.onStart`), a committed play
+  (`CoreDataPlayHistorySink` requests after `recordPlay` returns, i.e. after the
+  transaction), and a committed favorite (`FavoritesRepository` requests after
+  its transaction). Every trigger calls `OutboxSyncControl.requestDrain()` and
+  returns immediately; a failed drain is logged, never propagated into the
+  write path. Enqueue completion is not a trigger — it happens inside the write
+  transaction, before the change is readable. [VERIFIED by
+  `OutboxSyncTest` — `a foreground request runs one drain`,
+  `FavoritesRepositoryTest` — `favoritesAnItemWithoutASyncedSong` asserts one
+  request.]
+- Requests land in a conflated channel consumed by one worker, so a burst of
+  writes is expected to produce one drain and a request that arrives mid-drain
+  produces exactly one follow-up. [INFERRED from the `Channel.CONFLATED`
+  implementation; no test pins the coalesced count.]
+- A drain holds a try-lock; a second concurrent `drainNow()` returns null
+  instead of stacking. `retryAllNow()` that finds the runner busy clears the
+  back-off and re-requests, so the parked rows are still picked up by the
+  running worker's follow-up. [INFERRED from `OutboxSync.drainNow`/
+  `retryAllNow`; the concurrency path has no dedicated test.]
+- The drain coordinator runs on its own process scope, separate from the
+  library sync scope, so a pending sync never waits behind a library walk. Rows
+  blocked by the provider run gate stay queued without counting as deferred
+  when the drain was asked for all providers. [VERIFIED by
+  `a provider that is offline keeps every row without recording a failure`.]
+- A failure parks the row through the existing back-off path
+  (`attempts`/`nextAttemptAt`/`lastError`), so it is not retried before the due
+  time. A manual retry clears `attempts` and `nextAttemptAt` for every row —
+  parked rows become due immediately and the next failure starts from the base
+  back-off — while `lastError` stays until the row actually succeeds, so the
+  settings screen keeps showing what went wrong. [VERIFIED by `a failed
+  submission backs off and a manual retry succeeds at the same clock` and
+  `clearing the back-off makes parked rows due and keeps the error`.]
+
+## Pending-sync read model
+
+- `OutboxPendingRepository.providers` combines three aggregate queries:
+  per-provider count plus failing count (`observeProviderCounts`), the newest
+  error per provider ordered by `nextAttemptAt DESC, id DESC`
+  (`observeProviderErrors`), and provider names in display order
+  (`ProviderDao.observeIdentities`). Opening or writing to the settings screen
+  never loads queued rows one by one. [VERIFIED by
+  `counts errors and provider names aggregate per provider` and
+  `the most backed-off failure supplies the provider error`.]
+- Rows follow provider display order; a provider missing from the identity
+  table sorts last. `outbox_items` has no foreign key to `providers`, so a
+  queued row for a deleted provider can name no provider: the view falls back
+  to `Provider <id>` rather than hiding the row. [VERIFIED by the read-model
+  test; the fallback lives in `PendingSyncSection`.]
+- `PendingSyncViewModel` exposes the provider rows, the summed total, and a
+  `draining` flag from `OutboxSyncControl.state` (the retry button is disabled
+  while a drain runs). Counts refresh through Room invalidation, so no explicit
+  reload is needed. [VERIFIED by `PendingSyncViewModelTest` — pending rows with
+  total and newest error, empty outbox, running drain marks draining, retry
+  asks the coordinator — and `PendingSyncSectionTest`.]

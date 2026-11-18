@@ -37,6 +37,7 @@ class NotificationSettingsRowTest {
                     appVersion = "1.0.0",
                     onOpenProviders = {},
                     syncViewModel = testLibrarySyncManagerViewModel(),
+                    pendingSyncViewModel = testPendingSyncViewModel(),
                     viewModel = ShellSettingsViewModel(store),
                 )
             }
