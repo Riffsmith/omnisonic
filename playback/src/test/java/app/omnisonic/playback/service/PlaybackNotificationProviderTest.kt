@@ -7,8 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.app.PendingIntent
 import android.graphics.Bitmap
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaNotification
@@ -34,7 +37,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 
 private class RecordingActionFactory(private val context: Context) : MediaNotification.ActionFactory {
     val mediaCommands = mutableListOf<Int>()
@@ -86,6 +91,7 @@ private class RecordingActionFactory(private val context: Context) : MediaNotifi
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PlaybackNotificationProviderTest {
 
     private lateinit var context: Context
@@ -93,7 +99,9 @@ class PlaybackNotificationProviderTest {
     private lateinit var scope: CoroutineScope
     private lateinit var artworkLoader: FakeArtworkLoader
     private lateinit var player: ExoPlayer
+    private lateinit var publishPlayer: RecordingPublishPlayer
     private lateinit var session: MediaSession
+    private val events = CopyOnWriteArrayList<String>()
     private lateinit var provider: PlaybackNotificationProvider
     private lateinit var settingsDir: File
 
@@ -106,7 +114,8 @@ class PlaybackNotificationProviderTest {
         artworkLoader = FakeArtworkLoader()
         provider = PlaybackNotificationProvider(context, settings, scope, artworkLoader)
         player = ExoPlayer.Builder(context).build()
-        session = MediaSession.Builder(context, player).build()
+        publishPlayer = RecordingPublishPlayer(player) { events += "publish" }
+        session = MediaSession.Builder(context, publishPlayer).build()
     }
 
     @After
@@ -115,6 +124,16 @@ class PlaybackNotificationProviderTest {
         runCatching { player.release() }
         scope.cancel()
         runCatching { settingsDir.deleteRecursively() }
+    }
+
+    private fun await(message: String, timeoutMs: Long = 5_000, condition: () -> Boolean) {
+        val start = System.currentTimeMillis()
+        while (!condition()) {
+            if (System.currentTimeMillis() - start > timeoutMs) {
+                throw AssertionError("timeout: $message")
+            }
+            Thread.sleep(5)
+        }
     }
 
     private fun notification(callback: MediaNotification.Provider.Callback = NoopCallback): Notification {
@@ -236,16 +255,39 @@ class PlaybackNotificationProviderTest {
 
         assertThat(first.hasLargeIcon()).isFalse()
         assertThat(artworkLoader.requests.map { it.imageId }).containsExactly("cover-1")
-        assertThat(callback.notifications).hasSize(1)
+        await("artwork repaint after the load") { callback.notifications.size == 1 }
         assertThat(callback.notifications.single().notificationId)
             .isEqualTo(PlaybackNotificationProvider.NOTIFICATION_ID)
         assertThat(callback.notifications.single().notification.hasLargeIcon()).isTrue()
+        await("session artwork published from the fresh load") { publishPlayer.published.size == 1 }
+        val firstPng = publishPlayer.published.single().second
+        assertThat(publishPlayer.published.single().first)
+            .isEqualTo(NotificationArtworkIdentity(providerId = 1L, imageId = "cover-1"))
 
         val second = notification(callback)
 
         assertThat(second.hasLargeIcon()).isTrue()
         assertThat(artworkLoader.requests).hasSize(1)
         assertThat(callback.notifications).hasSize(1)
+        // The cache hit republishes the cached identity with the exact cached
+        // bytes instance, so the bridge can skip an unchanged artwork.
+        assertThat(publishPlayer.published).hasSize(2)
+        assertThat(publishPlayer.published[1].first)
+            .isEqualTo(NotificationArtworkIdentity(providerId = 1L, imageId = "cover-1"))
+        assertThat(publishPlayer.published[1].second).isSameInstanceAs(firstPng)
+    }
+
+    @Test
+    fun `a fresh load publishes exactly once after the notification repaint`() {
+        artworkLoader.results["cover-1"] = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        setTrack("cover-1")
+
+        notification(RecordingCallback(events))
+
+        await("one repaint and one publish") { events.size == 2 }
+        assertThat(events.toList()).containsExactly("repaint", "publish").inOrder()
+        assertThat(publishPlayer.published).hasSize(1)
+        assertThat(artworkLoader.requests).hasSize(1)
     }
 
     @Test
@@ -257,11 +299,13 @@ class PlaybackNotificationProviderTest {
 
         assertThat(built.hasLargeIcon()).isFalse()
         assertThat(callback.notifications).isEmpty()
+        assertThat(publishPlayer.published).isEmpty()
         assertThat(artworkLoader.requests).hasSize(1)
 
         notification(callback)
 
         assertThat(artworkLoader.requests).hasSize(1)
+        assertThat(publishPlayer.published).isEmpty()
     }
 
     @Test
@@ -277,11 +321,15 @@ class PlaybackNotificationProviderTest {
         setTrack("cover-b")
         notification(callback)
 
-        assertThat(callback.notifications).hasSize(1)
+        await("current cover repainted") { callback.notifications.size == 1 }
+        await("current cover published") { publishPlayer.published.size == 1 }
+        assertThat(publishPlayer.published.single().first.imageId).isEqualTo("cover-b")
 
         staleGate.complete(Unit)
+        Thread.sleep(100)
 
         assertThat(callback.notifications).hasSize(1)
+        assertThat(publishPlayer.published).hasSize(1)
     }
 
     @Test
@@ -366,16 +414,32 @@ class PlaybackNotificationProviderTest {
         assertThat(info.name).isEqualTo(context.getString(R.string.notification_channel_playback))
     }
 
-    private class RecordingCallback : MediaNotification.Provider.Callback {
-        val notifications = mutableListOf<MediaNotification>()
+    private class RecordingCallback(
+        private val events: MutableList<String>? = null,
+    ) : MediaNotification.Provider.Callback {
+        val notifications = CopyOnWriteArrayList<MediaNotification>()
 
         override fun onNotificationChanged(notification: MediaNotification) {
             notifications += notification
+            events?.add("repaint")
         }
     }
 
     private object NoopCallback : MediaNotification.Provider.Callback {
         override fun onNotificationChanged(notification: MediaNotification) = Unit
+    }
+}
+
+@UnstableApi
+private class RecordingPublishPlayer(
+    player: Player,
+    private val onPublish: () -> Unit,
+) : ForwardingPlayer(player), SessionArtworkPublisher {
+    val published = CopyOnWriteArrayList<Pair<NotificationArtworkIdentity, ByteArray>>()
+
+    override fun publishSessionArtwork(identity: NotificationArtworkIdentity, png: ByteArray) {
+        published += identity to png
+        onPublish()
     }
 }
 

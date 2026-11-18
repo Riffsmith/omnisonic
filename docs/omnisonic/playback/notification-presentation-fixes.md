@@ -28,11 +28,13 @@ Confidence:
   migration on an already-installed build, and whether the artwork repaint can
   race a track change. No device was attached for this investigation.
 
-Date: 2026-11-17
+Date: 2026-11-17 (follow-up note added 2026-11-18)
 
 Links: `service-and-notifications.md` (service/session facts),
 `media-notification-fix.md` (how the notification came to exist at all, task
-7e), `../ui/search-tab-fixes.md` (the other P1 cluster),
+7e), `notification-artwork-quality.md` (follow-up: Android 13 shrinks the large
+icon, session `artworkData` fix),
+`../ui/search-tab-fixes.md` (the other P1 cluster),
 `../providers/library-sync-ux.md` (cover sizing context — D-17),
 `progress/KNOWN_ISSUES.md`.
 
@@ -78,7 +80,6 @@ All of A1/A2/A3 are in the working tree (uncommitted). No device was attached
    off the caller's thread (`CoilNotificationArtworkLoader` uses `Dispatchers.IO`).
 
 **Deviations from this brief (recorded, deliberate):**
-
 - `NotificationArtworkLoader.load` takes the identity data class instead of
   three positional parameters.
 - The provider builds the notification **before** publishing its builder for the
@@ -88,6 +89,17 @@ All of A1/A2/A3 are in the working tree (uncommitted). No device was attached
 - The channel's display name stays `notification_channel_playback` ("Playback");
   the v2 id is invisible to users and the legacy channel is deleted, so no new
   string was added.
+
+**Follow-up (2026-11-18, implemented + JVM-verified, device-unverified):** the
+artwork this fix adds reached Android 13's media card only as `setLargeIcon`,
+and the platform shrinks a notification large icon to 48 dp before posting it;
+SystemUI then prefers session metadata artwork and fell back to that reduced
+icon, so the panel card showed an upscaled 48 dp bitmap ("very blurry"). D-32
+publishes the same 512 px bitmap as session `artworkData`, which fills
+`METADATA_KEY_ALBUM_ART` for SystemUI, and leaves `setLargeIcon` as the pre-13 /
+fallback path. Root cause, design, tests and the device checklist:
+`notification-artwork-quality.md`. The artwork item in this brief's device
+checklist still needs that device pass (`[UNKNOWN device]`).
 
 **Test evidence `[VERIFIED JVM]`:**
 

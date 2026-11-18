@@ -156,6 +156,49 @@ channel migration on an installed build, Settings → system screen) is still
 `[UNKNOWN device]`; brief and acceptance checklist:
 `notification-presentation-fixes.md`.
 
+### Artwork quality on Android 13+: session `artworkData` (D-32, 2026-11-18)
+
+The cover travels two ways, and they are both part of the contract:
+
+1. **`setLargeIcon`** — unchanged, and still the only artwork path on pre-13.
+   The platform shrinks that bitmap at `build()` time:
+   `Notification.Builder.build` calls `Notification.reduceImageSizes`, which
+   scales the large icon to `notification_right_icon_size` = 48 dp, and
+   `MediaStyle` does not override the reduction (AOSP 13
+   `Notification.java:6571`, `:6777-6813`, `:7237`; AOSP
+   `core/res/res/values/dimens.xml:771`). [VERIFIED against AOSP 13]
+2. **Session metadata `MediaMetadata.artworkData`** — the same already-loaded
+   512 px bitmap, PNG-encoded once per track on `Dispatchers.Default`, attached
+   to the **current** exposed queue entry only. media3 1.11.1 maps
+   `artworkData` into compat `METADATA_KEY_ALBUM_ART` with a local bitmap
+   decoder, and Android 13 SystemUI reads session artwork before the reduced
+   large icon (art URIs → `METADATA_KEY_ART` → `METADATA_KEY_ALBUM_ART` →
+   `getLargeIcon()`; `SystemUI/.../media/MediaDataManager.kt:639-649`). The card
+   art slot is 88 dp, so this is the copy that stays sharp. [VERIFIED against
+   AOSP 13 + media3 1.11.1, `[UNKNOWN device]` for the actual rendering]
+
+Ownership: `PlaybackNotificationProvider` already loads and caches the bitmap,
+so it encodes and publishes (`SessionArtworkPublisher`, obtained from
+`session.player` on the application thread in `createNotification` — never after
+the encode hop). `OmniForwardingPlayer` implements the seam and delegates to
+`QueueAwareBridge`, which posts to the application looper, republishes state,
+and caches the artwork `MediaMetadata` per artwork + queue entry so position
+ticks never rebuild (and never re-clone) the image. Publishing is idempotent for
+an unchanged identity and byte-array instance. Rules that must not regress:
+
+- one load and **one PNG encode** per track; a cache hit republishes the cached
+  bytes, no second fetch and no re-encode;
+- the large icon is never removed — it is the pre-13 and divergence fallback;
+- only the current entry carries artwork bytes; non-current timeline items never
+  do, and two tracks sharing a cover do not share title/artist metadata;
+- an encode failure stays non-fatal: one log, the large icon still repaints, and
+  the track is not retried.
+
+Root cause, design, tests and the device checklist: `notification-artwork-quality.md`.
+Visual sharpness, swap latency and the `dumpsys media_session` album-art check
+are `[UNKNOWN device]` until the device pass is recorded; the P1 blur item stays
+**OPEN**.
+
 ## Manifest contract
 
 `app/src/main/AndroidManifest.xml` declares one playback service:

@@ -22,8 +22,10 @@ import app.omnisonic.playback.api.stream.ResolvedStream
 import app.omnisonic.playback.cache.MediaDataSourceFactoryProvider
 import app.omnisonic.playback.cache.PlaybackCacheManager
 import app.omnisonic.playback.engine.ExoEngineFactory
+import androidx.media3.common.Timeline
 import app.omnisonic.playback.service.NotificationArtworkIdentity
 import app.omnisonic.playback.service.NotificationArtworkMetadata
+import app.omnisonic.playback.service.SessionArtworkPublisher
 import app.omnisonic.playback.settings.PlaybackSettingsStore
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
@@ -41,12 +43,17 @@ import org.robolectric.annotation.Config
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-private fun queueEntry(id: Long, title: String = "Track $id") = PlaybackQueueEntry(
+private fun queueEntry(
+    id: Long,
+    title: String = "Track $id",
+    coverImageId: String? = null,
+) = PlaybackQueueEntry(
     providerId = 1L,
     externalId = "ext-$id",
     queueItemId = id,
     title = title,
     artistName = "Artist $id",
+    coverImageId = coverImageId,
 )
 
 @RunWith(RobolectricTestRunner::class)
@@ -263,6 +270,126 @@ class OmniForwardingPlayerTest {
         await("coverless entry published") {
             NotificationArtworkMetadata.identityFrom(p.exposedPlayer().mediaMetadata) == null
         }
+    }
+
+    @Test
+    fun `published artwork rides on the current entry only and keeps the identity extras`() {
+        val p = newPlayer()
+        port.state.value = QueueState(
+            entries = listOf(
+                PlaybackQueueEntry(
+                    providerId = 7L,
+                    externalId = "ext-1",
+                    queueItemId = 1,
+                    title = "With cover",
+                    artistName = "Cover artist",
+                    coverImageId = "cover-9",
+                ),
+                queueEntry(2),
+            ),
+            playIndex = 0,
+        )
+        val identity = NotificationArtworkIdentity(providerId = 7L, imageId = "cover-9")
+        await("cover identity published") {
+            NotificationArtworkMetadata.identityFrom(p.exposedPlayer().mediaMetadata) != null
+        }
+
+        val png = byteArrayOf(1, 2, 3, 4, 5)
+        (p.exposedPlayer() as SessionArtworkPublisher).publishSessionArtwork(identity, png)
+
+        await("artwork published onto the session metadata") {
+            p.exposedPlayer().mediaMetadata.artworkData?.contentEquals(png) == true
+        }
+        val current = p.exposedPlayer()
+        assertThat(current.mediaMetadata.title.toString()).isEqualTo("With cover")
+        assertThat(current.mediaMetadata.artist.toString()).isEqualTo("Cover artist")
+        assertThat(NotificationArtworkMetadata.identityFrom(current.mediaMetadata))
+            .isEqualTo(identity)
+
+        val timeline = current.currentTimeline
+        assertThat(timeline.windowCount).isEqualTo(2)
+        for (index in 0 until timeline.windowCount) {
+            val metadata = timeline.getWindow(index, Timeline.Window()).mediaItem.mediaMetadata
+            if (index == current.currentMediaItemIndex) {
+                assertThat(metadata.artworkData).isNotNull()
+            } else {
+                assertThat(metadata.artworkData).isNull()
+            }
+        }
+    }
+
+    @Test
+    fun `re-publishing the same artwork instance emits no second metadata change`() {
+        val p = newPlayer()
+        port.state.value = QueueState(
+            entries = listOf(queueEntry(1, coverImageId = "cover-1")),
+            playIndex = 0,
+        )
+        val identity = NotificationArtworkIdentity(providerId = 1L, imageId = "cover-1")
+        await("cover identity published") {
+            NotificationArtworkMetadata.identityFrom(p.exposedPlayer().mediaMetadata) != null
+        }
+        val publisher = p.exposedPlayer() as SessionArtworkPublisher
+        val png = ByteArray(16) { it.toByte() }
+
+        var metadataChanges = 0
+        val listener = object : Player.Listener {
+            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                metadataChanges++
+            }
+        }
+        p.exposedPlayer().addListener(listener)
+        try {
+            publisher.publishSessionArtwork(identity, png)
+            await("first publish applied") {
+                p.exposedPlayer().mediaMetadata.artworkData?.contentEquals(png) == true
+            }
+            val afterFirst = metadataChanges
+            assertThat(afterFirst).isAtLeast(1)
+
+            publisher.publishSessionArtwork(identity, png)
+            idle()
+            idle()
+
+            assertThat(metadataChanges).isEqualTo(afterFirst)
+        } finally {
+            p.exposedPlayer().removeListener(listener)
+        }
+    }
+
+    @Test
+    fun `new artwork bytes replace the old ones and a coverless entry drops the artwork`() {
+        val p = newPlayer()
+        port.state.value = QueueState(
+            entries = listOf(
+                queueEntry(1, coverImageId = "cover-1"),
+                queueEntry(2),
+            ),
+            playIndex = 0,
+        )
+        val identity = NotificationArtworkIdentity(providerId = 1L, imageId = "cover-1")
+        await("cover identity published") {
+            NotificationArtworkMetadata.identityFrom(p.exposedPlayer().mediaMetadata) != null
+        }
+        val publisher = p.exposedPlayer() as SessionArtworkPublisher
+
+        val first = byteArrayOf(1, 1, 1)
+        publisher.publishSessionArtwork(identity, first)
+        await("first bytes applied") {
+            p.exposedPlayer().mediaMetadata.artworkData?.contentEquals(first) == true
+        }
+
+        val second = byteArrayOf(2, 2, 2, 2)
+        publisher.publishSessionArtwork(identity, second)
+        await("replacement bytes applied") {
+            p.exposedPlayer().mediaMetadata.artworkData?.contentEquals(second) == true
+        }
+
+        port.state.value = port.state.value.copy(playIndex = 1)
+        await("coverless entry drops the artwork") {
+            p.exposedPlayer().mediaMetadata.artworkData == null
+        }
+        assertThat(p.exposedPlayer().mediaMetadata.title.toString()).isEqualTo("Track 2")
     }
 
     @Test

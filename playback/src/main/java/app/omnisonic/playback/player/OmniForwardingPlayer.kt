@@ -6,6 +6,8 @@ import androidx.media3.common.Player
 import androidx.media3.common.ForwardingPlayer
 import app.omnisonic.playback.api.queue.QueueCommandPort
 import app.omnisonic.playback.api.queue.QueueState
+import app.omnisonic.playback.service.NotificationArtworkIdentity
+import app.omnisonic.playback.service.SessionArtworkPublisher
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -16,14 +18,23 @@ import kotlinx.coroutines.flow.StateFlow
  * indices derive from the queue state through [QueueCommandPolicy], and
  * repeat/shuffle state is queue-owned. Media-list mutation and engine
  * repeat/shuffle setters are never forwarded to the engine.
+ *
+ * This is the player bound to the media session, so it is also the
+ * [SessionArtworkPublisher] the notification provider obtains from
+ * `session.player`; publishing delegates to the bridge's looper-posted
+ * metadata update.
  */
 @UnstableApi
 internal class OmniForwardingPlayer(
     private val queueState: StateFlow<QueueState>,
     private val port: QueueCommandPort,
-    bridge: QueueAwareBridge,
+    private val bridge: QueueAwareBridge,
     private val releaseAction: () -> Unit,
-) : ForwardingPlayer(bridge) {
+) : ForwardingPlayer(bridge), SessionArtworkPublisher {
+
+    override fun publishSessionArtwork(identity: NotificationArtworkIdentity, png: ByteArray) {
+        bridge.publishSessionArtwork(identity, png)
+    }
 
     override fun seekToNext() {
         port.skipNext()

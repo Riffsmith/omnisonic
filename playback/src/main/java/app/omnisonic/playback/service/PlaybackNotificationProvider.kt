@@ -41,6 +41,14 @@ import javax.inject.Singleton
  * through [MediaNotification.Provider.Callback.onNotificationChanged]. The
  * notification is never built off the media session thread, so the load runs
  * on [scope] (the engine's main-immediate scope), never inline.
+ *
+ * The same bitmap is also published as session metadata artwork through
+ * [SessionArtworkPublisher] (obtained from `session.player`), because the
+ * platform shrinks the notification large icon to 48 dp at `build()` time and
+ * Android 13 SystemUI prefers session artwork. The bytes are encoded once per
+ * loaded bitmap and cached, and publishing happens on both a fresh load and a
+ * cache hit (returning to a track whose artwork is cached but no longer the
+ * bridge's current identity).
  */
 @UnstableApi
 @Singleton
@@ -55,13 +63,16 @@ class PlaybackNotificationProvider @Inject constructor(
     private var slots: List<NotificationAction> = DefaultNotificationActions.SLOT_DEFAULTS
 
     // Session-thread state (createNotification and the repaint continuation both
-    // run on the engine's main-immediate scope).
-    private val artworkCache = object : LinkedHashMap<NotificationArtworkIdentity, Bitmap>(
+    // run on the engine's main-immediate scope). The PNG bytes live beside the
+    // bitmap so a cached repaint never re-encodes.
+    private class Artwork(val bitmap: Bitmap, val png: ByteArray?)
+
+    private val artworkCache = object : LinkedHashMap<NotificationArtworkIdentity, Artwork>(
         MAX_CACHED_ARTWORK,
         0.75f,
         true,
     ) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<NotificationArtworkIdentity, Bitmap>): Boolean =
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<NotificationArtworkIdentity, Artwork>): Boolean =
             size > MAX_CACHED_ARTWORK
     }
     private val pendingArtwork = mutableSetOf<NotificationArtworkIdentity>()
@@ -140,19 +151,28 @@ class PlaybackNotificationProvider @Inject constructor(
 
         val identity = NotificationArtworkMetadata.identityFrom(metadata)
         val cachedArt = identity?.let { artworkCache[it] }
-        if (cachedArt != null) builder.setLargeIcon(cachedArt)
+        if (cachedArt != null) builder.setLargeIcon(cachedArt.bitmap)
+        // Resolve the publisher while still on the session's application
+        // thread: MediaSession.getPlayer verifies that thread, and the artwork
+        // load resumes after a Dispatchers.Default encode hop.
+        val publisher = player as? SessionArtworkPublisher
         // Build before publishing the builder for repaints: a load that
         // completes immediately must not mutate the notification being built.
         val notification = MediaNotification(NOTIFICATION_ID, builder.build())
         lastIdentity = identity
         lastBuilder = builder
-        if (cachedArt == null && identity != null) requestArtwork(identity, callback)
+        if (cachedArt != null && identity != null) {
+            publishArtwork(publisher, identity, cachedArt.png)
+        } else if (identity != null) {
+            requestArtwork(publisher, identity, callback)
+        }
         return notification
     }
 
     override fun handleCustomCommand(session: MediaSession, action: String, extras: android.os.Bundle): Boolean = false
 
     private fun requestArtwork(
+        publisher: SessionArtworkPublisher?,
         identity: NotificationArtworkIdentity,
         callback: MediaNotification.Provider.Callback,
     ) {
@@ -167,15 +187,29 @@ class PlaybackNotificationProvider @Inject constructor(
                 }
                 return@launch
             }
-            artworkCache[identity] = bitmap
             // A track change or a dismissal while the load was in flight must
-            // never repaint the previous track's art.
+            // never repaint the previous track's art (and must not spend an
+            // encode on artwork nobody will show).
             if (lastIdentity != identity) return@launch
+            val png = runCatching { encodeSessionArtworkPng(bitmap) }
+                .onFailure { Log.w(TAG, "notification artwork encode failed", it) }
+                .getOrNull()
+            artworkCache[identity] = Artwork(bitmap, png)
             val builder = lastBuilder ?: return@launch
             callback.onNotificationChanged(
                 MediaNotification(NOTIFICATION_ID, builder.setLargeIcon(bitmap).build()),
             )
+            publishArtwork(publisher, identity, png)
         }
+    }
+
+    private fun publishArtwork(
+        publisher: SessionArtworkPublisher?,
+        identity: NotificationArtworkIdentity,
+        png: ByteArray?,
+    ) {
+        if (png == null) return
+        publisher?.publishSessionArtwork(identity, png)
     }
 
     private fun buttonFor(action: NotificationAction): CommandButton {

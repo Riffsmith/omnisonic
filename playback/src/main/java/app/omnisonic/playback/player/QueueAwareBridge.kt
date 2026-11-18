@@ -1,5 +1,6 @@
 package app.omnisonic.playback.player
 
+import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -14,6 +15,7 @@ import androidx.media3.common.util.Clock
 import androidx.media3.common.util.UnstableApi
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.queue.QueueState
+import app.omnisonic.playback.service.NotificationArtworkIdentity
 import app.omnisonic.playback.service.NotificationArtworkMetadata
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -59,6 +61,25 @@ internal class QueueAwareBridge(
     private var publishedError: PlaybackException? = null
     private var publishedIndex = 0
 
+    // Cover bytes for the session metadata, published from the notification
+    // provider. The metadata is built lazily on the first [getState] that sees
+    // the matching current entry (the entry's title/artist live there), then
+    // reused for every position tick: rebuilding it would clone the whole
+    // image once per tick.
+    private class SessionArtwork(
+        val identity: NotificationArtworkIdentity,
+        val png: ByteArray,
+        var metadataEntryId: Long? = null,
+        var metadata: MediaMetadata? = null,
+    )
+
+    private val looperHandler = Handler(looper)
+
+    // Written on the application looper, read from the provider's thread for
+    // the fast-path no-op check below.
+    @Volatile
+    private var sessionArtwork: SessionArtwork? = null
+
     fun markReleased() {
         released = true
         publishedError = null
@@ -76,6 +97,32 @@ internal class QueueAwareBridge(
 
     fun republish() {
         if (!released) invalidateState()
+    }
+
+    /**
+     * Attaches [png] to the current queue entry's exposed metadata and
+     * republishes, so media3 fills `METADATA_KEY_ALBUM_ART` for the session.
+     * Safe from any thread; posted to the application looper because
+     * `invalidateState()` is application-thread-only. An unchanged identity
+     * and byte-array instance is a no-op, which stops the repaint feedback
+     * loop (the repaint triggers another notification build).
+     */
+    fun publishSessionArtwork(identity: NotificationArtworkIdentity, png: ByteArray) {
+        // Fast path only: the caller's thread can miss a just-posted value, so
+        // the authoritative no-op check runs again on the looper, where the
+        // state is mutated and every write is ordered.
+        if (isCurrentArtwork(identity, png)) return
+        looperHandler.post {
+            if (released) return@post
+            if (isCurrentArtwork(identity, png)) return@post
+            sessionArtwork = SessionArtwork(identity, png)
+            invalidateState()
+        }
+    }
+
+    private fun isCurrentArtwork(identity: NotificationArtworkIdentity, png: ByteArray): Boolean {
+        val current = sessionArtwork ?: return false
+        return current.identity == identity && current.png === png
     }
 
     override fun getState(): State {
@@ -190,14 +237,19 @@ internal class QueueAwareBridge(
         engine: Player,
     ): List<MediaItemData> {
         if (queue.entries.isNotEmpty()) {
+            // The session's current item is the queue's selected entry even
+            // before the engine has loaded it (paused/idle after a restore),
+            // so artwork must follow the queue pointer when the engine has no
+            // current entry yet.
+            val exposedCurrent = currentEntry ?: queue.currentEntry
             return queue.effectiveOrder().mapNotNull { index ->
                 queue.entries.getOrNull(index)?.let { entry ->
-                    mediaItemDataFor(entry, entry.queueItemId == currentEntry?.queueItemId, engine)
+                    mediaItemDataFor(entry, entry.queueItemId == exposedCurrent?.queueItemId, engine)
                 }
             }
         }
         val entries = listOfNotNull(currentEntry, preparedEntry?.takeIf { it != currentEntry })
-        return entries.map { entry -> mediaItemDataFor(entry, true, engine) }
+        return entries.map { entry -> mediaItemDataFor(entry, entry == currentEntry, engine) }
     }
 
     private fun currentIndexFor(queue: QueueState, currentEntry: PlaybackQueueEntry?, playlistSize: Int): Int {
@@ -212,7 +264,7 @@ internal class QueueAwareBridge(
 
     private fun mediaItemDataFor(entry: PlaybackQueueEntry, isCurrent: Boolean, engine: Player): MediaItemData {
         val durationUs = entry.durationMs?.let { C.msToUs(it) } ?: C.TIME_UNSET
-        val metadata = metadataFor(entry)
+        val metadata = metadataFor(entry, isCurrent)
         return MediaItemData.Builder(entry.queueItemId)
             .setMediaItem(
                 MediaItem.Builder()
@@ -228,8 +280,29 @@ internal class QueueAwareBridge(
             .build()
     }
 
-    /** Cover identity rides as extras; the notification resolves it, never a raw URL. */
-    private fun metadataFor(entry: PlaybackQueueEntry): MediaMetadata {
+    /**
+     * Cover identity rides as extras; the notification resolves it, never a raw
+     * URL. Only the current entry whose identity matches the published artwork
+     * carries the artwork bytes, and that [MediaMetadata] is cached per
+     * artwork + entry so position ticks never rebuild it.
+     */
+    private fun metadataFor(entry: PlaybackQueueEntry, isCurrent: Boolean): MediaMetadata {
+        val art = sessionArtwork
+        if (isCurrent && art != null && art.identity.matches(entry)) {
+            val cached = art.metadata
+            if (cached != null && art.metadataEntryId == entry.queueItemId) return cached
+            return metadataBuilderFor(entry)
+                .setArtworkData(art.png)
+                .build()
+                .also {
+                    art.metadata = it
+                    art.metadataEntryId = entry.queueItemId
+                }
+        }
+        return metadataBuilderFor(entry).build()
+    }
+
+    private fun metadataBuilderFor(entry: PlaybackQueueEntry): MediaMetadata.Builder {
         val builder = MediaMetadata.Builder()
             .setTitle(entry.title)
             .setArtist(entry.artistName)
@@ -237,8 +310,12 @@ internal class QueueAwareBridge(
         if (!coverImageId.isNullOrBlank()) {
             builder.setExtras(NotificationArtworkMetadata.extras(entry.providerId, coverImageId))
         }
-        return builder.build()
+        return builder
     }
+
+    /** [NotificationArtworkIdentity.sizePx] is a provider request concern, not an entry field. */
+    private fun NotificationArtworkIdentity.matches(entry: PlaybackQueueEntry): Boolean =
+        providerId == entry.providerId && imageId == entry.coverImageId
 
     private fun tracksFor(entry: PlaybackQueueEntry, isCurrent: Boolean, engine: Player): Tracks {
         val engineItem = if (engine.playbackState == Player.STATE_IDLE) null else engine.currentMediaItem
