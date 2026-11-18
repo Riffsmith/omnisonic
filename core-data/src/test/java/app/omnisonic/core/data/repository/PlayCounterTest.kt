@@ -69,6 +69,20 @@ class PlayCounterTest : DatabaseTestBase() {
     }
 
     @Test
+    fun resumePointMaterialisesTheRowWithoutCountingAPlay() = runDbTest {
+        newProvider(id = 1)
+
+        counter().recordResumePoint(1, "song-1", snapshot, positionMs = 42_000, now = 5_000)
+
+        val song = songDao.selectByProviderAndExternal(1, "song-1")!!
+        assertThat(song.resumeMs).isEqualTo(42_000)
+        assertThat(song.resumeUpdatedAt).isEqualTo(5_000)
+        assertThat(song.playCount).isEqualTo(0)
+        assertThat(playEventDao.selectByProviderAndExternal(1, "song-1")).isEmpty()
+        assertThat(outboxDao.selectByProvider(1)).isEmpty()
+    }
+
+    @Test
     fun localProviderSkipsTheOutboxButKeepsTheLocalPlay() = runDbTest {
         newProvider(id = 1)
 

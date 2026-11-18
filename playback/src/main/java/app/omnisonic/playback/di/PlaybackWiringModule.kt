@@ -31,6 +31,9 @@ import app.omnisonic.playback.engine.ExoEngineFactory
 import app.omnisonic.playback.events.PlaybackEventBusImpl
 import app.omnisonic.playback.focus.AudioFocusHelper
 import app.omnisonic.playback.focus.FocusOwnerFactory
+import app.omnisonic.playback.history.CoreDataPlayHistorySink
+import app.omnisonic.playback.history.PlayHistoryRecorder
+import app.omnisonic.playback.history.PlayHistorySink
 import app.omnisonic.playback.player.OmniPlayerImpl
 import app.omnisonic.playback.player.SinkProcessorChainFactory
 import app.omnisonic.playback.queue.QueuePersistence
@@ -171,6 +174,10 @@ object PlaybackWiringModule {
 
     @Provides
     @Singleton
+    fun playHistorySink(sink: CoreDataPlayHistorySink): PlayHistorySink = sink
+
+    @Provides
+    @Singleton
     fun playbackStack(
         @ApplicationContext context: Context,
         @PlaybackEngineScope scope: CoroutineScope,
@@ -182,9 +189,11 @@ object PlaybackWiringModule {
         streamResolver: StreamResolver,
         coordinator: QueuePersistenceCoordinator,
         queueSources: QueueSources,
+        historySink: PlayHistorySink,
         logger: OmnisonicLogger,
     ): PlaybackStack {
         val bus = PlaybackEventBusImpl()
+        PlayHistoryRecorder(bus, historySink).start(scope)
         val playerProxy = LateBoundOmniPlayer()
         val queue = QueuePlayerImpl(scope, playerProxy, streamResolver, bus)
         val port = LateBoundQueueCommandPort(queue.state)

@@ -64,4 +64,20 @@ class PlayCounter @Inject constructor(
         )
         songId
     }
+
+    /**
+     * Early track changes store the position they left at. The value is data,
+     * not a start offset (D-18): playback never reads it back.
+     */
+    suspend fun recordResumePoint(
+        providerId: Long,
+        externalId: String,
+        snapshot: SongRepository.SongSnapshot,
+        positionMs: Long,
+        now: Long,
+    ): Long = db.withTransaction {
+        val songId = songRepository.ensureSong(providerId, externalId, snapshot)
+        db.songDao().setResumePoint(songId, resumeMs = positionMs, now = now)
+        songId
+    }
 }
