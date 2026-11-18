@@ -4,7 +4,8 @@ import com.squareup.moshi.JsonClass
 
 @JsonClass(generateAdapter = true)
 data class BackupManifest(
-    val formatVersion: Int = BackupFormat.FORMAT_VERSION,
+    /** Required on decode: a manifest without a version is rejected as malformed. */
+    val formatVersion: Int,
     val appVersion: String,
     val createdAtMs: Long,
     val providers: List<ProviderBackupSection> = emptyList(),

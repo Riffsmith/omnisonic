@@ -87,6 +87,7 @@ class BackupWriter @Inject constructor(
                 entries += BackupEntry(BackupFormat.STYLE_ENTRY, styleProfileJson)
             }
             val manifest = BackupManifest(
+                formatVersion = BackupFormat.FORMAT_VERSION,
                 appVersion = appVersionName,
                 createdAtMs = System.currentTimeMillis(),
                 providers = sections,

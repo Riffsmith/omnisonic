@@ -1,8 +1,8 @@
 # Backup format — `storage/backup-format.md`
 
-Purpose: pin the backup ZIP container the writer (Phase 6 task 6) produces —
-entry layout, manifest fields, the versioning rule, and what is deliberately
-excluded.
+Purpose: pin the backup ZIP container the writer (Phase 6 task 6) produces and
+the reader (task 7) validates and applies — entry layout, manifest fields, the
+versioning rule, the restore semantics, and what is deliberately excluded.
 
 How derived: own design decision from the Phase 6 plan architecture note
 (versioned ZIP manifest, JSON entries, one event-log entry per provider,
@@ -13,16 +13,19 @@ schema v1.
 Confidence:
 - [VERIFIED] entry layout, manifest structure, per-provider isolation, empty
   provider, value round-trip, settings/style snapshots, SAF sink and the
-  credential exclusion by `BackupWriterTest` (10) — `:core-data` 361 / 0
-  (2026-11-19).
-- [UNKNOWN] ZIP size and SAF write time against a real large library, and the
-  device feel of the SAF picker flow — no device run in this task.
+  credential exclusion by `BackupWriterTest` (10); validation order, merge vs
+  replace counts, the conflict report, rejection-with-no-writes and the
+  writer→reader round trip by `BackupRestorerTest` (18) — `:core-data`
+  379 / 0 (2026-11-19).
+- [UNKNOWN] ZIP size and SAF write/read time against a real large library,
+  restore of ~thousands of events, and the device feel of the SAF picker
+  flows — no device run in these tasks.
 
 Date: 2026-11-19
 
 Links: `schema-v2.md`, `outbox-contract.md`, `../playback/listen-history.md`,
-`../providers/credential-handling.md` (backup exclusions),
-`../../.agents/plans/phase-6-tasks.md` (task 6).
+`../providers/credential-handling.md` (backup exclusions), `../decisions.md`
+D-36 (restore semantics), `../../.agents/plans/phase-6-tasks.md` (tasks 6–7).
 
 ---
 
@@ -48,7 +51,8 @@ streaming ZIP library.
 `BackupManifest(formatVersion, appVersion, createdAtMs, providers,
 settingsEntry, styleEntry)`; each `ProviderBackupSection(providerId, name,
 userDataEntry, eventsEntry, songCount, eventCount)`. `formatVersion` starts at
-`1` (`BackupFormat.FORMAT_VERSION`).
+`1` (`BackupFormat.FORMAT_VERSION`) and is a required field on decode; the
+reader rejects any other (or missing) value before writing anything (§Restore).
 
 ## Row shapes
 
@@ -82,3 +86,53 @@ App version and style profile come in as call parameters (the app layer owns
 `BuildConfig` and the style store); the settings snapshot is read from
 `PlayAggregateSettings` + `HistoryRecordingGate`. Device feel / SAF behaviour
 of a real export: [UNKNOWN] — logged, not marked VERIFIED.
+
+## Restore (task 7, `BackupRestorer`, D-36)
+
+`BackupRestorer.readBackup` parses and validates the whole ZIP **before any
+database write** and rejects with a `BackupRestoreException`:
+
+- not a ZIP (`PK` sniff, `ZipException`/truncation) → `MalformedBackup`;
+- no manifest entry, or the manifest is not the **first** entry →
+  `MissingManifest` / `MalformedBackup`;
+- manifest JSON undecodable or `formatVersion` missing (the field is required
+  on decode) → `MalformedEntry`; `formatVersion != 1` →
+  `UnsupportedFormatVersion`;
+- a referenced provider/settings/style entry absent → `MissingEntry`;
+  undecodable, non-canonical provider entry names, section counts that do not
+  match the decoded arrays, rows without identity (`externalId`/`filePath`,
+  `playedAtMs`), an unknown `albumCountRule`, or a non-JSON style entry →
+  `MalformedEntry`.
+
+`preview(parsed)` is read-only and reports per provider section the resolved
+local provider id, backup song/event counts, merge-only `newEvents` /
+`duplicateEvents` (key: `externalId` + `playedAtMs`), matched/unmatched songs,
+the local event count and the conflict list. `restore(parsed, mode)` applies
+everything in **one Room transaction**, then applies the settings snapshot to
+`PlayAggregateSettings`/`HistoryRecordingGate` and returns the style profile
+JSON for the caller (the app layer owns the style store).
+
+Semantics (user-confirmed 2026-11-19, D-36):
+
+- **Provider matching:** manifest `providerId` first, then `name`; unmatched
+  sections are reported (`applied = false`) and skipped.
+- **MERGE:** inserts only events whose (`externalId`, `playedAtMs`) is not
+  already local; the backup wins user-data conflicts, which are reported per
+  song with the differing field names.
+- **REPLACE:** per matched provider, deletes all local `play_events`, resets
+  play state on all its songs, drops pending `play_count` outbox rows (same
+  scope as the task-5 wipe), then inserts the backup events and applies the
+  backup user data (all nine locally-owned columns). Songs absent from the
+  backup lose play counters but keep rating/favorite/resume.
+- Events are always inserted even when the song row is not local yet (the
+  history read LEFT JOINs songs); their user data is reported as
+  `songsSkipped`. `dayStartMs` is recomputed in the local zone — a backup can
+  come from another time zone. Album/artist aggregates are recomputed
+  count-only with the snapshot's rule after the apply.
+- The pending outbox is otherwise untouched: restore is a local data
+  operation and never re-submits scrobbles [decision recorded, D-36].
+
+SAF read seam: `BackupDocumentSource` + `SafBackupDocumentSource`
+(`OpenDocument` URI → `ContentResolver.openInputStream`), the mirror of the
+writer's sink. Device feel of a real restore / SAF read: [UNKNOWN] — no device
+run.

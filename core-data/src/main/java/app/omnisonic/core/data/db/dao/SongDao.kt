@@ -317,6 +317,35 @@ interface SongDao {
     )
     suspend fun resetPlayStateByProvider(providerId: Long)
 
+    /** Restore: overwrites every locally-owned column from one backup row. */
+    @Query(
+        """
+        UPDATE songs SET
+            playCount = :playCount,
+            lastPlayed = :lastPlayed,
+            skipped = :skipped,
+            lastSkipped = :lastSkipped,
+            userRating = :userRating,
+            isFavorite = :isFavorite,
+            favoriteAt = :favoriteAt,
+            resumeMs = :resumeMs,
+            resumeUpdatedAt = :resumeUpdatedAt
+        WHERE id = :id
+        """,
+    )
+    suspend fun applyUserData(
+        id: Long,
+        playCount: Int,
+        lastPlayed: Long?,
+        skipped: Boolean,
+        lastSkipped: Long?,
+        userRating: Int?,
+        isFavorite: Boolean,
+        favoriteAt: Long?,
+        resumeMs: Long?,
+        resumeUpdatedAt: Long?,
+    )
+
     @Query("SELECT MAX(lastSeenSyncId) FROM songs WHERE providerId = :providerId")
     suspend fun selectMaxLastSeenSyncId(providerId: Long): Long?
 

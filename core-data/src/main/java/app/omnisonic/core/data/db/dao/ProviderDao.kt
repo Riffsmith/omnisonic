@@ -24,6 +24,10 @@ interface ProviderDao {
     @Query("SELECT * FROM providers WHERE id = :id")
     suspend fun selectById(id: Long): ProviderEntity?
 
+    /** Restore identity fallback: match a backup provider section by name when its id is not local. */
+    @Query("SELECT * FROM providers WHERE name = :name ORDER BY displayOrder, id")
+    suspend fun selectByName(name: String): List<ProviderEntity>
+
     @Query("SELECT * FROM providers WHERE api = :api")
     suspend fun selectByApi(api: String): List<ProviderEntity>
 
