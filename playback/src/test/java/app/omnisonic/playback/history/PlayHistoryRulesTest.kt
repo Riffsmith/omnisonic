@@ -22,32 +22,32 @@ class PlayHistoryRulesTest {
 
     @Test
     fun `a resume point needs the absolute minimum position`() {
-        assertThat(PlayHistoryRules.resumePointMs(9_999, 100_000)).isNull()
-        assertThat(PlayHistoryRules.resumePointMs(10_000, 100_000)).isEqualTo(10_000)
-        assertThat(PlayHistoryRules.resumePointMs(0, 100_000)).isNull()
-        assertThat(PlayHistoryRules.resumePointMs(-5, 100_000)).isNull()
-        assertThat(PlayHistoryRules.resumePointMs(20_000, 600_000)).isNull()
+        assertThat(PlayHistoryRules.resumePositionMs(9_999, 100_000)).isNull()
+        assertThat(PlayHistoryRules.resumePositionMs(10_000, 100_000)).isEqualTo(10_000)
+        assertThat(PlayHistoryRules.resumePositionMs(0, 100_000)).isNull()
+        assertThat(PlayHistoryRules.resumePositionMs(-5, 100_000)).isNull()
+        assertThat(PlayHistoryRules.resumePositionMs(20_000, 600_000)).isNull()
     }
 
     @Test
     fun `a resume point uses the larger of the absolute and relative floors`() {
         assertThat(
-            PlayHistoryRules.resumePointMs(15_000, 100_000, minPositionMs = 10_000, minFraction = 0.2),
+            PlayHistoryRules.resumePositionMs(15_000, 100_000, minPositionMs = 10_000, minFraction = 0.2),
         ).isNull()
         assertThat(
-            PlayHistoryRules.resumePointMs(20_000, 100_000, minPositionMs = 10_000, minFraction = 0.2),
+            PlayHistoryRules.resumePositionMs(20_000, 100_000, minPositionMs = 10_000, minFraction = 0.2),
         ).isEqualTo(20_000)
     }
 
     @Test
     fun `a resume point is not stored once the play counts`() {
-        assertThat(PlayHistoryRules.resumePointMs(190_000, 200_000)).isNull()
-        assertThat(PlayHistoryRules.resumePointMs(100_000, 200_000, playThresholdFraction = 0.4)).isNull()
+        assertThat(PlayHistoryRules.resumePositionMs(190_000, 200_000)).isNull()
+        assertThat(PlayHistoryRules.resumePositionMs(100_000, 200_000, playThresholdFraction = 0.4)).isNull()
     }
 
     @Test
     fun `an unknown duration keeps only the absolute floor`() {
-        assertThat(PlayHistoryRules.resumePointMs(12_000, null)).isEqualTo(12_000)
-        assertThat(PlayHistoryRules.resumePointMs(2_000, 0)).isNull()
+        assertThat(PlayHistoryRules.resumePositionMs(12_000, null)).isEqualTo(12_000)
+        assertThat(PlayHistoryRules.resumePositionMs(2_000, 0)).isNull()
     }
 }

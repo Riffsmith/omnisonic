@@ -31,7 +31,7 @@ object PlayHistoryRules {
      * the minimum position or the playback already counted as a full play
      * (a completed listen needs no resume marker).
      */
-    fun resumePointMs(
+    fun resumePositionMs(
         positionMs: Long,
         durationMs: Long?,
         minPositionMs: Long = DEFAULT_RESUME_MIN_POSITION_MS,

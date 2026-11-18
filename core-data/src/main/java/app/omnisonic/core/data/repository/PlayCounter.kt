@@ -2,6 +2,8 @@ package app.omnisonic.core.data.repository
 
 import androidx.room.withTransaction
 import app.omnisonic.core.data.db.OmnisonicDatabase
+import app.omnisonic.core.data.db.aggregation.PlayAggregateSettings
+import app.omnisonic.core.data.db.aggregation.recomputeAlbums
 import app.omnisonic.core.data.db.queue.OutboxQueue
 import app.omnisonic.provider.api.ProviderMediaType
 import javax.inject.Inject
@@ -10,14 +12,17 @@ import javax.inject.Singleton
 /**
  * Records listening outcomes. The songs row is materialised first so a play
  * from a queue/radio item never requires a synced row; locally-owned playback
- * state is then updated by id. Eligibility rules (95% threshold, resume points)
- * stay in the playback layer that calls this.
+ * state is then updated by id, and the affected album and artist rows are
+ * recomputed from the song rows before the transaction commits. Eligibility
+ * rules (95% threshold, resume points) stay in the playback layer that calls
+ * this.
  */
 @Singleton
 class PlayCounter @Inject constructor(
     private val db: OmnisonicDatabase,
     private val songRepository: SongRepository,
     private val outboxQueue: OutboxQueue,
+    private val aggregateSettings: PlayAggregateSettings,
 ) {
 
     suspend fun recordPlay(
@@ -43,6 +48,7 @@ class PlayCounter @Inject constructor(
             playedAtMs = playedAtMs,
             now = now,
         )
+        refreshAggregates(songId)
         songId
     }
 
@@ -78,6 +84,22 @@ class PlayCounter @Inject constructor(
     ): Long = db.withTransaction {
         val songId = songRepository.ensureSong(providerId, externalId, snapshot)
         db.songDao().setResumePoint(songId, resumeMs = positionMs, now = now)
+        refreshAggregates(songId)
         songId
+    }
+
+    /**
+     * The album row carries the derived play count, last-played stamp and
+     * resume track, so every write that changes one of its songs must refresh
+     * it in the same transaction; the artist rows sum the same song counts.
+     */
+    private suspend fun refreshAggregates(songId: Long) {
+        val song = db.songDao().selectById(songId) ?: return
+        val options = aggregateSettings.options()
+        song.albumId?.let { db.aggregateDao().recomputeAlbums(listOf(it), options.albumCountRule) }
+        val artistIds = db.songArtistDao().selectBySong(songId).map { it.artistId }.distinct()
+        if (artistIds.isNotEmpty()) {
+            db.aggregateDao().recomputeArtistsById(artistIds, options.includeSupportingArtists)
+        }
     }
 }

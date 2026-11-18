@@ -137,7 +137,7 @@ class PlayHistoryRecorder(
     }
 
     private suspend fun saveResumeIfEarly(entry: PlaybackQueueEntry, positionMs: Long) {
-        val resume = PlayHistoryRules.resumePointMs(
+        val resume = PlayHistoryRules.resumePositionMs(
             positionMs = positionMs,
             durationMs = entry.durationMs,
             minPositionMs = resumeMinPositionMs,
