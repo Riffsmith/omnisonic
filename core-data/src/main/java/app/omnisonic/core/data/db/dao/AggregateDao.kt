@@ -152,4 +152,81 @@ interface AggregateDao {
         """,
     )
     suspend fun recomputeArtistsByProvider(providerId: Long, includeSupporting: Boolean)
+
+    /**
+     * Count-only variants used by the history controls: they refresh
+     * `playCount`/`lastPlayed` and never touch the locally-owned
+     * `albums.resumeTrackPath` (D-7, task 5).
+     */
+    @Transaction
+    suspend fun recomputeAlbumCountsById(albumIds: List<Long>, rule: String) {
+        albumIds.forEachSqlChunk { recomputeAlbumCountsByIdChunk(it, rule) }
+    }
+
+    @Query(
+        """
+        UPDATE albums SET
+          playCount = (SELECT COALESCE(CASE :rule
+            WHEN 'sum' THEN SUM(songs.playCount)
+            WHEN 'minimum' THEN MIN(songs.playCount)
+            ELSE ROUND(AVG(songs.playCount)) END, 0) FROM songs WHERE songs.albumId = albums.id),
+          lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id)
+        WHERE albums.id IN (:albumIds)
+        """,
+    )
+    suspend fun recomputeAlbumCountsByIdChunk(albumIds: List<Long>, rule: String)
+
+    @Query(
+        """
+        UPDATE albums SET
+          playCount = (SELECT COALESCE(CASE :rule
+            WHEN 'sum' THEN SUM(songs.playCount)
+            WHEN 'minimum' THEN MIN(songs.playCount)
+            ELSE ROUND(AVG(songs.playCount)) END, 0) FROM songs WHERE songs.albumId = albums.id),
+          lastPlayed = (SELECT MAX(songs.lastPlayed) FROM songs WHERE songs.albumId = albums.id)
+        WHERE albums.providerId = :providerId
+        """,
+    )
+    suspend fun recomputeAlbumCountsByProvider(providerId: Long, rule: String)
+
+    @Transaction
+    suspend fun recomputeArtistCountsById(artistIds: List<Long>, includeSupporting: Boolean) {
+        artistIds.forEachSqlChunk { recomputeArtistCountsByIdChunk(it, includeSupporting) }
+    }
+
+    @Query(
+        """
+        UPDATE artists SET
+          playCount = COALESCE((
+            SELECT SUM(songs.playCount) FROM song_artists
+            JOIN songs ON songs.id = song_artists.songId
+            WHERE song_artists.artistId = artists.id AND (:includeSupporting = 1 OR song_artists.role = '')
+          ), 0),
+          lastPlayed = (
+            SELECT MAX(songs.lastPlayed) FROM song_artists
+            JOIN songs ON songs.id = song_artists.songId
+            WHERE song_artists.artistId = artists.id AND (:includeSupporting = 1 OR song_artists.role = '')
+          )
+        WHERE artists.id IN (:artistIds)
+        """,
+    )
+    suspend fun recomputeArtistCountsByIdChunk(artistIds: List<Long>, includeSupporting: Boolean)
+
+    @Query(
+        """
+        UPDATE artists SET
+          playCount = COALESCE((
+            SELECT SUM(songs.playCount) FROM song_artists
+            JOIN songs ON songs.id = song_artists.songId
+            WHERE song_artists.artistId = artists.id AND (:includeSupporting = 1 OR song_artists.role = '')
+          ), 0),
+          lastPlayed = (
+            SELECT MAX(songs.lastPlayed) FROM song_artists
+            JOIN songs ON songs.id = song_artists.songId
+            WHERE song_artists.artistId = artists.id AND (:includeSupporting = 1 OR song_artists.role = '')
+          )
+        WHERE artists.providerId = :providerId
+        """,
+    )
+    suspend fun recomputeArtistCountsByProvider(providerId: Long, includeSupporting: Boolean)
 }

@@ -19,4 +19,6 @@ data class RecentPlayRow(
     val displayArtist: String?,
     val albumTitle: String?,
     val imagePath: String?,
+    /** Song play count when the row exists, 0 when it was pruned; edit-dialog prefill. */
+    val playCount: Int = 0,
 )

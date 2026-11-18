@@ -19,6 +19,21 @@
     <string name="history_title">Recent plays</string>
     <string name="history_empty">Nothing played yet. Plays you listen to will show up here.</string>
     <string name="history_skipped">Skipped</string>
+    <string name="history_row_actions">More options for %1$s</string>
+    <string name="history_remove_play">Remove this play</string>
+    <string name="history_edit_play_count">Edit play count</string>
+    <string name="history_clear_provider">Clear all history for this provider</string>
+    <string name="history_pause_recording">Pause recording for this provider</string>
+    <string name="history_resume_recording">Resume recording for this provider</string>
+    <string name="history_remove_play_title">Remove this play?</string>
+    <string name="history_remove_play_body">This play is removed from your history and its play count.</string>
+    <string name="history_clear_provider_title">Clear all history for this provider?</string>
+    <string name="history_clear_provider_body">All plays from this provider are removed. Ratings, favorites and resume points are kept.</string>
+    <string name="history_edit_play_count_title">Edit play count</string>
+    <string name="history_cancel">Cancel</string>
+    <string name="history_remove">Remove</string>
+    <string name="history_clear">Clear</string>
+    <string name="history_save">Save</string>
 
     <string name="detail_play">Play</string>
     <string name="detail_shuffle">Shuffle</string>

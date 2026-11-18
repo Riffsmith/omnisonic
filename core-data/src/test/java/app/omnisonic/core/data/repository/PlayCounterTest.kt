@@ -2,6 +2,7 @@ package app.omnisonic.core.data.repository
 
 import app.omnisonic.core.data.DatabaseTestBase
 import app.omnisonic.core.data.db.aggregation.AlbumCountRule
+import app.omnisonic.core.data.history.HistoryRecordingGate
 import app.omnisonic.core.data.db.aggregation.PlayAggregateSettings
 import app.omnisonic.core.data.db.aggregation.PlayAggregateSettings.Options
 import app.omnisonic.core.data.db.queue.OutboxQueue
@@ -19,11 +20,13 @@ class PlayCounterTest : DatabaseTestBase() {
     private fun counter(
         traits: ProviderTraits = ProviderTraits(),
         settings: PlayAggregateSettings = PlayAggregateSettings(),
+        gate: HistoryRecordingGate = HistoryRecordingGate(),
     ) = PlayCounter(
         db = db,
         songRepository = SongRepository(db),
         outboxQueue = OutboxQueue(db, db.outboxDao(), traitsSource = { traits }, moshi = app.omnisonic.core.data.json.OmnisonicJson.moshi),
         aggregateSettings = settings,
+        recordingGate = gate,
     )
 
     private val snapshot = SongRepository.SongSnapshot(
@@ -37,7 +40,7 @@ class PlayCounterTest : DatabaseTestBase() {
     fun recordsAPlayForAnItemWithoutASyncedSong() = runDbTest {
         newProvider(id = 1)
 
-        val songId = counter().recordPlay(1, "song-1", snapshot, playedAtMs = 1_000, durationMs = 2_000)
+        val songId = counter().recordPlay(1, "song-1", snapshot, playedAtMs = 1_000, durationMs = 2_000)!!
 
         val song = songDao.selectById(songId)!!
         assertThat(song.title).isEqualTo("Unsynced title")
@@ -52,8 +55,8 @@ class PlayCounterTest : DatabaseTestBase() {
         newProvider(id = 1)
         val counter = counter()
 
-        val first = counter.recordPlay(1, "song-1", snapshot, playedAtMs = 1_000, durationMs = 2_000)
-        val second = counter.recordPlay(1, "song-1", snapshot, playedAtMs = 2_000, durationMs = 2_000)
+        val first = counter.recordPlay(1, "song-1", snapshot, playedAtMs = 1_000, durationMs = 2_000)!!
+        val second = counter.recordPlay(1, "song-1", snapshot, playedAtMs = 2_000, durationMs = 2_000)!!
 
         assertThat(second).isEqualTo(first)
         assertThat(songDao.selectByProvider(1)).hasSize(1)
@@ -65,7 +68,7 @@ class PlayCounterTest : DatabaseTestBase() {
     fun skipMarksTheSongWithoutCountingAPlay() = runDbTest {
         newProvider(id = 1)
 
-        val songId = counter().recordSkip(1, "song-1", snapshot, playedAtMs = 1_000, durationMs = 500)
+        val songId = counter().recordSkip(1, "song-1", snapshot, playedAtMs = 1_000, durationMs = 500)!!
 
         val song = songDao.selectById(songId)!!
         assertThat(song.playCount).isEqualTo(0)
@@ -211,6 +214,30 @@ class PlayCounterTest : DatabaseTestBase() {
         assertThat(artistDao.selectById(99)!!.playCount).isEqualTo(0)
         assertThat(playEventDao.selectByProvider(1)).isEmpty()
         assertThat(outboxDao.selectByProvider(1)).isEmpty()
+    }
+
+    @Test
+    fun pausedProviderRecordsNothingAndKeepsExistingRows() = runDbTest {
+        newProvider(id = 1)
+        val gate = HistoryRecordingGate()
+        val counter = counter(gate = gate)
+        counter().recordPlay(1, "song-1", snapshot, playedAtMs = 1_000, durationMs = 2_000)
+        assertThat(playEventDao.selectByProvider(1)).hasSize(1)
+
+        gate.setPaused(1, paused = true)
+        assertThat(counter.recordPlay(1, "song-1", snapshot, playedAtMs = 2_000, durationMs = 2_000)).isNull()
+        assertThat(counter.recordSkip(1, "song-1", snapshot, playedAtMs = 3_000, durationMs = 2_000)).isNull()
+        assertThat(counter.recordResumePoint(1, "song-1", snapshot, positionMs = 5_000, now = 4_000)).isNull()
+
+        assertThat(songDao.selectByProviderAndExternal(1, "song-1")!!.playCount).isEqualTo(1)
+        assertThat(songDao.selectByProviderAndExternal(1, "song-1")!!.resumeMs).isNull()
+        assertThat(playEventDao.selectByProvider(1)).hasSize(1)
+        assertThat(outboxDao.selectByProvider(1)).hasSize(1)
+
+        gate.setPaused(1, paused = false)
+        assertThat(counter.recordPlay(1, "song-1", snapshot, playedAtMs = 5_000, durationMs = 2_000)).isNotNull()
+        assertThat(playEventDao.selectByProvider(1)).hasSize(2)
+        assertThat(songDao.selectByProviderAndExternal(1, "song-1")!!.playCount).isEqualTo(2)
     }
 
     @Test

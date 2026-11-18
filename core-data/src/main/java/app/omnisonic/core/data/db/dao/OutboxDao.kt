@@ -98,6 +98,9 @@ interface OutboxDao {
     @Query("DELETE FROM outbox_items")
     suspend fun deleteAll()
 
+    @Query("DELETE FROM outbox_items WHERE providerId = :providerId AND action = :action")
+    suspend fun deleteByProviderAndAction(providerId: Long, action: String)
+
     /**
      * Parked rows become due again for a manual retry. The attempts counter is
      * reset so the next failure starts from the base back-off; `lastError`

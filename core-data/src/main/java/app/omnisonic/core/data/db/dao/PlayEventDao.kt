@@ -73,7 +73,8 @@ interface PlayEventDao {
             play_events.played AS played, play_events.skipped AS skipped,
             play_events.durationMs AS durationMs,
             songs.id AS songId, songs.title AS songTitle, songs.displayArtist AS displayArtist,
-            albums.title AS albumTitle, songs.imagePath AS imagePath
+            albums.title AS albumTitle, songs.imagePath AS imagePath,
+            COALESCE(songs.playCount, 0) AS playCount
         FROM play_events
         LEFT JOIN songs ON songs.providerId = play_events.providerId
             AND songs.externalId = play_events.externalId
@@ -102,6 +103,18 @@ interface PlayEventDao {
     @Query("SELECT COUNT(*) FROM play_events")
     suspend fun count(): Int
 
+    @Query("SELECT * FROM play_events WHERE id = :id")
+    suspend fun selectById(id: Long): PlayEventEntity?
+
+    @Query("SELECT COUNT(*) FROM play_events WHERE providerId = :providerId")
+    suspend fun countByProvider(providerId: Long): Int
+
     @Query("DELETE FROM play_events")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM play_events WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM play_events WHERE providerId = :providerId")
+    suspend fun deleteByProvider(providerId: Long)
 }

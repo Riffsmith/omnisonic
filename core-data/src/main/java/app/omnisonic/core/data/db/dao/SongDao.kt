@@ -280,6 +280,43 @@ interface SongDao {
     @Query("UPDATE songs SET skipped = 1, lastSkipped = :now WHERE id = :id")
     suspend fun markSkipped(id: Long, now: Long)
 
+    /**
+     * History delete: drops one play, clamped at zero, and re-derives
+     * `lastPlayed` from the remaining play events of the song.
+     */
+    @Query(
+        """
+        UPDATE songs SET
+          playCount = MAX(0, playCount - 1),
+          lastPlayed = (
+            SELECT MAX(playedAtMs) FROM play_events
+            WHERE providerId = songs.providerId AND externalId = songs.externalId AND played = 1
+          )
+        WHERE id = :id
+        """,
+    )
+    suspend fun removePlayCount(id: Long)
+
+    /** History edit: explicit count, clamped at zero; zero clears `lastPlayed`. */
+    @Query(
+        """
+        UPDATE songs SET
+          playCount = MAX(0, :value),
+          lastPlayed = CASE WHEN :value <= 0 THEN NULL ELSE COALESCE(lastPlayed, :now) END
+        WHERE id = :id
+        """,
+    )
+    suspend fun setPlayCount(id: Long, value: Int, now: Long)
+
+    /** History wipe: resets the locally-owned play state of one provider's songs. */
+    @Query(
+        """
+        UPDATE songs SET playCount = 0, lastPlayed = NULL, skipped = 0, lastSkipped = NULL
+        WHERE providerId = :providerId
+        """,
+    )
+    suspend fun resetPlayStateByProvider(providerId: Long)
+
     @Query("SELECT MAX(lastSeenSyncId) FROM songs WHERE providerId = :providerId")
     suspend fun selectMaxLastSeenSyncId(providerId: Long): Long?
 

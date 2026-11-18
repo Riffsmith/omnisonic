@@ -5,6 +5,7 @@ import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.aggregation.PlayAggregateSettings
 import app.omnisonic.core.data.db.aggregation.recomputeAlbums
 import app.omnisonic.core.data.db.queue.OutboxQueue
+import app.omnisonic.core.data.history.HistoryRecordingGate
 import app.omnisonic.provider.api.ProviderMediaType
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,7 +16,8 @@ import javax.inject.Singleton
  * state is then updated by id, and the affected album and artist rows are
  * recomputed from the song rows before the transaction commits. Eligibility
  * rules (95% threshold, resume points) stay in the playback layer that calls
- * this.
+ * this. A paused provider (D-7) writes nothing and returns null; existing
+ * rows are kept.
  */
 @Singleton
 class PlayCounter @Inject constructor(
@@ -23,6 +25,7 @@ class PlayCounter @Inject constructor(
     private val songRepository: SongRepository,
     private val outboxQueue: OutboxQueue,
     private val aggregateSettings: PlayAggregateSettings,
+    private val recordingGate: HistoryRecordingGate,
 ) {
 
     suspend fun recordPlay(
@@ -32,24 +35,27 @@ class PlayCounter @Inject constructor(
         playedAtMs: Long,
         durationMs: Long,
         now: Long = playedAtMs,
-    ): Long = db.withTransaction {
-        val songId = songRepository.ensureSong(providerId, externalId, snapshot)
-        db.songDao().addPlayCount(songId, delta = 1, now = now)
-        db.playEventDao().recordPlay(
-            providerId = providerId,
-            externalId = externalId,
-            playedAtMs = playedAtMs,
-            durationMs = durationMs,
-        )
-        outboxQueue.enqueuePlayCountDelta(
-            providerId = providerId,
-            mediaType = ProviderMediaType.SONG,
-            externalId = externalId,
-            playedAtMs = playedAtMs,
-            now = now,
-        )
-        refreshAggregates(songId)
-        songId
+    ): Long? {
+        if (recordingGate.isPaused(providerId)) return null
+        return db.withTransaction {
+            val songId = songRepository.ensureSong(providerId, externalId, snapshot)
+            db.songDao().addPlayCount(songId, delta = 1, now = now)
+            db.playEventDao().recordPlay(
+                providerId = providerId,
+                externalId = externalId,
+                playedAtMs = playedAtMs,
+                durationMs = durationMs,
+            )
+            outboxQueue.enqueuePlayCountDelta(
+                providerId = providerId,
+                mediaType = ProviderMediaType.SONG,
+                externalId = externalId,
+                playedAtMs = playedAtMs,
+                now = now,
+            )
+            refreshAggregates(songId)
+            songId
+        }
     }
 
     suspend fun recordSkip(
@@ -59,16 +65,19 @@ class PlayCounter @Inject constructor(
         playedAtMs: Long,
         durationMs: Long,
         now: Long = playedAtMs,
-    ): Long = db.withTransaction {
-        val songId = songRepository.ensureSong(providerId, externalId, snapshot)
-        db.songDao().markSkipped(songId, now = now)
-        db.playEventDao().recordSkip(
-            providerId = providerId,
-            externalId = externalId,
-            playedAtMs = playedAtMs,
-            durationMs = durationMs,
-        )
-        songId
+    ): Long? {
+        if (recordingGate.isPaused(providerId)) return null
+        return db.withTransaction {
+            val songId = songRepository.ensureSong(providerId, externalId, snapshot)
+            db.songDao().markSkipped(songId, now = now)
+            db.playEventDao().recordSkip(
+                providerId = providerId,
+                externalId = externalId,
+                playedAtMs = playedAtMs,
+                durationMs = durationMs,
+            )
+            songId
+        }
     }
 
     /**
@@ -81,11 +90,14 @@ class PlayCounter @Inject constructor(
         snapshot: SongRepository.SongSnapshot,
         positionMs: Long,
         now: Long,
-    ): Long = db.withTransaction {
-        val songId = songRepository.ensureSong(providerId, externalId, snapshot)
-        db.songDao().setResumePoint(songId, resumeMs = positionMs, now = now)
-        refreshAggregates(songId)
-        songId
+    ): Long? {
+        if (recordingGate.isPaused(providerId)) return null
+        return db.withTransaction {
+            val songId = songRepository.ensureSong(providerId, externalId, snapshot)
+            db.songDao().setResumePoint(songId, resumeMs = positionMs, now = now)
+            refreshAggregates(songId)
+            songId
+        }
     }
 
     /**

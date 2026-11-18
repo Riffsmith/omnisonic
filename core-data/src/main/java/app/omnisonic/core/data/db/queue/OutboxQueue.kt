@@ -86,6 +86,67 @@ class OutboxQueue @Inject constructor(
         )
 
     /**
+     * Drops one play timestamp from the pending play-count row of an item
+     * (history delete). Returns false when no row exists or the timestamp is
+     * not queued anymore (already submitted). The delete is payload-keyed, so
+     * a play enqueued meanwhile survives.
+     */
+    suspend fun removePlayTimestamp(
+        providerId: Long,
+        mediaType: ProviderMediaType,
+        externalId: String,
+        playedAtMs: Long,
+    ): Boolean = db.withTransaction {
+        val existing = outboxDao.selectTarget(providerId, mediaType.name, externalId, OutboxActions.PLAY_COUNT)
+            ?: return@withTransaction false
+        val payload = decode(existing.payloadJson)
+        val before = payload.playTimestampsForSubmission()
+        val remaining = payload.afterSubmitting(listOf(playedAtMs))
+        if (remaining.playTimestampsForSubmission() == before) return@withTransaction false
+        writeBackPlayCount(existing, remaining)
+        true
+    }
+
+    /**
+     * Adjusts the pending play-count delta of an item by [delta] (history
+     * edit), floored at zero: negative deltas consume the newest queued
+     * timestamps, positive ones append synthesised ones, so the row keeps one
+     * timestamp per play. Returns false when no row exists or delta is 0.
+     */
+    suspend fun adjustPlayCountDelta(
+        providerId: Long,
+        mediaType: ProviderMediaType,
+        externalId: String,
+        delta: Int,
+    ): Boolean = db.withTransaction {
+        if (delta == 0) return@withTransaction false
+        val existing = outboxDao.selectTarget(providerId, mediaType.name, externalId, OutboxActions.PLAY_COUNT)
+            ?: return@withTransaction false
+        val payload = decode(existing.payloadJson)
+        val adjusted = if (delta < 0) {
+            payload.afterSubmitting(payload.playTimestampsForSubmission().takeLast(-delta))
+        } else {
+            payload.withAppendedPlays(delta).withConsistentPlayCount()
+        }
+        writeBackPlayCount(existing, adjusted)
+        true
+    }
+
+    private suspend fun writeBackPlayCount(existing: OutboxItemEntity, payload: OutboxActionPayload) {
+        if (payload.playTimestampsForSubmission().isEmpty()) {
+            outboxDao.deleteByIdAndPayload(existing.id, existing.payloadJson)
+        } else {
+            outboxDao.recordProgress(existing.id, payloadAdapter.toJson(payload), existing.nextAttemptAt)
+        }
+    }
+
+    private fun OutboxActionPayload.withAppendedPlays(count: Int): OutboxActionPayload {
+        val base = playTimestampsForSubmission()
+        val start = (base.lastOrNull() ?: lastPlayedAt ?: 0L) + 1
+        return copy(playTimestamps = base + List(count) { start + it })
+    }
+
+    /**
      * Traits come from the persisted row's api; a row that has already gone
      * resolves to the Subsonic-family defaults (same fallback the registry
      * applies to unknown apis).

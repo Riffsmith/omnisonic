@@ -9,6 +9,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -34,7 +36,7 @@ class HistoryViewModelTest {
     @Test
     fun `initial load lands on content with count and hasMore`() = runTest {
         val source = FakeHistorySource(total = 130)
-        val viewModel = HistoryViewModel(source)
+        val viewModel = HistoryViewModel(source, FakeHistoryControls())
 
         viewModel.load()
 
@@ -48,7 +50,7 @@ class HistoryViewModelTest {
     @Test
     fun `loadMore appends the next window newest first without duplicate keys`() = runTest {
         val source = FakeHistorySource(total = 130)
-        val viewModel = HistoryViewModel(source)
+        val viewModel = HistoryViewModel(source, FakeHistoryControls())
         viewModel.load()
 
         viewModel.loadMore()
@@ -67,7 +69,7 @@ class HistoryViewModelTest {
 
     @Test
     fun `empty history lands on the empty state`() = runTest {
-        val viewModel = HistoryViewModel(FakeHistorySource(total = 0))
+        val viewModel = HistoryViewModel(FakeHistorySource(total = 0), FakeHistoryControls())
 
         viewModel.load()
 
@@ -77,7 +79,7 @@ class HistoryViewModelTest {
     @Test
     fun `initial failure lands on error and load retries`() = runTest {
         val source = FakeHistorySource(total = 5, failPagesAt = setOf(0))
-        val viewModel = HistoryViewModel(source)
+        val viewModel = HistoryViewModel(source, FakeHistoryControls())
 
         viewModel.load()
         assertThat(viewModel.state.value).isEqualTo(BrowseUiState.Error)
@@ -91,7 +93,7 @@ class HistoryViewModelTest {
     @Test
     fun `a play-event change reloads the open window with the new count`() = runTest {
         val source = FakeHistorySource(total = 3)
-        val viewModel = HistoryViewModel(source)
+        val viewModel = HistoryViewModel(source, FakeHistoryControls())
         viewModel.load()
         assertThat((viewModel.state.value as BrowseUiState.Content).totalCount).isEqualTo(3)
 
@@ -108,12 +110,59 @@ class HistoryViewModelTest {
     @Test
     fun `a change before the first load fetches nothing`() = runTest {
         val source = FakeHistorySource(total = 10)
-        HistoryViewModel(source)
+        HistoryViewModel(source, FakeHistoryControls())
 
         source.changeFeed.emit(Unit)
         runCurrent()
 
         assertThat(source.pageOffsets).isEmpty()
+    }
+
+    @Test
+    fun `removePlay delegates to the controls`() = runTest {
+        val controls = FakeHistoryControls()
+        val viewModel = HistoryViewModel(FakeHistorySource(total = 1), controls)
+
+        viewModel.removePlay(42)
+        runCurrent()
+
+        assertThat(controls.deletedEventIds).containsExactly(42L)
+    }
+
+    @Test
+    fun `editPlayCount delegates with provider external id and value`() = runTest {
+        val controls = FakeHistoryControls()
+        val viewModel = HistoryViewModel(FakeHistorySource(total = 1), controls)
+
+        viewModel.editPlayCount(providerId = 7, externalId = "e-1", count = 5)
+        runCurrent()
+
+        assertThat(controls.playCounts).containsExactly(Triple(7L, "e-1", 5))
+    }
+
+    @Test
+    fun `wipeProvider delegates to the controls`() = runTest {
+        val controls = FakeHistoryControls()
+        val viewModel = HistoryViewModel(FakeHistorySource(total = 1), controls)
+
+        viewModel.wipeProvider(3)
+        runCurrent()
+
+        assertThat(controls.wipedProviders).containsExactly(3L)
+    }
+
+    @Test
+    fun `setRecordingPaused exposes the gate state`() = runTest {
+        val controls = FakeHistoryControls()
+        val viewModel = HistoryViewModel(FakeHistorySource(total = 1), controls)
+        assertThat(viewModel.pausedProviders.value).isEmpty()
+
+        viewModel.setRecordingPaused(3, paused = true)
+        assertThat(controls.paused).containsExactly(3L, true)
+        assertThat(viewModel.pausedProviders.value).containsExactly(3L)
+
+        viewModel.setRecordingPaused(3, paused = false)
+        assertThat(viewModel.pausedProviders.value).isEmpty()
     }
 
     private class FakeHistorySource(
@@ -155,5 +204,35 @@ class HistoryViewModelTest {
         }
 
         override suspend fun recentCount(): Int = total
+    }
+
+    private class FakeHistoryControls : HistoryControls {
+
+        val deletedEventIds = mutableListOf<Long>()
+        val playCounts = mutableListOf<Triple<Long, String, Int>>()
+        val wipedProviders = mutableListOf<Long>()
+        val paused = mutableMapOf<Long, Boolean>()
+        private val gate = MutableStateFlow<Set<Long>>(emptySet())
+
+        override val pausedProviders: StateFlow<Set<Long>>
+            get() = gate
+
+        override suspend fun deletePlay(eventId: Long): Boolean {
+            deletedEventIds.add(eventId)
+            return true
+        }
+
+        override suspend fun setPlayCount(providerId: Long, externalId: String, count: Int) {
+            playCounts.add(Triple(providerId, externalId, count))
+        }
+
+        override suspend fun wipeProvider(providerId: Long) {
+            wipedProviders.add(providerId)
+        }
+
+        override fun setRecordingPaused(providerId: Long, paused: Boolean) {
+            this.paused[providerId] = paused
+            gate.value = if (paused) gate.value + providerId else gate.value - providerId
+        }
     }
 }

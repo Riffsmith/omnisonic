@@ -151,14 +151,76 @@ seam, keyed on event id) rendered by `HistoryRoute`/`HistoryScreen` at the
 hub's "Recent plays" row. Header shows the title and total count; rows show
 cover, song title (or external id), a skipped marker plus artist · album, the
 absolute played-at and the duration; loading/empty/error states and the load-more
-footer follow the section-screen contract. Rows are display-only until the
-history-controls task. Device feel [UNKNOWN] — no device attached in the task-4
-session.
+footer follow the section-screen contract. Rows carry the D-7 controls in an
+overflow menu (see §Controls). Device feel `[VERIFIED device 2026-11-19 moto g32
+Android 13, debug APK fresh install]`: hub → "Recent plays" renders the paged
+newest-first list live (header count 3→4→5 as plays/skips landed; rows show
+title, artist · album, absolute played-at, duration, "Skipped" marker, per-row
+"More options" button); empty state after a wipe.
+
+## Controls (task 5, D-7 confirmed 2026-11-19)
+
+[VERIFIED by `HistoryEditorTest` (12) + the `PlayCounterTest` pause case +
+`HistoryViewModelTest` (10) + `HistoryScreenTest` (8)] The write side is
+`HistoryEditor` (`:core-data` `history/`), one Room transaction per mutation,
+exposed to the UI through the `:feature-library` `HistoryControls` seam
+(`RepositoryHistoryControls`, bound in `HistoryModule`); `HistoryViewModel`
+delegates and the change feed reloads the open window after every mutation.
+
+- **Remove this play** (per-row menu item, confirm dialog): the event row is
+  gone; a played event also decrements `songs.playCount` (clamped at 0,
+  `lastPlayed` re-derived from the remaining play events) and removes that
+  event's `playedAtMs` from any unsubmitted outbox play-count row
+  (`OutboxQueue.removePlayTimestamp`; the row is deleted when nothing
+  remains). A skip event only loses its row — the skip marker is state, not a
+  count. Server-side correction of an already accepted scrobble is out of
+  reach — Subsonic has no un-scrobble [INFERRED] — so deletes are local +
+  pending-outbox only.
+- **Edit play count** (per-row menu item, numeric dialog prefilled from
+  `RecentPlayRow.playCount`): sets an explicit value clamped at 0 (zero clears
+  `lastPlayed`) and adjusts the unsubmitted outbox delta by the same amount,
+  floored at 0 (`adjustPlayCountDelta` consumes the newest queued timestamps
+  for negative deltas, appends synthesised ones for positive). Event rows are
+  untouched.
+- **Clear all history for this provider** (per-row menu item, confirm dialog):
+  deletes the provider's `play_events`, resets its songs'
+  `playCount`/`lastPlayed`/`skipped`/`lastSkipped`, drops its unsubmitted
+  `play_count` outbox rows and recomputes album/artist counts for that
+  provider. Ratings, favorites, resume points and other providers are
+  untouched.
+- **Pause/Resume recording for this provider** (per-row menu item):
+  `HistoryRecordingGate` (in-memory `pausedProviders` StateFlow) is read by
+  `PlayCounter` on every record call; a paused provider writes nothing (null
+  returns) and keeps its existing rows. Persistence + the settings UI land in
+  task 9.
+- **Aggregates after a control mutation are count-only**:
+  `AggregateDao.recompute*Counts*` refresh `playCount`/`lastPlayed` only and
+  never touch the locally-owned `albums.resumeTrackPath`. The sync-side sweep
+  that re-derives aggregates after a move/prune stays deferred (findings),
+  now with the count-only variants available.
+
+Device feel `[VERIFIED device 2026-11-19 moto g32 Android 13, fresh debug
+install, real Subsonic provider synced 1527 songs]` — all four overflow items
+present and working, exercised end to end with DB + screenshot evidence:
+menu opens with Remove this play / Edit play count / Clear all history for
+this provider / Pause recording for this provider; pause relabels the item to
+Resume and a skip while paused wrote **no** `play_events` row (count stayed 3),
+a skip after resume wrote one; Remove this play → confirm dialog → event row
+gone and the song's `playCount` 1→0 with `lastPlayed` cleared; Edit play count
+→ dialog prefilled with the row's count → set 5 → `playCount`=5; Clear all
+history for this provider → confirm dialog → `play_events` 0, all songs' play
+state reset, `resumeMs` preserved (110270 kept), outbox empty, list fell back
+to the empty state; a post-wipe skip recorded normally. Note: the pending
+outbox rows drained to the server within seconds (server reachable), so the
+unsubmitted-row edit was observed via the local counter, not a lingering row.
 
 ## Deferred
 
 - The album rule and the supporting-credit toggle are process-memory defaults;
   task 9 adds the persisted settings store and the UI.
-- Resume points do not yet enqueue an outbox change; task 3 wires that drain.
-- Per-provider recording pause and the threshold setting are task 9.
+- Resume points do not yet enqueue an outbox change — the drain already
+  supports the `resume_point` action, but the recorder's resume write stays
+  local until the task 9 settings store feeds it.
+- Per-provider recording pause is in-memory (task 5); its persisted settings
+  surface and the threshold setting are task 9.
 - Real-device event spacing and live-scrobble acceptance stay [UNKNOWN].

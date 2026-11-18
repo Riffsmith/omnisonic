@@ -11,17 +11,32 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,8 +53,7 @@ private const val LOAD_MORE_KEY = "load-more"
 /**
  * Recent-plays destination: header (title + play count), then the paged
  * newest-first list with its load-more footer, plus loading/empty/error
- * states. Rows are display-only here; the history controls land in the
- * next task.
+ * states. Each row carries the D-7 history controls in an overflow menu.
  */
 @Composable
 fun HistoryRoute(
@@ -48,11 +62,17 @@ fun HistoryRoute(
 ) {
     LaunchedEffect(Unit) { viewModel.load() }
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val pausedProviders by viewModel.pausedProviders.collectAsStateWithLifecycle()
     HistoryScreen(
         state = state,
+        pausedProviders = pausedProviders,
         onRetry = viewModel::load,
         onLoadMore = viewModel::loadMore,
         onScrollInProgress = viewModel::setScrolling,
+        onRemovePlay = viewModel::removePlay,
+        onEditPlayCount = viewModel::editPlayCount,
+        onWipeProvider = viewModel::wipeProvider,
+        onSetRecordingPaused = viewModel::setRecordingPaused,
         modifier = modifier,
     )
 }
@@ -60,9 +80,14 @@ fun HistoryRoute(
 @Composable
 fun HistoryScreen(
     state: BrowseUiState<RecentPlayRow>,
+    pausedProviders: Set<Long>,
     onRetry: () -> Unit,
     onLoadMore: () -> Unit,
     onScrollInProgress: ((Boolean) -> Unit)? = null,
+    onRemovePlay: (eventId: Long) -> Unit,
+    onEditPlayCount: (providerId: Long, externalId: String, count: Int) -> Unit,
+    onWipeProvider: (providerId: Long) -> Unit,
+    onSetRecordingPaused: (providerId: Long, paused: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
@@ -96,8 +121,13 @@ fun HistoryScreen(
                 BrowseUiState.Error -> DetailErrorBody(onRetry)
                 is BrowseUiState.Content -> HistoryListBody(
                     content = state,
+                    pausedProviders = pausedProviders,
                     onLoadMore = onLoadMore,
                     onScrollInProgress = onScrollInProgress,
+                    onRemovePlay = onRemovePlay,
+                    onEditPlayCount = onEditPlayCount,
+                    onWipeProvider = onWipeProvider,
+                    onSetRecordingPaused = onSetRecordingPaused,
                 )
             }
         }
@@ -107,13 +137,22 @@ fun HistoryScreen(
 @Composable
 private fun HistoryListBody(
     content: BrowseUiState.Content<RecentPlayRow>,
+    pausedProviders: Set<Long>,
     onLoadMore: () -> Unit,
     onScrollInProgress: ((Boolean) -> Unit)?,
+    onRemovePlay: (eventId: Long) -> Unit,
+    onEditPlayCount: (providerId: Long, externalId: String, count: Int) -> Unit,
+    onWipeProvider: (providerId: Long) -> Unit,
+    onSetRecordingPaused: (providerId: Long, paused: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
     val listState = rememberLazyListState()
     ScrollGateReporter(listState, onScrollInProgress)
+    var menuForEvent by remember { mutableStateOf<Long?>(null) }
+    var confirmingRemove by remember { mutableStateOf<RecentPlayRow?>(null) }
+    var confirmingWipe by remember { mutableStateOf<RecentPlayRow?>(null) }
+    var editingRow by remember { mutableStateOf<RecentPlayRow?>(null) }
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
@@ -123,7 +162,16 @@ private fun HistoryListBody(
         ),
     ) {
         items(content.items, key = { it.eventId }) { row ->
-            HistoryRow(row = row)
+            HistoryRow(
+                row = row,
+                paused = row.providerId in pausedProviders,
+                menuExpanded = menuForEvent == row.eventId,
+                onMenuChange = { open -> menuForEvent = if (open) row.eventId else null },
+                onRemove = { confirmingRemove = row },
+                onEdit = { editingRow = row },
+                onWipe = { confirmingWipe = row },
+                onToggleRecording = { onSetRecordingPaused(row.providerId, row.providerId !in pausedProviders) },
+            )
         }
         if (content.hasMore) {
             item(key = LOAD_MORE_KEY) {
@@ -135,10 +183,90 @@ private fun HistoryListBody(
             }
         }
     }
+    confirmingRemove?.let { row ->
+        AlertDialog(
+            onDismissRequest = { confirmingRemove = null },
+            title = { Text(stringResource(R.string.history_remove_play_title)) },
+            text = { Text(stringResource(R.string.history_remove_play_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingRemove = null
+                    onRemovePlay(row.eventId)
+                }) {
+                    Text(stringResource(R.string.history_remove))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingRemove = null }) {
+                    Text(stringResource(R.string.history_cancel))
+                }
+            },
+        )
+    }
+    confirmingWipe?.let { row ->
+        AlertDialog(
+            onDismissRequest = { confirmingWipe = null },
+            title = { Text(stringResource(R.string.history_clear_provider_title)) },
+            text = { Text(stringResource(R.string.history_clear_provider_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingWipe = null
+                    onWipeProvider(row.providerId)
+                }) {
+                    Text(stringResource(R.string.history_clear))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingWipe = null }) {
+                    Text(stringResource(R.string.history_cancel))
+                }
+            },
+        )
+    }
+    editingRow?.let { row ->
+        var countText by remember { mutableStateOf(row.playCount.toString()) }
+        AlertDialog(
+            onDismissRequest = { editingRow = null },
+            title = { Text(stringResource(R.string.history_edit_play_count_title)) },
+            text = {
+                Box(Modifier.width(240.dp)) {
+                    OutlinedTextField(
+                        value = countText,
+                        onValueChange = { countText = it.filter(Char::isDigit) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    editingRow = null
+                    countText.toIntOrNull()?.let { onEditPlayCount(row.providerId, row.externalId, it) }
+                }) {
+                    Text(stringResource(R.string.history_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingRow = null }) {
+                    Text(stringResource(R.string.history_cancel))
+                }
+            },
+        )
+    }
 }
 
 @Composable
-private fun HistoryRow(row: RecentPlayRow) {
+private fun HistoryRow(
+    row: RecentPlayRow,
+    paused: Boolean,
+    menuExpanded: Boolean,
+    onMenuChange: (Boolean) -> Unit,
+    onRemove: () -> Unit,
+    onEdit: () -> Unit,
+    onWipe: () -> Unit,
+    onToggleRecording: () -> Unit,
+) {
     val tokens = OmnisonicTheme.tokens
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -193,6 +321,46 @@ private fun HistoryRow(row: RecentPlayRow) {
                 maxLines = 1,
                 textAlign = TextAlign.End,
             )
+        }
+        Box {
+            IconButton(onClick = { onMenuChange(true) }) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = stringResource(
+                        R.string.history_row_actions,
+                        row.songTitle ?: row.externalId,
+                    ),
+                )
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { onMenuChange(false) },
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.history_remove_play)) },
+                    onClick = { onMenuChange(false); onRemove() },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.history_edit_play_count)) },
+                    onClick = { onMenuChange(false); onEdit() },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.history_clear_provider)) },
+                    onClick = { onMenuChange(false); onWipe() },
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            if (paused) {
+                                stringResource(R.string.history_resume_recording)
+                            } else {
+                                stringResource(R.string.history_pause_recording)
+                            },
+                        )
+                    },
+                    onClick = { onMenuChange(false); onToggleRecording() },
+                )
+            }
         }
     }
 }

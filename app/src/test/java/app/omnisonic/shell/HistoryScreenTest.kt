@@ -5,9 +5,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import app.omnisonic.core.data.db.RecentPlayRow
@@ -33,6 +37,7 @@ private fun historyRow(
     songTitle: String,
     artist: String,
     album: String,
+    playCount: Int = 0,
 ) = RecentPlayRow(
     eventId = eventId,
     providerId = 1,
@@ -46,6 +51,7 @@ private fun historyRow(
     displayArtist = artist,
     albumTitle = album,
     imagePath = null,
+    playCount = playCount,
 )
 
 private fun tabItem(label: String): SemanticsMatcher = SemanticsMatcher("tab '$label'") { node ->
@@ -132,6 +138,123 @@ class HistoryScreenTest {
 
         composeRule.onNodeWithText("Nothing played yet. Plays you listen to will show up here.")
             .assertExists()
+    }
+
+    @Test
+    fun `row overflow remove asks for confirmation and deletes the event`() {
+        val controls = RecordingHistoryControls()
+        val viewModel = testHistoryViewModel(
+            StaticHistorySource(
+                listOf(historyRow(2, "e-2", 2_000, skipped = false, 65_000, "Second Song", "Artist B", "Album B")),
+            ),
+            controls,
+        )
+        composeRule.setContent {
+            OmnisonicTheme {
+                HistoryRoute(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("More options for Second Song").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Remove this play").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Remove this play?").assertExists()
+        composeRule.onNodeWithText("Remove").performClick()
+        composeRule.waitForIdle()
+
+        assertThat(controls.deletedEventIds).containsExactly(2L)
+    }
+
+    @Test
+    fun `clear provider asks for confirmation and wipes that provider`() {
+        val controls = RecordingHistoryControls()
+        val viewModel = testHistoryViewModel(
+            StaticHistorySource(
+                listOf(historyRow(2, "e-2", 2_000, skipped = false, 65_000, "Second Song", "Artist B", "Album B")),
+            ),
+            controls,
+        )
+        composeRule.setContent {
+            OmnisonicTheme {
+                HistoryRoute(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("More options for Second Song").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Clear all history for this provider").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Clear all history for this provider?").assertExists()
+        composeRule.onNodeWithText("Clear").performClick()
+        composeRule.waitForIdle()
+
+        assertThat(controls.wipedProviders).containsExactly(1L)
+        assertThat(controls.deletedEventIds).isEmpty()
+    }
+
+    @Test
+    fun `pause recording toggles the provider and relabels the menu item`() {
+        val controls = RecordingHistoryControls()
+        val viewModel = testHistoryViewModel(
+            StaticHistorySource(
+                listOf(historyRow(2, "e-2", 2_000, skipped = false, 65_000, "Second Song", "Artist B", "Album B")),
+            ),
+            controls,
+        )
+        composeRule.setContent {
+            OmnisonicTheme {
+                HistoryRoute(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("More options for Second Song").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Pause recording for this provider").performClick()
+        composeRule.waitForIdle()
+        assertThat(controls.pausedProviders.value).containsExactly(1L)
+
+        composeRule.onNodeWithContentDescription("More options for Second Song").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Resume recording for this provider").assertExists()
+    }
+
+    @Test
+    fun `edit play count dialog submits the entered value`() {
+        val controls = RecordingHistoryControls()
+        val viewModel = testHistoryViewModel(
+            StaticHistorySource(
+                listOf(
+                    historyRow(
+                        2, "e-2", 2_000, skipped = false, 65_000,
+                        "Second Song", "Artist B", "Album B", playCount = 3,
+                    ),
+                ),
+            ),
+            controls,
+        )
+        composeRule.setContent {
+            OmnisonicTheme {
+                HistoryRoute(viewModel = viewModel)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("More options for Second Song").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Edit play count").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("3").assertExists()
+        val field = composeRule.onNode(hasSetTextAction())
+        field.performTextClearance()
+        field.performTextInput("7")
+        composeRule.onNodeWithText("Save").performClick()
+        composeRule.waitForIdle()
+
+        assertThat(controls.playCounts).containsExactly(Triple(1L, "e-2", 7))
     }
 
     @Test
