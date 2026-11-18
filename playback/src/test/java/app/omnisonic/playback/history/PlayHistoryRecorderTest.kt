@@ -26,13 +26,17 @@ private class RecordingBus : PlaybackEventBus {
     }
 }
 
-private class FakeSink : PlayHistorySink {
+private class FakeSink(var failingPlays: Int = 0) : PlayHistorySink {
     val calls = mutableListOf<String>()
     val plays = mutableListOf<String>()
     val skips = mutableListOf<String>()
     val resumes = mutableListOf<Pair<String, Long>>()
 
     override suspend fun recordPlay(entry: PlaybackQueueEntry, playedAtMs: Long, durationMs: Long) {
+        if (failingPlays > 0) {
+            failingPlays -= 1
+            throw IllegalStateException("write failed")
+        }
         calls += "play:${entry.externalId}:$playedAtMs:$durationMs"
         plays += entry.externalId
     }
@@ -52,9 +56,10 @@ private class Harness(
     scope: CoroutineScope,
     thresholdFraction: Double = PlayHistoryRules.DEFAULT_PLAY_THRESHOLD_FRACTION,
     resumeMinPositionMs: Long = PlayHistoryRules.DEFAULT_RESUME_MIN_POSITION_MS,
+    failingPlays: Int = 0,
 ) {
     val bus = RecordingBus()
-    val sink = FakeSink()
+    val sink = FakeSink(failingPlays)
 
     init {
         PlayHistoryRecorder(
@@ -70,7 +75,8 @@ private class Harness(
 private fun TestScope.harness(
     thresholdFraction: Double = PlayHistoryRules.DEFAULT_PLAY_THRESHOLD_FRACTION,
     resumeMinPositionMs: Long = PlayHistoryRules.DEFAULT_RESUME_MIN_POSITION_MS,
-): Harness = Harness(backgroundScope, thresholdFraction, resumeMinPositionMs).also { runCurrent() }
+    failingPlays: Int = 0,
+): Harness = Harness(backgroundScope, thresholdFraction, resumeMinPositionMs, failingPlays).also { runCurrent() }
 
 private fun entry(
     externalId: String = "song-1",
@@ -242,6 +248,52 @@ class PlayHistoryRecorderTest {
         runCurrent()
 
         assertThat(h.sink.calls).isEmpty()
+    }
+
+    @Test
+    fun `a failed write does not stop later history`() = runTest {
+        val h = harness(failingPlays = 1)
+        val first = entry("song-1", queueItemId = 1)
+        val second = entry("song-2", queueItemId = 2)
+
+        h.bus.emit(PlaybackEvent.Started(first, 0))
+        h.bus.emit(PlaybackEvent.Position(first, 195_000, isPlaying = true))
+        h.bus.emit(PlaybackEvent.TrackChanged(first, second, TrackChangeCause.AUTO_ADVANCE, emptyQueue))
+        h.bus.emit(PlaybackEvent.Position(second, 195_000, isPlaying = true))
+        runCurrent()
+
+        assertThat(h.sink.plays).containsExactly("song-2")
+    }
+
+    @Test
+    fun `a seek back moves the resume point to the latest position`() = runTest {
+        val h = harness()
+        val e = entry()
+
+        h.bus.emit(PlaybackEvent.Started(e, 0))
+        h.bus.emit(PlaybackEvent.Position(e, 70_000, isPlaying = true))
+        h.bus.emit(PlaybackEvent.Position(e, 20_000, isPlaying = true))
+        h.bus.emit(PlaybackEvent.Skipped(e, 20_000, manual = true))
+        h.bus.emit(PlaybackEvent.TrackChanged(e, null, TrackChangeCause.USER_NEXT, emptyQueue))
+        runCurrent()
+
+        assertThat(h.sink.resumes).containsExactly("song-1" to 20_000L)
+    }
+
+    @Test
+    fun `a position for the next entry never opens it before its track change`() = runTest {
+        val h = harness()
+        val first = entry("song-1", queueItemId = 1)
+        val second = entry("song-2", queueItemId = 2)
+
+        h.bus.emit(PlaybackEvent.Started(first, 0))
+        h.bus.emit(PlaybackEvent.Position(first, 195_000, isPlaying = true))
+        h.bus.emit(PlaybackEvent.Skipped(first, 195_000, manual = true))
+        // A stale tick from the still-playing engine, stamped with the new current entry.
+        h.bus.emit(PlaybackEvent.Position(second, 195_000, isPlaying = true))
+        runCurrent()
+
+        assertThat(h.sink.plays).containsExactly("song-1")
     }
 
     @Test

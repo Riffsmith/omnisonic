@@ -193,7 +193,7 @@ object PlaybackWiringModule {
         logger: OmnisonicLogger,
     ): PlaybackStack {
         val bus = PlaybackEventBusImpl()
-        PlayHistoryRecorder(bus, historySink).start(scope)
+        PlayHistoryRecorder(bus, historySink, logger = logger).start(scope)
         val playerProxy = LateBoundOmniPlayer()
         val queue = QueuePlayerImpl(scope, playerProxy, streamResolver, bus)
         val port = LateBoundQueueCommandPort(queue.state)

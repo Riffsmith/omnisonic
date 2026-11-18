@@ -12,7 +12,8 @@ Behavioural context from the study docs' listen-history description
 
 Confidence:
 - [VERIFIED] The recorder's eligibility rules, ordering and dedupe behaviour are
-  covered by `PlayHistoryRulesTest` (6) and `PlayHistoryRecorderTest` (11).
+  covered by `PlayHistoryRulesTest` (6) and `PlayHistoryRecorderTest` (14,
+  including failure isolation and position/seek ordering).
 - [VERIFIED] `:core-data` `PlayCounter` writes the song counter, the
   `play_events` row, the outbox row and the album/artist aggregates in one Room
   transaction (`PlayCounterTest`, 12, including a forced failure that leaves no
@@ -72,9 +73,9 @@ Album play count follows the configurable rule from `PlayAggregateSettings`
 (`SUM` / `AVERAGE` / `MINIMUM`, default `AVERAGE` with half-up rounding).
 Artist play count and last played honour the supporting-credit toggle (default
 off: only track-level credits count). Both defaults follow the studied
-behaviour (`album.play.count.mode` = average, `track.artist.only.playcount` =
-true) [INFERRED]; the holder keeps them in process memory until the history
-settings store lands (task 9).
+behaviour (per-track mean for albums, track-level credits for artists)
+[INFERRED]; the holder keeps them in process memory until the history settings
+store lands (task 9).
 
 ## Events
 
@@ -86,6 +87,11 @@ settings store lands (task 9).
   when `ScrobblePoint` carries a position that satisfies the *recorder's* rule,
   or on `Finished` (a natural finish is a full play even below the threshold).
   The counted flag is per playback, so hints and finishes cannot double count.
+- A `Position`/`Paused`/`Resumed` event only advances an already open span and
+  stores the **latest** reported position. A restart or seek backwards moves
+  the resume candidate back with the listener; a tick stamped with the next
+  queue entry (the engine is still on the previous item while the next one
+  resolves) can neither open that entry nor count it early.
 - `ScrobblePoint` is deliberately re-checked: a threshold configured below 95 %
   counts earlier than the tracker; a threshold above it never counts early on
   the hint.
@@ -109,6 +115,12 @@ field only as a position hint.
 by one coroutine, so writes are applied in emission order and two transactions
 can never interleave. Eligibility state (`open`, `positionMs`, `counted`) is
 owned by that single writer; there are no locks and no shared maps.
+
+[VERIFIED by `a failed write does not stop later history`] A write failure is
+logged and the drain continues with the next event. Without that guard a single
+failed transaction killed the only drain coroutine while the collector kept
+filling the unbounded channel, so listen history stopped silently for the rest
+of the process.
 
 ## Wiring
 

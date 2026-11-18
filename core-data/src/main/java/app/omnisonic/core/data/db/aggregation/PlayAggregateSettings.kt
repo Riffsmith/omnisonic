@@ -8,7 +8,7 @@ import javax.inject.Singleton
  *
  * Defaults follow the studied behaviour [INFERRED from `DATABASE_SCHEMA.md`
  * §4.3]: album play count is the rounded average of its songs, and artist play
- * count includes only track-level credits (`track.artist.only.playcount`).
+ * count includes only track-level credits.
  * Persistence and the settings surface land with the history settings task;
  * this holder is the single read point for the write path either way.
  */
