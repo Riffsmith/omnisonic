@@ -91,6 +91,8 @@ class PlayerScreensGoldenTest {
                     ),
                     onJump = {},
                     onRemove = {},
+                    onUndo = {},
+                    onUndoExpired = {},
                     onMoveUp = {},
                     onMoveDown = {},
                     onClearRemaining = {},

@@ -22,7 +22,9 @@ Date: 2026-11-16 (task 6 shipped 2026-11-11; header added 2026-11-17)
 
 Links: `player-sheet.md` (owns sheet motion + detents), `queue-swipe.md` (owns
 row swipe), `player-queue-return.md` (owns the return gesture), `gesture-contract.md`
-(ownership + twins), `../decisions.md` (D-19…D-26), `../playback/controller-and-events.md`
+(ownership + twins), `queue-ux-improvements.md` (planned undo on remove + animated
+now-playing marker; docs only, not implemented), `../decisions.md` (D-19…D-26),
+`../playback/controller-and-events.md`
 
 ---
 
@@ -165,9 +167,11 @@ list + play order.
 - Header: back button, "Playing N of M" (or "Queue" when nothing is current)
   and "Clear remaining" (enabled only with more than one row).
 - Rows render in playback order with stable `queueItemId` keys; the current
-  row shows an equalizer marker in the primary color. Each row has a bounded
-  cover thumbnail, title/artist, a per-row remove button and an overflow menu
-  with move-up/move-down.
+  row shows a three-bar marker in the primary color inside the old
+  `uiIconSize` box, animated only while playing and revealed and static
+  otherwise (D-31). Each row has a bounded cover thumbnail, title/artist, a
+  per-row remove button and an overflow menu with move-up/move-down. The
+  jump-to-current pill keeps the static glyph (navigation, not playback state).
 - **Remove has both twins:** a right-to-left swipe (custom reveal row; start→
   end is reserved but disabled) and the per-row delete button
   (`ui/queue-swipe.md`). The row follows the finger, a release past half the
@@ -175,6 +179,18 @@ list + play order.
   release springs back to rest. The swipe background is the error container;
   rows paint an opaque background so the swipe affordance never shows through.
   Vertical drags still belong to the list.
+- **Undo on remove (D-31):** a committed swipe or the trash button removes the
+  row and shows a snackbar ("Removed <title>", action "Undo",
+  `SnackbarDuration.Long`) hosted in the queue screen above the jump pill.
+  Undo calls `QueueCommandPort.insertIntoQueue(entry, entriesIndex,
+  orderIndex)` — a transport-free insertion that restores the entry at its
+  captured stable-entries and effective-order slots and re-points the current
+  entry by id. It never starts, stops, seeks or changes the track; restoring
+  into an emptied queue returns idle. Undo is dropped silently on queue
+  replacement, shuffle toggle/reshuffle, move, clear, another removal or a
+  snackbar timeout, and is kept across a jump, play/pause, seek or natural
+  advance. Expiry is id-guarded, so an older snackbar cannot clear a newer
+  removal. Detail: `ui/queue-ux-improvements.md`.
 - **Move** ships through the per-row overflow (the accessibility twin). Free
   drag-reorder is deliberately deferred — the Phase 9 row-action work owns
   drag handles and `MotionTokens.queueReorder`; the move commands already

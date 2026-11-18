@@ -465,6 +465,7 @@ class DetailViewModelTest {
         }
 
         override fun removeFromQueue(queueItemId: Long) = Unit
+        override fun insertIntoQueue(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int) = Unit
         override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) = Unit
         override fun clearQueueExceptCurrent() = Unit
     }

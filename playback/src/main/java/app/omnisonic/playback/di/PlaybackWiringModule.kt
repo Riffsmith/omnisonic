@@ -283,6 +283,8 @@ private class LateBoundQueueCommandPort(
     override fun setRepeatMode(mode: RepeatMode) = requireNotNull(delegate).setRepeatMode(mode)
     override fun setShuffleEnabled(enabled: Boolean) = requireNotNull(delegate).setShuffleEnabled(enabled)
     override fun removeFromQueue(queueItemId: Long) = requireNotNull(delegate).removeFromQueue(queueItemId)
+    override fun insertIntoQueue(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int) =
+        requireNotNull(delegate).insertIntoQueue(entry, entriesIndex, orderIndex)
     override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) =
         requireNotNull(delegate).moveInQueue(queueItemId, toEntriesIndex)
     override fun clearQueueExceptCurrent() = requireNotNull(delegate).clearQueueExceptCurrent()

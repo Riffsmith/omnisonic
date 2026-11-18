@@ -22,8 +22,10 @@ Date: 2026-11-16
 
 Links: `ui/gesture-contract.md` (swipe vs scroll ownership, pointer passes);
 `ui/player-queue-return.md` (D-24 return latch, unchanged);
-`ui/player-screens.md` (queue screen layout); `decisions.md` (D-26; cross-links
-D-24); `.agents/plans/queue-swipe-removal-plan.md`.
+`ui/player-screens.md` (queue screen layout); `queue-ux-improvements.md`
+(a committed swipe removal is now undoable via the snackbar — thresholds, direction and gesture rules below are unchanged);
+`decisions.md` (D-26; cross-links D-24);
+`.agents/plans/queue-swipe-removal-plan.md`.
 
 ---
 

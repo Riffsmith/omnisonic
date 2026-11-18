@@ -60,6 +60,8 @@
     <string name="queue_clear_remaining">Clear remaining</string>
     <string name="queue_current_marker">Now playing</string>
     <string name="queue_remove">Remove %1$s</string>
+    <string name="queue_removed_message">Removed %1$s</string>
+    <string name="queue_undo">Undo</string>
     <string name="queue_move_up">Move %1$s up</string>
     <string name="queue_move_down">Move %1$s down</string>
     <string name="queue_row_actions">More options for %1$s</string>

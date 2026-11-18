@@ -248,6 +248,11 @@ class PlaybackControllerImpl(
         queue.removeEntry(queueItemId)
     }
 
+    override fun insertIntoQueue(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int) {
+        if (released) return
+        queue.insertEntry(entry, entriesIndex, orderIndex)
+    }
+
     override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) {
         if (released) return
         queue.moveEntry(queueItemId, toEntriesIndex)

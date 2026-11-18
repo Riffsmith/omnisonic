@@ -1,5 +1,6 @@
 package app.omnisonic.playback.player
 
+import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.queue.QueueCommandPort
 import app.omnisonic.playback.api.queue.QueueState
 import app.omnisonic.playback.api.queue.RepeatMode
@@ -16,6 +17,7 @@ class TestQueuePort(startState: QueueState = QueueState()) : QueueCommandPort {
     val shuffleCalls = mutableListOf<Boolean>()
     val removedCalls = mutableListOf<Long>()
     val moveCalls = mutableListOf<Pair<Long, Int>>()
+    val insertCalls = mutableListOf<Triple<PlaybackQueueEntry, Int, Int>>()
     val clearExceptCurrentCalls = mutableListOf<Unit>()
 
     override fun skipNext() {
@@ -40,6 +42,10 @@ class TestQueuePort(startState: QueueState = QueueState()) : QueueCommandPort {
 
     override fun removeFromQueue(queueItemId: Long) {
         removedCalls += queueItemId
+    }
+
+    override fun insertIntoQueue(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int) {
+        insertCalls += Triple(entry, entriesIndex, orderIndex)
     }
 
     override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) {

@@ -610,9 +610,16 @@ class PlaybackControllerImplTest {
         runCurrent()
         assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(1L, 3L).inOrder()
 
+        f.controller.insertIntoQueue(entry(2), 1, 1)
+        runCurrent()
+        assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(1L, 2L, 3L).inOrder()
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(1L)
+        assertThat(f.player.played.map { it.queueItemId }).containsExactly(1L)
+
         f.controller.moveInQueue(3, 0)
         runCurrent()
-        assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(3L, 1L).inOrder()
+        assertThat(f.queue.state.value.entries.map { it.queueItemId })
+            .containsExactly(3L, 1L, 2L).inOrder()
 
         f.controller.clearQueueExceptCurrent()
         runCurrent()

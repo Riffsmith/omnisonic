@@ -22,6 +22,18 @@ interface QueuePlayer {
     fun prependNext(entry: PlaybackQueueEntry)
     fun removeEntry(queueItemId: Long)
     fun moveEntry(queueItemId: Long, toEntriesIndex: Int)
+
+    /**
+     * Splices [entry] back into the queue without touching transport: an undo
+     * of [removeEntry] must never start, seek or change the current track.
+     * [entriesIndex] is the stable-entries slot (clamped to `0..entries.size`),
+     * [orderIndex] the effective-order slot used when shuffled (clamped to
+     * `0..playOrder.size`); unshuffled the play order rebuilds from entries. A
+     * duplicate id is a no-op. With no current entry (the removal emptied the
+     * queue) the restored entry becomes the pointer target while playback
+     * stays idle.
+     */
+    fun insertEntry(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int)
     fun jumpToEntry(orderIndex: Int)
     fun clearQueue(keepCurrent: Boolean)
     fun restack()

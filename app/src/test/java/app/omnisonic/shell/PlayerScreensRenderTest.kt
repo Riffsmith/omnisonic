@@ -1,5 +1,6 @@
 package app.omnisonic.shell
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -22,11 +23,13 @@ import app.omnisonic.feature.library.nowplaying.LyricsUiState
 import app.omnisonic.feature.library.nowplaying.NowPlayingEntry
 import app.omnisonic.feature.library.nowplaying.NowPlayingPane
 import app.omnisonic.feature.library.nowplaying.NowPlayingUiState
+import app.omnisonic.feature.library.queue.PendingUndoUi
 import app.omnisonic.feature.library.queue.QueueRow
 import app.omnisonic.feature.library.queue.QueueUiState
 import app.omnisonic.feature.library.ui.NowPlayingScreen
 import app.omnisonic.feature.library.ui.PlayerSheetDrag
 import app.omnisonic.feature.library.ui.QueueScreen
+import app.omnisonic.feature.library.ui.nowPlayingIndicatorAnimates
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.queue.RepeatMode
 import app.omnisonic.style.ButtonTwinAudit
@@ -137,6 +140,8 @@ class PlayerScreensRenderTest {
         state: QueueUiState = queueState(),
         onJump: (Int) -> Unit = {},
         onRemove: (Long) -> Unit = {},
+        onUndo: () -> Unit = {},
+        onUndoExpired: (Long) -> Unit = {},
         onMoveUp: (Long) -> Unit = {},
         onMoveDown: (Long) -> Unit = {},
         onClearRemaining: () -> Unit = {},
@@ -151,6 +156,8 @@ class PlayerScreensRenderTest {
                     state = state,
                     onJump = onJump,
                     onRemove = onRemove,
+                    onUndo = onUndo,
+                    onUndoExpired = onUndoExpired,
                     onMoveUp = onMoveUp,
                     onMoveDown = onMoveDown,
                     onClearRemaining = onClearRemaining,
@@ -458,6 +465,122 @@ class PlayerScreensRenderTest {
 
         composeRule.onNodeWithText("Track 41").assertExists()
         assertThat(composeRule.onAllNodesWithText("Track 1").fetchSemanticsNodes()).isEmpty()
+    }
+
+    @Test
+    fun queueRemovalShowsAnActionableUndo() {
+        var undos = 0
+        setQueue(
+            state = queueState().copy(
+                pendingUndo = PendingUndoUi(2, "Night Ride", "The Late Shift"),
+            ),
+            onUndo = { undos += 1 },
+        )
+
+        composeRule.onNodeWithText("Removed Night Ride").assertExists()
+        composeRule.onNodeWithText("Undo").performClick()
+
+        assertThat(undos).isEqualTo(1)
+    }
+
+    @Test
+    fun queueSecondRemovalReplacesTheVisibleSnackbar() {
+        val pending = mutableStateOf(PendingUndoUi(2, "Night Ride", "The Late Shift"))
+        composeRule.setContent {
+            OmnisonicTheme {
+                QueueScreen(
+                    state = queueState().copy(pendingUndo = pending.value),
+                    onJump = {},
+                    onRemove = {},
+                    onUndo = {},
+                    onUndoExpired = {},
+                    onMoveUp = {},
+                    onMoveDown = {},
+                    onClearRemaining = {},
+                    onBack = {},
+                    onOpenLibrary = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText("Removed Night Ride").assertExists()
+
+        composeRule.runOnIdle { pending.value = PendingUndoUi(3, "Encore", "The Late Shift") }
+
+        composeRule.onNodeWithText("Removed Encore").assertExists()
+        composeRule.onNodeWithText("Removed Night Ride").assertDoesNotExist()
+    }
+
+    @Test
+    fun queueSnackbarTimeoutExpiresThePendingUndoWithoutUndoing() {
+        var undos = 0
+        val expired = mutableListOf<Long>()
+        setQueue(
+            state = queueState().copy(
+                pendingUndo = PendingUndoUi(2, "Night Ride", "The Late Shift"),
+            ),
+            onUndo = { undos += 1 },
+            onUndoExpired = { expired.add(it) },
+        )
+
+        composeRule.mainClock.advanceTimeBy(12_000)
+        composeRule.waitForIdle()
+
+        assertThat(expired).containsExactly(2L)
+        assertThat(undos).isEqualTo(0)
+    }
+
+    @Test
+    fun queueHiddenMarkerStaysStaticWhilePlaying() {
+        setQueue(
+            state = queueState().copy(isPlaying = true),
+            isRevealed = false,
+        )
+
+        composeRule.onAllNodesWithContentDescription("Now playing").onFirst().assertExists()
+    }
+
+    @Test
+    fun nowPlayingIndicatorAnimatesOnlyWhenEveryGateHolds() {
+        assertThat(
+            nowPlayingIndicatorAnimates(
+                isPlaying = true,
+                active = true,
+                durationScale = 1f,
+                animatorsEnabled = true,
+            ),
+        ).isTrue()
+        assertThat(
+            nowPlayingIndicatorAnimates(
+                isPlaying = false,
+                active = true,
+                durationScale = 1f,
+                animatorsEnabled = true,
+            ),
+        ).isFalse()
+        assertThat(
+            nowPlayingIndicatorAnimates(
+                isPlaying = true,
+                active = false,
+                durationScale = 1f,
+                animatorsEnabled = true,
+            ),
+        ).isFalse()
+        assertThat(
+            nowPlayingIndicatorAnimates(
+                isPlaying = true,
+                active = true,
+                durationScale = 0f,
+                animatorsEnabled = true,
+            ),
+        ).isFalse()
+        assertThat(
+            nowPlayingIndicatorAnimates(
+                isPlaying = true,
+                active = true,
+                durationScale = 1f,
+                animatorsEnabled = false,
+            ),
+        ).isFalse()
     }
 
     @Test

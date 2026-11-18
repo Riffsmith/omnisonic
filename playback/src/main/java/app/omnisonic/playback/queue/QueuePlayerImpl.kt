@@ -182,6 +182,26 @@ class QueuePlayerImpl(
         }
     }
 
+    override fun insertEntry(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int) {
+        if (released) return
+        if (entriesIndexFor(entry.queueItemId) >= 0) return
+        val currentId = currentEntry()?.queueItemId
+        entries = entries.toMutableList().apply { add(entriesIndex.coerceIn(0, entries.size), entry) }
+        if (!shuffleOn) {
+            playOrder = entries.map { it.queueItemId }
+        } else {
+            playOrder = playOrder.toMutableList()
+                .apply { add(orderIndex.coerceIn(0, playOrder.size), entry.queueItemId) }
+        }
+        if (currentId != null) {
+            repositionPlayIndexTo(currentId)
+        } else {
+            playIndex = playOrder.indexOf(entry.queueItemId).coerceAtLeast(0)
+        }
+        refreshState()
+        schedulePrepareFollowing()
+    }
+
     override fun moveEntry(queueItemId: Long, toEntriesIndex: Int) {
         if (released) return
         val from = entriesIndexFor(queueItemId)

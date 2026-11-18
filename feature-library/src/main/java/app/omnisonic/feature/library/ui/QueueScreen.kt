@@ -1,7 +1,16 @@
 package app.omnisonic.feature.library.ui
 
+import android.animation.ValueAnimator
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -37,6 +46,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,7 +66,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -82,6 +97,7 @@ import app.omnisonic.provider.api.CoverImageKey
 import app.omnisonic.style.GestureTwin
 import app.omnisonic.style.OmnisonicTheme
 import app.omnisonic.style.gestureTwins
+import app.omnisonic.style.toEasing
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -99,6 +115,8 @@ fun QueueRoute(
         state = state,
         onJump = viewModel::jumpTo,
         onRemove = viewModel::remove,
+        onUndo = viewModel::undoRemove,
+        onUndoExpired = viewModel::undoExpired,
         onMoveUp = viewModel::moveUp,
         onMoveDown = viewModel::moveDown,
         onClearRemaining = viewModel::clearQueueExceptCurrent,
@@ -129,6 +147,8 @@ fun QueueScreen(
     state: QueueUiState,
     onJump: (Int) -> Unit,
     onRemove: (Long) -> Unit,
+    onUndo: () -> Unit,
+    onUndoExpired: (Long) -> Unit,
     onMoveUp: (Long) -> Unit,
     onMoveDown: (Long) -> Unit,
     onClearRemaining: () -> Unit,
@@ -144,6 +164,37 @@ fun QueueScreen(
     val currentOrderIndex = state.currentOrderIndex
     val currentRow = currentOrderIndex?.let { index -> state.rows.getOrNull(index) }
     val currentListIndex = currentRow?.let { (it.orderIndex - 1).coerceAtLeast(0) }
+
+    // The undo snackbar is driven by the pending-undo state: showing it is keyed
+    // on the pending identity so a second removal replaces the visible message
+    // (showSnackbar cancels the previous one) instead of queueing behind it, and
+    // clearing the pending state — an undo, or an invalidated stale undo —
+    // dismisses whatever is visible (ui/queue-ux-improvements.md). The action
+    // reports back only on a real tap; a natural timeout drops the pending
+    // action through its id, so it can never clear a newer removal.
+    val snackbarHostState = remember { SnackbarHostState() }
+    val pendingUndo = state.pendingUndo
+    val undoLabel = stringResource(R.string.queue_undo)
+    val removalMessage = pendingUndo?.let { stringResource(R.string.queue_removed_message, it.title) }
+    LaunchedEffect(pendingUndo?.queueItemId, removalMessage) {
+        if (pendingUndo == null || removalMessage == null) {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            return@LaunchedEffect
+        }
+        val result = snackbarHostState.showSnackbar(
+            message = removalMessage,
+            actionLabel = undoLabel,
+            withDismissAction = false,
+            duration = SnackbarDuration.Long,
+        )
+        // Material3 reports a natural timeout as Dismissed; only this effect's
+        // own dismissal arrives here (a replacement cancels it), and the id
+        // guard in the view model keeps an older dismissal harmless.
+        when (result) {
+            SnackbarResult.ActionPerformed -> onUndo()
+            SnackbarResult.Dismissed -> onUndoExpired(pendingUndo.queueItemId)
+        }
+    }
 
     // The queue layer stays composed under now-playing, so positioning has to
     // wait for the reveal edge instead of running on every track change; the
@@ -182,11 +233,19 @@ fun QueueScreen(
         }
     }
 
+    // Floating controls over the list: the jump pill hugs the bottom edge and
+    // the undo snackbar stacks above its band, so the two never collide; the
+    // list's tail padding keeps the last row clear of both
+    // (ui/player-queue-return.md §5, ui/queue-ux-improvements.md).
+    val pillBand = tokens.spacing.md + tokens.imagery.listThumbSize + tokens.spacing.sm * 2
+    val snackbarBand = tokens.imagery.listThumbSize + tokens.spacing.sm
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -247,15 +306,14 @@ fun QueueScreen(
                             start = tokens.layout.pagePadding,
                             top = tokens.spacing.sm,
                             end = tokens.layout.pagePadding,
-                            // The jump pill floats over the list; the extra room
-                            // keeps the last row clear of it (ui/player-queue-return.md §5).
-                            bottom = tokens.spacing.sm + tokens.imagery.listThumbSize +
-                                tokens.spacing.lg,
+                            bottom = pillBand + snackbarBand,
                         ),
                     ) {
                         items(state.rows, key = { row -> row.entry.queueItemId }) { row ->
                             QueueRowItem(
                                 row = row,
+                                isPlaying = state.isPlaying,
+                                active = isRevealed,
                                 canReorder = state.canReorder,
                                 canMoveUp = state.canReorder &&
                                     state.rows.firstOrNull()?.entry?.queueItemId !=
@@ -281,6 +339,13 @@ fun QueueScreen(
                     }
                 }
             }
+        }
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = pillBand),
+            )
         }
     }
 }
@@ -457,6 +522,8 @@ private fun QueueRow.isLast(rows: List<QueueRow>): Boolean =
 @Composable
 private fun QueueRowItem(
     row: QueueRow,
+    isPlaying: Boolean,
+    active: Boolean,
     canReorder: Boolean,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
@@ -561,12 +628,7 @@ private fun QueueRowItem(
                 .padding(vertical = tokens.spacing.xs),
         ) {
             if (row.isCurrent) {
-                Icon(
-                    imageVector = Icons.Filled.Equalizer,
-                    contentDescription = stringResource(R.string.queue_current_marker),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(tokens.imagery.uiIconSize),
-                )
+                NowPlayingIndicator(isPlaying = isPlaying, active = active)
             } else {
                 Spacer(Modifier.size(tokens.imagery.uiIconSize))
             }
@@ -628,6 +690,86 @@ private fun QueueRowItem(
                 }
             }
         }
+    }
+}
+
+/**
+ * Pure gate for the animated marker (ui/queue-ux-improvements.md): it animates
+ * only while playing, while the queue surface is revealed, and while motion is
+ * allowed at all. Public so render tests can exercise the gate directly
+ * instead of frame timing.
+ */
+fun nowPlayingIndicatorAnimates(
+    isPlaying: Boolean,
+    active: Boolean,
+    durationScale: Float,
+    animatorsEnabled: Boolean,
+): Boolean = isPlaying && active && durationScale > 0f && animatorsEnabled
+
+/**
+ * The current row's three-bar playback marker in the `uiIconSize` box the old
+ * equalizer glyph occupied. Bars animate on one infinite transition with
+ * staggered reverse tweens while the gate in [nowPlayingIndicatorAnimates]
+ * holds; every gated-off state (paused, hidden, reduced motion) draws the same
+ * static bars, which is also the deterministic golden frame. The bars are
+ * decorative: the container carries the row's "now playing" description.
+ */
+@Composable
+private fun NowPlayingIndicator(isPlaying: Boolean, active: Boolean, modifier: Modifier = Modifier) {
+    val tokens = OmnisonicTheme.tokens
+    val description = stringResource(R.string.queue_current_marker)
+    val tint = MaterialTheme.colorScheme.primary
+    val animates = nowPlayingIndicatorAnimates(
+        isPlaying = isPlaying,
+        active = active,
+        durationScale = tokens.motion.durationScale,
+        animatorsEnabled = ValueAnimator.areAnimatorsEnabled(),
+    )
+    val heightFractions = if (animates) {
+        animatedBarFractions(
+            durationMs = (tokens.motion.queuePlayingIndicator.durationMs * tokens.motion.durationScale)
+                .roundToInt(),
+            easing = tokens.motion.easingProfile.toEasing(),
+        )
+    } else {
+        STATIC_BAR_FRACTIONS
+    }
+    Box(
+        modifier = modifier
+            .size(tokens.imagery.uiIconSize)
+            .semantics { contentDescription = description },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val gap = tokens.spacing.xs.toPx()
+            val barWidth = (size.width - gap * (BAR_COUNT - 1)) / BAR_COUNT
+            heightFractions.forEachIndexed { bar, fraction ->
+                val height = (size.height * fraction).coerceAtMost(size.height)
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(bar * (barWidth + gap), (size.height - height) / 2f),
+                    size = Size(barWidth, height),
+                    cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun animatedBarFractions(durationMs: Int, easing: Easing): List<Float> {
+    val transition = rememberInfiniteTransition(label = "queuePlayingIndicator")
+    val stagger = (durationMs * BAR_STAGGER_FRACTION).roundToInt()
+    return List(BAR_COUNT) { bar ->
+        transition.animateFloat(
+            initialValue = MIN_BAR_HEIGHT_FRACTION,
+            targetValue = MAX_BAR_HEIGHT_FRACTION,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = durationMs, easing = easing),
+                repeatMode = RepeatMode.Reverse,
+                initialStartOffset = StartOffset(stagger * bar),
+            ),
+            label = "bar$bar",
+        ).value
     }
 }
 
@@ -727,3 +869,14 @@ object QueueSwipeRules {
 }
 
 private const val GESTURE_QUEUE_REMOVE = "queue-remove"
+
+private const val BAR_COUNT = 3
+
+/** Static bar heights (fractions of the marker box); the user-approved paused look. */
+private val STATIC_BAR_FRACTIONS = listOf(0.55f, 0.85f, 0.65f)
+
+private const val MIN_BAR_HEIGHT_FRACTION = 0.35f
+private const val MAX_BAR_HEIGHT_FRACTION = 1f
+
+/** Per-bar start offset as a fraction of the tween duration; not a style key. */
+private const val BAR_STAGGER_FRACTION = 0.18f

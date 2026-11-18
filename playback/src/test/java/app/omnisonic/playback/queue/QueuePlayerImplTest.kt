@@ -315,6 +315,100 @@ class QueuePlayerImplTest {
     }
 
     @Test
+    fun `insertEntry restores a removed row without touching transport`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1), entry(2), entry(3)), startEntriesIndex = 1)
+        f.queue.removeEntry(1L)
+        val playedBefore = f.playerFake.played.toList()
+        val eventsBefore = f.bus.emitted.toList()
+
+        f.queue.insertEntry(entry(1), entriesIndex = 0, orderIndex = 0)
+
+        assertThat(f.playerFake.played).isEqualTo(playedBefore)
+        assertThat(f.playerFake.seeks).isEmpty()
+        assertThat(f.playerFake.stopCount).isEqualTo(0)
+        assertThat(f.bus.emitted).isEqualTo(eventsBefore)
+        assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(1L, 2L, 3L).inOrder()
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(2L)
+        assertThat(f.queue.state.value.playIndex).isEqualTo(1)
+    }
+
+    @Test
+    fun `insertEntry after the current id keeps the pointer on it`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1), entry(2), entry(3)), startEntriesIndex = 0)
+        f.queue.removeEntry(3L)
+
+        f.queue.insertEntry(entry(3), entriesIndex = 2, orderIndex = 2)
+
+        assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(1L, 2L, 3L).inOrder()
+        assertThat(f.queue.state.value.playIndex).isEqualTo(0)
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(1L)
+        assertThat(f.playerFake.played).hasSize(1)
+    }
+
+    @Test
+    fun `insertEntry while shuffled splices at the order index and preserves the seed`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1), entry(2), entry(3), entry(4)), startEntriesIndex = 2)
+        f.queue.setShuffleEnabled(true)
+        val seed = requireNotNull(f.queue.state.value.shuffle).seed
+        val orderBefore = f.queue.state.value.effectiveOrder()
+        val removedEntriesIndex = orderBefore[1]
+        val removedId = removedEntriesIndex.toLong() + 1L
+        f.queue.removeEntry(removedId)
+        assertThat(f.queue.state.value.effectiveOrder()).isNotEqualTo(orderBefore)
+
+        f.queue.insertEntry(entry(removedId), entriesIndex = removedEntriesIndex, orderIndex = 1)
+
+        val after = f.queue.state.value
+        assertThat(after.shuffle?.seed).isEqualTo(seed)
+        assertThat(after.effectiveOrder()).isEqualTo(orderBefore)
+        assertThat(after.currentEntry?.queueItemId).isEqualTo(3L)
+        assertThat(f.playerFake.played).hasSize(1)
+    }
+
+    @Test
+    fun `insertEntry into an emptied queue points at the restored entry and stays idle`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1)))
+        f.queue.removeEntry(1L)
+        assertThat(f.playerFake.stopCount).isEqualTo(1)
+        val eventsBefore = f.bus.emitted.toList()
+
+        f.queue.insertEntry(entry(1), entriesIndex = 0, orderIndex = 0)
+
+        assertThat(f.playerFake.played).hasSize(1)
+        assertThat(f.playerFake.stopCount).isEqualTo(1)
+        assertThat(f.playerFake.seeks).isEmpty()
+        assertThat(f.playerFake.prepared.count { it != null }).isEqualTo(0)
+        assertThat(f.bus.emitted).isEqualTo(eventsBefore)
+        assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(1L)
+        assertThat(f.queue.state.value.playIndex).isEqualTo(0)
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(1L)
+    }
+
+    @Test
+    fun `insertEntry is a no-op for a duplicate id and clamps out-of-range indices`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1), entry(2), entry(3)), startEntriesIndex = 0)
+        val before = f.queue.state.value
+
+        f.queue.insertEntry(entry(2), entriesIndex = 0, orderIndex = 0)
+        assertThat(f.queue.state.value).isEqualTo(before)
+
+        f.queue.insertEntry(entry(4), entriesIndex = 99, orderIndex = 99)
+        assertThat(f.queue.state.value.entries.map { it.queueItemId }).containsExactly(1L, 2L, 3L, 4L).inOrder()
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(1L)
+
+        val g = newFixture()
+        g.queue.setQueue(listOf(entry(1), entry(2), entry(3)), startEntriesIndex = 0)
+        g.queue.insertEntry(entry(4), entriesIndex = -5, orderIndex = -5)
+        assertThat(g.queue.state.value.entries.map { it.queueItemId }).containsExactly(4L, 1L, 2L, 3L).inOrder()
+        assertThat(g.queue.state.value.currentEntry?.queueItemId).isEqualTo(1L)
+    }
+
+    @Test
     fun `moveEntry with shuffle off reorders entries and playIndex follows the current entry`() {
         val f = newFixture()
         f.queue.setQueue(listOf(entry(1), entry(2), entry(3)), startEntriesIndex = 1)

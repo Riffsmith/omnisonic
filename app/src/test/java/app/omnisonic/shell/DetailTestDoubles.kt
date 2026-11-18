@@ -96,6 +96,7 @@ internal class NoopPlaybackController(
     override fun setRepeatMode(mode: RepeatMode) = Unit
     override fun setShuffleEnabled(enabled: Boolean) = Unit
     override fun removeFromQueue(queueItemId: Long) = Unit
+    override fun insertIntoQueue(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int) = Unit
     override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) = Unit
     override fun clearQueueExceptCurrent() = Unit
     override fun onPlayWhenReady(playWhenReady: Boolean): Boolean = false

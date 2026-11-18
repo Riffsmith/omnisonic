@@ -348,6 +348,7 @@ data class MotionTokens(
     val nowPlayingExpand: MotionSpring = MotionSpring(dampingRatio = 0.85f, stiffness = 380f),
     val nowPlayingRoute: MotionTween = MotionTween(durationMs = 300),
     val queueReorder: MotionTween = MotionTween(durationMs = 300),
+    val queuePlayingIndicator: MotionTween = MotionTween(durationMs = 900),
     val artCrossfade: MotionTween = MotionTween(durationMs = 200),
 )
 

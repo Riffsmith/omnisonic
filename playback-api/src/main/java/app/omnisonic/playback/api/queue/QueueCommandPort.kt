@@ -23,6 +23,12 @@ interface QueueCommandPort {
     /** Removes one queue entry; removing the playing entry advances playback. */
     fun removeFromQueue(queueItemId: Long)
 
+    /**
+     * Restores a removed entry at its captured slots (undo); never touches
+     * transport. See [QueuePlayer.insertEntry].
+     */
+    fun insertIntoQueue(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int)
+
     /** Reorders one queue entry to [toEntriesIndex] in the stable entries list. */
     fun moveInQueue(queueItemId: Long, toEntriesIndex: Int)
 

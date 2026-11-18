@@ -42,6 +42,7 @@ internal class FakePlaybackController : PlaybackController {
     val jumps = mutableListOf<Int>()
     val removed = mutableListOf<Long>()
     val moves = mutableListOf<Pair<Long, Int>>()
+    val inserted = mutableListOf<Triple<PlaybackQueueEntry, Int, Int>>()
     val clearCalls = mutableListOf<Unit>()
 
     override suspend fun play(
@@ -101,6 +102,10 @@ internal class FakePlaybackController : PlaybackController {
 
     override fun removeFromQueue(queueItemId: Long) {
         removed += queueItemId
+    }
+
+    override fun insertIntoQueue(entry: PlaybackQueueEntry, entriesIndex: Int, orderIndex: Int) {
+        inserted += Triple(entry, entriesIndex, orderIndex)
     }
 
     override fun moveInQueue(queueItemId: Long, toEntriesIndex: Int) {
