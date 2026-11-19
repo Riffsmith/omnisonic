@@ -1,5 +1,6 @@
 package app.omnisonic.core.data.backup
 
+import app.omnisonic.core.data.history.HistoryPreferencesStore
 import com.squareup.moshi.JsonClass
 
 @JsonClass(generateAdapter = true)
@@ -55,6 +56,8 @@ data class BackupSettingsSnapshot(
     val albumCountRule: String,
     val includeSupportingArtists: Boolean,
     val pausedProviderIds: List<Long>,
+    val playThresholdPercent: Int = HistoryPreferencesStore.DEFAULT_PLAY_THRESHOLD_PERCENT,
+    val resumeMinPositionMs: Long = HistoryPreferencesStore.DEFAULT_RESUME_MIN_POSITION_MS,
 )
 
 data class BackupEntry(

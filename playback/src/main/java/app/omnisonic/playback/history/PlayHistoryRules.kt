@@ -1,5 +1,7 @@
 package app.omnisonic.playback.history
 
+import app.omnisonic.core.data.history.HistoryPreferences
+
 /**
  * Eligibility rules for listen-history writes, kept pure so the recorder's
  * event ordering and the rules can be tested apart. A play counts once the
@@ -16,6 +18,22 @@ object PlayHistoryRules {
 
     /** Relative floor so long tracks need a proportionally larger start. */
     const val DEFAULT_RESUME_MIN_FRACTION = 0.05
+
+    /**
+     * The rule values the recorder evaluates against, read per decision so a
+     * changed setting takes effect on the next event. Production feeds this
+     * from the persisted history preferences (task 9).
+     */
+    data class PlayHistoryRuleValues(
+        val playThresholdFraction: Double = DEFAULT_PLAY_THRESHOLD_FRACTION,
+        val resumeMinPositionMs: Long = DEFAULT_RESUME_MIN_POSITION_MS,
+        val resumeMinFraction: Double = DEFAULT_RESUME_MIN_FRACTION,
+    )
+
+    fun HistoryPreferences.toRuleValues(): PlayHistoryRuleValues = PlayHistoryRuleValues(
+        playThresholdFraction = playThresholdPercent / 100.0,
+        resumeMinPositionMs = resumeMinPositionMs,
+    )
 
     fun countsAsPlay(
         positionMs: Long,

@@ -255,6 +255,7 @@ class MiniPlayerShellTest {
                 OmnisonicShell(
                     state = shellState(startRoute),
                     settingsViewModel = settingsViewModel,
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },

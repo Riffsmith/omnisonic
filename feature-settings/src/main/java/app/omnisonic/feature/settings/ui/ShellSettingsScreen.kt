@@ -30,6 +30,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.omnisonic.feature.settings.R
+import app.omnisonic.feature.settings.history.HistorySettingsSection
+import app.omnisonic.feature.settings.history.HistorySettingsViewModel
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellNavigationResolver
 import app.omnisonic.feature.settings.shell.ShellPreferences
@@ -53,6 +55,7 @@ fun ShellSettingsScreen(
     syncViewModel: LibrarySyncManagerViewModel,
     pendingSyncViewModel: PendingSyncViewModel,
     viewModel: ShellSettingsViewModel = hiltViewModel(),
+    historySettingsViewModel: HistorySettingsViewModel,
     onShareLogs: () -> Unit = {},
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
@@ -70,6 +73,7 @@ fun ShellSettingsScreen(
         onOpenProviders = onOpenProviders,
         syncViewModel = syncViewModel,
         pendingSyncViewModel = pendingSyncViewModel,
+        historySettingsViewModel = historySettingsViewModel,
         onShareLogs = onShareLogs,
         onSetNetworkLogging = viewModel::setNetworkLogging,
     )
@@ -85,6 +89,7 @@ private fun ShellSettingsContent(
     onOpenProviders: () -> Unit,
     syncViewModel: LibrarySyncManagerViewModel,
     pendingSyncViewModel: PendingSyncViewModel,
+    historySettingsViewModel: HistorySettingsViewModel,
     onShareLogs: () -> Unit,
     onSetNetworkLogging: (Boolean) -> Unit,
 ) {
@@ -136,6 +141,7 @@ private fun ShellSettingsContent(
         }
         LibrarySyncManagerSection(viewModel = syncViewModel)
         PendingSyncSection(viewModel = pendingSyncViewModel)
+        HistorySettingsSection(viewModel = historySettingsViewModel)
         SectionHeader(stringResource(R.string.settings_group_playback))
         NotificationSettingsRow()
         SectionHeader(stringResource(R.string.settings_group_about))

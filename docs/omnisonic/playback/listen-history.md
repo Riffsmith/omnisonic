@@ -12,21 +12,21 @@ Behavioural context from the study docs' listen-history description
 
 Confidence:
 - [VERIFIED] The recorder's eligibility rules, ordering and dedupe behaviour are
-  covered by `PlayHistoryRulesTest` (6) and `PlayHistoryRecorderTest` (14,
+  covered by `PlayHistoryRulesTest` (7) and `PlayHistoryRecorderTest` (16,
   including failure isolation and position/seek ordering).
 - [VERIFIED] `:core-data` `PlayCounter` writes the song counter, the
   `play_events` row, the outbox row and the album/artist aggregates in one Room
-  transaction (`PlayCounterTest`, 12, including a forced failure that leaves no
+  transaction (`PlayCounterTest`, 13, including a forced failure that leaves no
   row behind).
 - [INFERRED] Real-device event spacing, background/Doze behaviour and live-server
   scrobble acceptance are not measured in this task.
 
-Date: 2026-11-18
+Date: 2026-11-19
 
 Links: `../storage/schema-v2.md`, `../storage/outbox-contract.md`,
-`controller-and-events.md`, `resume-and-bookmarks.md`,
-`../decisions.md` (D-7, D-18), `../../.agents/plans/phase-6-tasks.md`
-(tasks 1–2).
+`../storage/csv-export.md`, `controller-and-events.md`, `resume-and-bookmarks.md`,
+`../decisions.md` (D-7, D-18, D-38), `../../../.agents/plans/phase-6-tasks.md`
+(tasks 1–2, 9).
 
 ---
 
@@ -58,7 +58,9 @@ duration), so a play from an unsynced queue item still materialises a local row.
 
 Defaults are `0.95` play threshold, `10 s` absolute resume floor, `5 %` relative
 resume floor. Only the play threshold has a studied default (95 %); the resume
-floors are Omnisonic defaults until the task 9 setting lands.
+floors are Omnisonic defaults. Since task 9 the play threshold and the absolute
+resume floor are user settings read from `HistoryPreferencesStore`
+(§Settings); the relative resume floor stays a constant.
 
 ## Aggregates
 
@@ -74,8 +76,9 @@ Album play count follows the configurable rule from `PlayAggregateSettings`
 Artist play count and last played honour the supporting-credit toggle (default
 off: only track-level credits count). Both defaults follow the studied
 behaviour (per-track mean for albums, track-level credits for artists)
-[INFERRED]; the holder keeps them in process memory until the history settings
-store lands (task 9).
+[INFERRED]; since task 9 the holder is seeded from and persists through
+`HistoryPreferencesStore` (§Settings), so the choices survive a restart and a
+backup restore.
 
 ## Events
 
@@ -126,8 +129,13 @@ of the process.
 
 `PlaybackWiringModule` provides `PlayHistorySink` bound to
 `CoreDataPlayHistorySink` and starts `PlayHistoryRecorder` with the engine scope
-at playback-stack assembly, so it runs for the process lifetime. Threshold and
-resume floors are constructor parameters (task 9 injects the settings values).
+at playback-stack assembly, so it runs for the process lifetime. Since task 9
+the recorder takes a `rules: () -> PlayHistoryRules.PlayHistoryRuleValues` lambda
+instead of value parameters; the suspend lambda reads
+`HistoryPreferencesStore.current()` and maps percent → fraction via
+`HistoryPreferences.toRuleValues()` at each decision, so a settings change
+applies to the next event without restarting the recorder and an early event
+waits for the persisted values rather than using defaults.
 
 ## Read side (task 4)
 
@@ -191,8 +199,10 @@ delegates and the change feed reloads the open window after every mutation.
 - **Pause/Resume recording for this provider** (per-row menu item):
   `HistoryRecordingGate` (in-memory `pausedProviders` StateFlow) is read by
   `PlayCounter` on every record call; a paused provider writes nothing (null
-  returns) and keeps its existing rows. Persistence + the settings UI land in
-  task 9.
+  returns) and keeps its existing rows. Since task 9 the gate is seeded once
+  from and persisted through `HistoryPreferencesStore` (single-lane IO scope,
+  value captured synchronously in `setPaused`), and the same pause is also
+  editable from the settings UI (§Settings).
 - **Aggregates after a control mutation are count-only**:
   `AggregateDao.recompute*Counts*` refresh `playCount`/`lastPlayed` only and
   never touch the locally-owned `albums.resumeTrackPath`. The sync-side sweep
@@ -214,13 +224,39 @@ to the empty state; a post-wipe skip recorded normally. Note: the pending
 outbox rows drained to the server within seconds (server reachable), so the
 unsubmitted-row edit was observed via the local counter, not a lingering row.
 
+## Settings (task 9)
+
+[VERIFIED by `HistoryPreferencesStoreTest` (7), `HistoryRecordingGateTest` (5),
+`PlayAggregateSettingsTest` (4) in `:core-data` (412 / 0), 2 recorder
+setting-read tests + 1 mapping test in `:playback` (298 / 0),
+`HistorySettingsViewModelTest` (6) in `:feature-settings` (63 / 0), and
+`HistorySettingsSectionTest` (2) in `:app`] All listen-history choices live in
+`HistoryPreferencesStore` (`:core-data`, DataStore file `omnisonic_history`):
+play threshold (int percent, clamped 1..100, default 95), minimum resume
+position (long ms, clamped 0..600 000, default 10 000), the paused provider id
+set (string set of decimal strings), the album count rule (tolerant enum name,
+default `AVERAGE`) and the supporting-artists flag (default off).
+`HistoryRecordingGate` and `PlayAggregateSettings` are seeded once from the
+store and persist through it on single-lane IO scopes. Their `awaitReady()`
+gates keep `PlayCounter` and backup writes from consulting defaults before the
+seed; changes made during a blocked seed are replayed over the persisted
+values, so neither a new toggle nor an existing paused provider is lost. The
+settings view model updates the aggregate holder after readiness, keeping its
+synchronous write-path values and the store in agreement. A backup restore of
+the settings snapshot lands in the same store and holders.
+
+The UI is `HistorySettingsSection` in the shell settings screen (`:feature-settings`
+`history/`, rendered after the pending-sync block under a "Listen history"
+header): a 1..100 threshold slider, a 0..600 s resume slider in 5 s steps, one
+recording switch per provider, album-rule chips (Sum/Average/Minimum), the
+supporting-artists switch, and an "Export history as CSV" button that launches
+the system `CreateDocument("text/csv")` picker (suggested name
+`omnisonic-history.csv`) and writes through `PlayEventCsvExporter` +
+`SafBackupDocumentSink`, reporting running/done(count)/failed under the button.
+
 ## Deferred
 
-- The album rule and the supporting-credit toggle are process-memory defaults;
-  task 9 adds the persisted settings store and the UI.
 - Resume points do not yet enqueue an outbox change — the drain already
   supports the `resume_point` action, but the recorder's resume write stays
-  local until the task 9 settings store feeds it.
-- Per-provider recording pause is in-memory (task 5); its persisted settings
-  surface and the threshold setting are task 9.
+  local.
 - Real-device event spacing and live-scrobble acceptance stay [UNKNOWN].

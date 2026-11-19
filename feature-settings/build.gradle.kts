@@ -32,6 +32,10 @@ dependencies {
     implementation(project(":core-data"))
     implementation(project(":style"))
     implementation(libs.datastore.preferences)
+    implementation(libs.androidx.activity.compose)
+    // core-data keeps room as `implementation`; referencing the database type
+    // (history settings reads provider identities) needs the supertype here.
+    implementation(libs.room.runtime)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)

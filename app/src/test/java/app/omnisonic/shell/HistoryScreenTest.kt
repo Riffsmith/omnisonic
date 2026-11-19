@@ -276,6 +276,7 @@ class HistoryScreenTest {
                         landscapeNavOverride = null,
                     ),
                     settingsViewModel = settingsViewModel,
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = testProviderSetupViewModel(),
                     browseViewModel = testBrowseViewModel(),
                     syncManagerViewModel = testLibrarySyncManagerViewModel(),

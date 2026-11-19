@@ -38,12 +38,12 @@ Confidence:
   account, so a value synced into `songs.resumeMs` usually describes another
   client's listening, not ours.
 
-Date: 2026-11-11
+Date: 2026-11-19
 
 Links: `stream-resolution.md` (resolver contract), `controller-and-events.md`
 (position persistence), `start-position-investigation.md` (the measured
 record behind D-18), `../storage/library-sync-ownership.md` (resume merge rule
-and column ownership), `../decisions.md` (D-18)
+and column ownership), `../decisions.md` (D-18, D-37)
 
 ---
 
@@ -52,7 +52,7 @@ and column ownership), `../decisions.md` (D-18)
 | Priority | Source | Applies when |
 |---|---|---|
 | 1 | Queue snapshot (`queue_state.positionMs`) | An idle, restored queue starts its current entry; position must be ≥ 10 s and strictly inside the duration |
-| 2 | Explicit resume intent (future, Phase 6) | Only with the opt-in setting on and a visible "resumed from m:ss — start over" affordance |
+| 2 | Explicit resume intent (deferred follow-up, D-37) | Only with the opt-in setting on and a visible "resumed from m:ss — start over" affordance |
 | 3 | **Zero** | Every other case: a new selection, a queue jump, radio, a restored position that fails the guards |
 
 A song-level resume point is **never** an implicit start instruction. That is
@@ -81,12 +81,14 @@ the whole of D-18: `songs.resumeMs` is data, and playback does not read it.
 - D-9 prune protection — rows with `resumeMs IS NOT NULL` are tombstoned, never
   deleted, on a full sync.
 
-**Writes:** nothing of its own. `SubsonicLibrarySyncer.syncBookmarks` is the
-only production writer: server bookmark → `SongDao.applyServerResumePoint`,
-gated on (a) no pending `resume_point` outbox row, (b) a non-null bookmark
-timestamp, (c) `bookmark.changed` newer than `songs.resumeUpdatedAt`. The
-merge rule itself is unchanged and still correct — see
-`../storage/library-sync-ownership.md`.
+**Writes:** `PlayHistoryRecorder` stores a local resume point on an early track
+change above the configured absolute/relative floors through
+`PlayCounter.recordResumePoint`; this stays local and does not enqueue an
+outbox change. `SubsonicLibrarySyncer.syncBookmarks` remains the server-side
+writer: server bookmark → `SongDao.applyServerResumePoint`, gated on (a) no
+pending `resume_point` outbox row, (b) a non-null bookmark timestamp, (c)
+`bookmark.changed` newer than `songs.resumeUpdatedAt`. The merge rule itself is
+unchanged and still correct — see `../storage/library-sync-ownership.md`.
 
 **Deletion:** not propagated, in either direction. A bookmark removed on the
 server leaves the local value in place, and Omnisonic never uploads a resume
@@ -105,7 +107,7 @@ deleting the values would also have erased the album aggregates and the prune
 protection, and the values are legitimate on the server. Magnitude table and
 the full evidence: `start-position-investigation.md`.
 
-## 5. Opt-in resume (Phase 6, not built)
+## 5. Opt-in resume (deferred follow-up, user-confirmed D-37)
 
 Only meaningful once Omnisonic writes its own resume points (play counter +
 outbox `RESUME_POINT` → `createBookmark`, and clear the bookmark or delete it on

@@ -96,6 +96,7 @@ class MainTabsPagerTest {
                 OmnisonicShell(
                     state = state,
                     settingsViewModel = settingsViewModel,
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },

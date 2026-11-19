@@ -13,7 +13,12 @@ Confidence:
 - [VERIFIED] header and column order, row content + ordering, RFC 4180
   escaping of commas/quotes/newlines, CRLF records, empty export, optional BOM
   bytes, SAF sink through the content resolver by `PlayEventCsvExporterTest`
-  (6) and `CsvFormatTest` (6) — `:core-data` 391 / 0 (2026-11-19).
+  (6) and `CsvFormatTest` (6) — `:core-data` 412 / 0 (2026-11-19).
+- [VERIFIED] The settings entry point wiring (picker → `exportCsv` → exporter,
+  running/done/failed states) by `HistorySettingsViewModelTest` (6) and
+  `HistorySettingsSectionTest` (2, renders the button and pauses a provider
+  through the section) — `:feature-settings` 63 / 0, `:app` 157 / 0
+  (2026-11-19).
 - [UNKNOWN] CSV size and SAF write time against a real large event log, and
   the device feel of the `CreateDocument` picker for a `.csv` — no device run.
 
@@ -21,15 +26,19 @@ Date: 2026-11-19
 
 Links: `backup-format.md` (the SAF sink seam + backup container),
 `../playback/listen-history.md` (what a `play_events` row means),
-`../../.agents/plans/phase-6-tasks.md` (task 8).
+`../../../.agents/plans/phase-6-tasks.md` (task 8).
 
 ---
 
 ## Format
 
 - One UTF-8 CSV document, written through `BackupDocumentSink`
-  (`SafBackupDocumentSink` over a `CreateDocument` URI) — the same seam as
-  the backup ZIP; the settings entry point is task 9.
+  (`SafBackupDocumentSink` over a `CreateDocument` URI in truncating `wt`
+  mode) — the same seam as the backup ZIP. Since Phase 6 task 9 the in-app entry point is the "Export
+  history as CSV" button in the shell settings "Listen history" section
+  (`HistorySettingsSection`), which launches `CreateDocument("text/csv")`
+  with the suggested name `omnisonic-history.csv` and writes with the default
+  no-BOM flavour.
 - Optional UTF-8 BOM (`EF BB BF`) as the very first bytes, controlled by the
   `includeBom` parameter (default off) so spreadsheet tools can be offered a
   BOM'd copy.

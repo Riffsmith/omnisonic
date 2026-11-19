@@ -107,12 +107,12 @@ class PlayEventCsvExporterTest : DatabaseTestBase() {
         val uri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3Ahistory.csv")
         val bytes = ByteArrayOutputStream()
         val resolver = mockk<ContentResolver> {
-            every { openOutputStream(uri, "w") } returns bytes
+            every { openOutputStream(uri, "wt") } returns bytes
         }
 
         val count = exporter().writeCsv(SafBackupDocumentSink(resolver, uri))
 
-        verify(exactly = 1) { resolver.openOutputStream(uri, "w") }
+        verify(exactly = 1) { resolver.openOutputStream(uri, "wt") }
         assertThat(count).isEqualTo(1)
         val text = bytes.toString(Charsets.UTF_8)
         assertThat(text).startsWith("providerId,externalId,playedAtUtc")

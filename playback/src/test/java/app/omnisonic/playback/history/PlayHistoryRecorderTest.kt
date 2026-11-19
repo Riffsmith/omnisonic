@@ -8,6 +8,7 @@ import app.omnisonic.playback.api.queue.QueueState
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -54,20 +55,19 @@ private class FakeSink(var failingPlays: Int = 0) : PlayHistorySink {
 
 private class Harness(
     scope: CoroutineScope,
-    thresholdFraction: Double = PlayHistoryRules.DEFAULT_PLAY_THRESHOLD_FRACTION,
-    resumeMinPositionMs: Long = PlayHistoryRules.DEFAULT_RESUME_MIN_POSITION_MS,
+    initialRules: PlayHistoryRules.PlayHistoryRuleValues = PlayHistoryRules.PlayHistoryRuleValues(),
     failingPlays: Int = 0,
 ) {
     val bus = RecordingBus()
     val sink = FakeSink(failingPlays)
+    val rules = MutableStateFlow(initialRules)
 
     init {
         PlayHistoryRecorder(
             bus = bus,
             sink = sink,
             clock = { NOW },
-            playThresholdFraction = thresholdFraction,
-            resumeMinPositionMs = resumeMinPositionMs,
+            rules = { rules.value },
         ).start(scope)
     }
 }
@@ -76,7 +76,14 @@ private fun TestScope.harness(
     thresholdFraction: Double = PlayHistoryRules.DEFAULT_PLAY_THRESHOLD_FRACTION,
     resumeMinPositionMs: Long = PlayHistoryRules.DEFAULT_RESUME_MIN_POSITION_MS,
     failingPlays: Int = 0,
-): Harness = Harness(backgroundScope, thresholdFraction, resumeMinPositionMs, failingPlays).also { runCurrent() }
+): Harness = Harness(
+    backgroundScope,
+    PlayHistoryRules.PlayHistoryRuleValues(
+        playThresholdFraction = thresholdFraction,
+        resumeMinPositionMs = resumeMinPositionMs,
+    ),
+    failingPlays,
+).also { runCurrent() }
 
 private fun entry(
     externalId: String = "song-1",
@@ -294,6 +301,41 @@ class PlayHistoryRecorderTest {
         runCurrent()
 
         assertThat(h.sink.plays).containsExactly("song-1")
+    }
+
+    @Test
+    fun `a changed threshold setting is read on the next event`() = runTest {
+        val h = harness()
+        val e = entry()
+
+        h.bus.emit(PlaybackEvent.Started(e, 0))
+        h.bus.emit(PlaybackEvent.Position(e, 100_000, isPlaying = true))
+        runCurrent()
+        assertThat(h.sink.plays).isEmpty()
+
+        h.rules.value = h.rules.value.copy(playThresholdFraction = 0.5)
+        h.bus.emit(PlaybackEvent.Position(e, 100_000, isPlaying = true))
+        runCurrent()
+        assertThat(h.sink.plays).containsExactly("song-1")
+    }
+
+    @Test
+    fun `a changed resume minimum is read on the next track change`() = runTest {
+        val h = harness()
+        val e = entry(durationMs = 60_000L)
+
+        h.bus.emit(PlaybackEvent.Started(e, 0))
+        h.bus.emit(PlaybackEvent.Position(e, 8_000, isPlaying = true))
+        h.bus.emit(PlaybackEvent.TrackChanged(e, null, TrackChangeCause.USER_NEXT, emptyQueue))
+        runCurrent()
+        assertThat(h.sink.resumes).isEmpty()
+
+        h.rules.value = h.rules.value.copy(resumeMinPositionMs = 5_000L)
+        h.bus.emit(PlaybackEvent.Started(e, 0))
+        h.bus.emit(PlaybackEvent.Position(e, 8_000, isPlaying = true))
+        h.bus.emit(PlaybackEvent.TrackChanged(e, null, TrackChangeCause.USER_NEXT, emptyQueue))
+        runCurrent()
+        assertThat(h.sink.resumes).containsExactly("song-1" to 8_000L)
     }
 
     @Test

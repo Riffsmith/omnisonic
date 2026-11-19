@@ -8,6 +8,7 @@ import app.omnisonic.core.data.db.aggregation.AlbumCountRule
 import app.omnisonic.core.data.db.aggregation.PlayAggregateSettings
 import app.omnisonic.core.data.db.entity.ProviderEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.history.HistoryPreferencesStore
 import app.omnisonic.core.data.history.HistoryRecordingGate
 import app.omnisonic.core.data.json.OmnisonicJson
 import com.google.common.truth.Truth.assertThat
@@ -39,16 +40,18 @@ class BackupWriterTest : DatabaseTestBase() {
     private fun writer(
         settings: PlayAggregateSettings = PlayAggregateSettings(),
         gate: HistoryRecordingGate = HistoryRecordingGate(),
-    ) = BackupWriter(db = db, aggregateSettings = settings, recordingGate = gate)
+        history: HistoryPreferencesStore = HistoryPreferencesStore.inMemory(),
+    ) = BackupWriter(db, settings, gate, history)
 
     private suspend fun writeToEntries(
         appVersion: String = "1.2.3",
         styleProfileJson: String? = null,
         settings: PlayAggregateSettings = PlayAggregateSettings(),
         gate: HistoryRecordingGate = HistoryRecordingGate(),
+        history: HistoryPreferencesStore = HistoryPreferencesStore.inMemory(),
     ): Pair<BackupManifest, Map<String, String>> {
         val out = ByteArrayOutputStream()
-        val manifest = writer(settings, gate).writeBackup(out, appVersion, styleProfileJson)
+        val manifest = writer(settings, gate, history).writeBackup(out, appVersion, styleProfileJson)
         return manifest to unzip(out.toByteArray())
     }
 
@@ -236,13 +239,18 @@ class BackupWriterTest : DatabaseTestBase() {
         settings.update(PlayAggregateSettings.Options(albumCountRule = AlbumCountRule.SUM, includeSupportingArtists = true))
         val gate = HistoryRecordingGate()
         gate.setPaused(2, true)
+        val history = HistoryPreferencesStore.inMemory()
+        history.setPlayThresholdPercent(80)
+        history.setResumeMinPositionMs(30_000)
 
-        val (_, entries) = writeToEntries(settings = settings, gate = gate)
+        val (_, entries) = writeToEntries(settings = settings, gate = gate, history = history)
 
         val snapshot = settingsAdapter.fromJson(entries.getValue(BackupFormat.SETTINGS_ENTRY))!!
         assertThat(snapshot.albumCountRule).isEqualTo("SUM")
         assertThat(snapshot.includeSupportingArtists).isTrue()
         assertThat(snapshot.pausedProviderIds).containsExactly(2L)
+        assertThat(snapshot.playThresholdPercent).isEqualTo(80)
+        assertThat(snapshot.resumeMinPositionMs).isEqualTo(30_000L)
     }
 
     @Test
@@ -266,12 +274,12 @@ class BackupWriterTest : DatabaseTestBase() {
         val uri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3Abackup.zip")
         val bytes = ByteArrayOutputStream()
         val resolver = mockk<ContentResolver> {
-            every { openOutputStream(uri, "w") } returns bytes
+            every { openOutputStream(uri, "wt") } returns bytes
         }
 
         val manifest = writer().writeBackup(SafBackupDocumentSink(resolver, uri), appVersionName = "1.0.0")
 
-        verify(exactly = 1) { resolver.openOutputStream(uri, "w") }
+        verify(exactly = 1) { resolver.openOutputStream(uri, "wt") }
         assertThat(manifest.formatVersion).isEqualTo(BackupFormat.FORMAT_VERSION)
         val zipBytes = bytes.toByteArray()
         assertThat(zipBytes[0]).isEqualTo('P'.code.toByte())

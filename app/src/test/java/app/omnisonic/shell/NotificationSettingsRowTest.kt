@@ -39,6 +39,7 @@ class NotificationSettingsRowTest {
                     syncViewModel = testLibrarySyncManagerViewModel(),
                     pendingSyncViewModel = testPendingSyncViewModel(),
                     viewModel = ShellSettingsViewModel(store),
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                 )
             }
         }

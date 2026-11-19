@@ -29,6 +29,26 @@
         <item quantity="one">%1$d failed</item>
         <item quantity="other">%1$d failed</item>
     </plurals>
+    <string name="settings_group_history">Listen history</string>
+    <string name="history_threshold">Count a play after</string>
+    <string name="history_threshold_value">%1$d%%</string>
+    <string name="history_resume_min">Save a resume point after</string>
+    <string name="history_resume_min_value">%1$d s</string>
+    <string name="history_recording">Record plays per provider</string>
+    <string name="history_recording_for">Recording for %1$s</string>
+    <string name="history_album_rule">Album play count</string>
+    <string name="history_rule_sum">Sum</string>
+    <string name="history_rule_average">Average</string>
+    <string name="history_rule_minimum">Minimum</string>
+    <string name="history_supporting_artists">Count supporting artists</string>
+    <string name="history_export_csv">Export history as CSV</string>
+    <string name="history_export_running">Exporting…</string>
+    <string name="history_export_failed">Export failed: %1$s</string>
+    <plurals name="history_export_count">
+        <item quantity="zero">No plays to export</item>
+        <item quantity="one">%1$d play exported</item>
+        <item quantity="other">%1$d plays exported</item>
+    </plurals>
     <string name="settings_group_playback">Playback</string>
     <string name="settings_notification_settings">Notification settings</string>
     <string name="settings_group_about">About</string>

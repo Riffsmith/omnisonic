@@ -1,5 +1,17 @@
 # Fix brief — launch-time queue restore + Library → Songs tap
 
+Purpose: record the implemented exactly-once launch queue restore and library song-tap playback fixes, their contracts and remaining device acceptance.
+
+How derived: own-source review of playback, playback-api, feature-library and the app shell, followed by the task-7c/7d JVM regression suites and the device evidence cited below.
+
+Confidence: [VERIFIED code/JVM] both fixes; kill/relaunch and tap feel remain [UNKNOWN device] unless a later device section explicitly marks them verified.
+
+Date: 2026-11-12
+
+Links: `controller-and-events.md`, `service-and-notifications.md`, `resume-and-bookmarks.md`, `media-notification-fix.md`, `../ui/library-browse.md`, `../ui/detail-screens.md`.
+
+---
+
 Status: **Defect A fixed 2026-11-12 (task 7c, device acceptance [UNKNOWN]);
 Defect B fixed 2026-11-12 (task 7d, device acceptance [UNKNOWN]).** This is the authoritative
 plan for the two open playback defects in `progress/KNOWN_ISSUES.md` §Playback

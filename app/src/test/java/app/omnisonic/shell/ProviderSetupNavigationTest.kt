@@ -67,6 +67,7 @@ class ProviderSetupNavigationTest {
                 OmnisonicShell(
                     state = onboardingShellState(),
                     settingsViewModel = ShellSettingsViewModel(tempShellStore("setup-nav")),
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = testProviderSetupViewModel(service = service),
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },
@@ -103,6 +104,7 @@ class ProviderSetupNavigationTest {
                 OmnisonicShell(
                     state = completedShellState(),
                     settingsViewModel = ShellSettingsViewModel(tempShellStore("step-scope")),
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = testProviderSetupViewModel(),
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = {
@@ -139,6 +141,7 @@ class ProviderSetupNavigationTest {
                 OmnisonicShell(
                     state = completedShellState(),
                     settingsViewModel = ShellSettingsViewModel(tempShellStore("setup-settings-path")),
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = testProviderSetupViewModel(service = service),
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },

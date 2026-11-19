@@ -36,6 +36,7 @@ class PlayCounter @Inject constructor(
         durationMs: Long,
         now: Long = playedAtMs,
     ): Long? {
+        recordingGate.awaitReady()
         if (recordingGate.isPaused(providerId)) return null
         return db.withTransaction {
             val songId = songRepository.ensureSong(providerId, externalId, snapshot)
@@ -66,6 +67,7 @@ class PlayCounter @Inject constructor(
         durationMs: Long,
         now: Long = playedAtMs,
     ): Long? {
+        recordingGate.awaitReady()
         if (recordingGate.isPaused(providerId)) return null
         return db.withTransaction {
             val songId = songRepository.ensureSong(providerId, externalId, snapshot)
@@ -91,6 +93,7 @@ class PlayCounter @Inject constructor(
         positionMs: Long,
         now: Long,
     ): Long? {
+        recordingGate.awaitReady()
         if (recordingGate.isPaused(providerId)) return null
         return db.withTransaction {
             val songId = songRepository.ensureSong(providerId, externalId, snapshot)
@@ -106,6 +109,7 @@ class PlayCounter @Inject constructor(
      * it in the same transaction; the artist rows sum the same song counts.
      */
     private suspend fun refreshAggregates(songId: Long) {
+        aggregateSettings.awaitReady()
         val song = db.songDao().selectById(songId) ?: return
         val options = aggregateSettings.options()
         song.albumId?.let { db.aggregateDao().recomputeAlbums(listOf(it), options.albumCountRule) }

@@ -1,5 +1,9 @@
 # Mid-track starts on never-played songs — historical record
 
+Purpose: preserve the measured evidence and cause chain for foreign bookmarks moving fresh playback to mid-track; the current behavior contract lives in `resume-and-bookmarks.md`.
+
+Confidence: [VERIFIED device/server 2026-11-11] the 279-row bookmark/database join and reported symptom; [VERIFIED code/JVM] the D-18 fix. Any later device observation is tagged at its claim.
+
 Status: **fixed 2026-11-11 in Phase 5 task 6b** (D-18). The behavior contract
 now lives in `resume-and-bookmarks.md`; this file keeps the measured evidence
 and the cause chain, which nothing else records at this resolution.

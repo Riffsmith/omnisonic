@@ -78,6 +78,7 @@ class LibraryScrollGestureTest {
                 OmnisonicShell(
                     state = state,
                     settingsViewModel = settingsViewModel,
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = browseViewModel,
                     syncStepViewModelProvider = { stepViewModel },

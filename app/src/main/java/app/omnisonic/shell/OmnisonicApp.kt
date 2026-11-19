@@ -78,6 +78,7 @@ import app.omnisonic.feature.library.ui.PlayerSheetDrag
 import app.omnisonic.feature.library.ui.PlaylistDetailRoute
 import app.omnisonic.feature.library.ui.QueueRoute
 import app.omnisonic.feature.search.search.SearchViewModel
+import app.omnisonic.feature.settings.history.HistorySettingsViewModel
 import app.omnisonic.feature.settings.providers.ProviderSetupRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupViewModel
 import app.omnisonic.feature.settings.shell.MainTab
@@ -120,6 +121,7 @@ fun OmnisonicApp(
             OmnisonicShell(
                 state = shell,
                 settingsViewModel = hiltViewModel(),
+                historySettingsViewModel = hiltViewModel(),
                 providerSetupViewModel = providerSetupViewModel,
                 browseViewModel = hiltViewModel(),
                 syncManagerViewModel = syncManagerViewModel,
@@ -157,6 +159,7 @@ fun OmnisonicApp(
 fun OmnisonicShell(
     state: ShellUiState,
     settingsViewModel: ShellSettingsViewModel,
+    historySettingsViewModel: HistorySettingsViewModel,
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
@@ -401,6 +404,7 @@ fun OmnisonicShell(
                         showingTabs = showingTabs,
                         navController = controller,
                         settingsViewModel = settingsViewModel,
+                        historySettingsViewModel = historySettingsViewModel,
                         providerSetupViewModel = providerSetupViewModel,
                         browseViewModel = browseViewModel,
                         syncStepViewModelProvider = syncStepViewModelProvider,
@@ -438,6 +442,7 @@ fun OmnisonicShell(
                     showingTabs = showingTabs,
                     navController = controller,
                     settingsViewModel = settingsViewModel,
+                    historySettingsViewModel = historySettingsViewModel,
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = browseViewModel,
                     syncStepViewModelProvider = syncStepViewModelProvider,
@@ -495,6 +500,7 @@ private fun ShellContentArea(
     showingTabs: Boolean,
     navController: NavHostController,
     settingsViewModel: ShellSettingsViewModel,
+    historySettingsViewModel: HistorySettingsViewModel,
     providerSetupViewModel: ProviderSetupViewModel,
     browseViewModel: LibraryBrowseViewModel,
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel,
@@ -540,6 +546,7 @@ private fun ShellContentArea(
             swipeEnabled = swipeEnabled && showingTabs,
             hasProvider = state.hasProvider,
             settingsViewModel = settingsViewModel,
+            historySettingsViewModel = historySettingsViewModel,
             syncManagerViewModel = syncManagerViewModel,
             pendingSyncViewModel = pendingSyncViewModel,
             searchViewModel = searchViewModel,

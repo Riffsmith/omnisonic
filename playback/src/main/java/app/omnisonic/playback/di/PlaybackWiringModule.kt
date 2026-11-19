@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
+import app.omnisonic.core.data.history.HistoryPreferencesStore
 import app.omnisonic.core.data.providers.ProviderClientRegistry
 import app.omnisonic.core.data.repository.SongRepository
 import app.omnisonic.core.model.log.OmnisonicLogger
@@ -33,6 +34,7 @@ import app.omnisonic.playback.focus.AudioFocusHelper
 import app.omnisonic.playback.focus.FocusOwnerFactory
 import app.omnisonic.playback.history.CoreDataPlayHistorySink
 import app.omnisonic.playback.history.PlayHistoryRecorder
+import app.omnisonic.playback.history.PlayHistoryRules.toRuleValues
 import app.omnisonic.playback.history.PlayHistorySink
 import app.omnisonic.playback.player.OmniPlayerImpl
 import app.omnisonic.playback.player.SinkProcessorChainFactory
@@ -190,10 +192,16 @@ object PlaybackWiringModule {
         coordinator: QueuePersistenceCoordinator,
         queueSources: QueueSources,
         historySink: PlayHistorySink,
+        historyPreferences: HistoryPreferencesStore,
         logger: OmnisonicLogger,
     ): PlaybackStack {
         val bus = PlaybackEventBusImpl()
-        PlayHistoryRecorder(bus, historySink, logger = logger).start(scope)
+        PlayHistoryRecorder(
+            bus,
+            historySink,
+            rules = { historyPreferences.current().toRuleValues() },
+            logger = logger,
+        ).start(scope)
         val playerProxy = LateBoundOmniPlayer()
         val queue = QueuePlayerImpl(scope, playerProxy, streamResolver, bus)
         val port = LateBoundQueueCommandPort(queue.state)

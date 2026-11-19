@@ -15,6 +15,7 @@ import app.omnisonic.feature.library.browse.LibrarySection
 import app.omnisonic.feature.library.ui.LibraryHubScreen
 import app.omnisonic.feature.search.search.SearchViewModel
 import app.omnisonic.feature.search.ui.SearchRoute
+import app.omnisonic.feature.settings.history.HistorySettingsViewModel
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
@@ -43,6 +44,7 @@ internal fun MainTabsPager(
     swipeEnabled: Boolean,
     hasProvider: Boolean,
     settingsViewModel: ShellSettingsViewModel,
+    historySettingsViewModel: HistorySettingsViewModel,
     syncManagerViewModel: LibrarySyncManagerViewModel,
     pendingSyncViewModel: PendingSyncViewModel,
     searchViewModel: SearchViewModel,
@@ -97,6 +99,7 @@ internal fun MainTabsPager(
                 syncViewModel = syncManagerViewModel,
                 pendingSyncViewModel = pendingSyncViewModel,
                 viewModel = settingsViewModel,
+                historySettingsViewModel = historySettingsViewModel,
                 onShareLogs = { LogExport.shareIntent(context)?.let(context::startActivity) },
             )
         }

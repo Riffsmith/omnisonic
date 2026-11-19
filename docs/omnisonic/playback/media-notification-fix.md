@@ -1,5 +1,17 @@
 # Fix brief — media notification never appears (session-host controller)
 
+Purpose: record the implemented session-host controller and command-grant fixes for the missing media notification, with the source evidence and device acceptance status.
+
+How derived: own-source review of the app/playback session path, decompiled media3 1.11.1 registration and connection behavior, and the RMX3085 device checks recorded below.
+
+Confidence: [VERIFIED code/JVM] registration and command grants; [VERIFIED device RMX3085] notification/FGS behavior; OEM and lock-screen variations not exercised remain [UNKNOWN].
+
+Date: 2026-11-12
+
+Links: `service-and-notifications.md`, `controller-and-events.md`, `queue-restore-and-song-tap-fixes.md`, `../decisions.md`.
+
+---
+
 Status: **implemented in task 7e (2026-11-12), then corrected.** Layer 1 below
 (the missing controller bind) was real but not sufficient: after the bind
 landed, the notification still never appeared, because the session's

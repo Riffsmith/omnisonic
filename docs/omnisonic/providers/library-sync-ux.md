@@ -1,5 +1,17 @@
 # Library sync UX: progress, live refresh, resume (D-16) + cover sizing (D-17)
 
+Purpose: pin the shipped sync progress, live library refresh, launch resume, onboarding/settings flow and display-sized cover requests, together with device-only follow-ups.
+
+How derived: own-source review of the Phase 3 syncer and Phase 5 shell, the 2026-11-09 live-device findings, and the task-4b/4c/7b implementation and regression suites.
+
+Confidence: [VERIFIED code/JVM] shipped mechanics and screen transitions; [VERIFIED device] only the explicitly dated live observations; new-screen feel and background policy remain [UNKNOWN].
+
+Date: 2026-11-11
+
+Links: `provider-connections.md`, `client-lifecycle.md`, `../ui/library-browse.md`, `../ui/provider-setup.md`, `../decisions.md` (D-16, D-17).
+
+---
+
 Status: **tasks 4b + 4c shipped 2026-11-09** (D-16/D-17, inserted from the
 first live-device test). Sync mechanics, the progress surface, resume-on-launch,
 live refresh, cover sizing and the first-run/settings screens are all

@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
  * for the rest of the process.
  *
  * One playback is one Started / non-terminal TrackChanged span. A play counts
- * when a position while playing reaches [playThresholdFraction] of the
+ * when a position while playing reaches the configured fraction of the
  * duration, or when the engine reports a natural finish. `ScrobblePoint` is
  * only a hint: it is honoured under the same rule, so a threshold configured
  * below it still counts at the configured position and a higher one does not
@@ -38,15 +38,17 @@ import kotlinx.coroutines.launch
  * `Skipped`/`Finished` events carry the last playback position in their
  * `playedAtMs` field, not a wall-clock stamp, so timestamps come from [clock].
  *
+ * Rule values come from [rules] and are read per decision, so a changed
+ * history setting applies to the next event without restarting the recorder.
+ *
  * Radio entries have no stable library identity and are never recorded.
  */
 class PlayHistoryRecorder(
     private val bus: PlaybackEventBus,
     private val sink: PlayHistorySink,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val playThresholdFraction: Double = PlayHistoryRules.DEFAULT_PLAY_THRESHOLD_FRACTION,
-    private val resumeMinPositionMs: Long = PlayHistoryRules.DEFAULT_RESUME_MIN_POSITION_MS,
-    private val resumeMinFraction: Double = PlayHistoryRules.DEFAULT_RESUME_MIN_FRACTION,
+    private val rules: suspend () -> PlayHistoryRules.PlayHistoryRuleValues =
+        { PlayHistoryRules.PlayHistoryRuleValues() },
     private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),
 ) {
 
@@ -107,7 +109,8 @@ class PlayHistoryRecorder(
         }
         val current = open?.takeIf { it.entry.queueItemId == entry.queueItemId } ?: return
         current.positionMs = positionMs
-        if (isPlaying && !current.counted && PlayHistoryRules.countsAsPlay(positionMs, entry.durationMs, playThresholdFraction)) {
+        val thresholdFraction = rules().playThresholdFraction
+        if (isPlaying && !current.counted && PlayHistoryRules.countsAsPlay(positionMs, entry.durationMs, thresholdFraction)) {
             current.counted = true
             sink.recordPlay(entry, clock(), entry.durationMs ?: current.positionMs)
         }
@@ -117,7 +120,7 @@ class PlayHistoryRecorder(
         val current = open?.takeIf { it.entry.queueItemId == entry.queueItemId } ?: return
         current.positionMs = positionMs
         if (current.counted) return
-        if (PlayHistoryRules.countsAsPlay(positionMs, entry.durationMs, playThresholdFraction)) {
+        if (PlayHistoryRules.countsAsPlay(positionMs, entry.durationMs, rules().playThresholdFraction)) {
             current.counted = true
             sink.recordPlay(entry, clock(), entry.durationMs ?: current.positionMs)
         }
@@ -155,12 +158,13 @@ class PlayHistoryRecorder(
     }
 
     private suspend fun saveResumeIfEarly(entry: PlaybackQueueEntry, positionMs: Long) {
+        val ruleValues = rules()
         val resume = PlayHistoryRules.resumePositionMs(
             positionMs = positionMs,
             durationMs = entry.durationMs,
-            minPositionMs = resumeMinPositionMs,
-            minFraction = resumeMinFraction,
-            playThresholdFraction = playThresholdFraction,
+            minPositionMs = ruleValues.resumeMinPositionMs,
+            minFraction = ruleValues.resumeMinFraction,
+            playThresholdFraction = ruleValues.playThresholdFraction,
         ) ?: return
         sink.saveResumePoint(entry, resume, clock())
     }

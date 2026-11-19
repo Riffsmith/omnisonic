@@ -1,5 +1,7 @@
 package app.omnisonic.playback.history
 
+import app.omnisonic.core.data.history.HistoryPreferences
+import app.omnisonic.playback.history.PlayHistoryRules.toRuleValues
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
 
@@ -49,5 +51,17 @@ class PlayHistoryRulesTest {
     fun `an unknown duration keeps only the absolute floor`() {
         assertThat(PlayHistoryRules.resumePositionMs(12_000, null)).isEqualTo(12_000)
         assertThat(PlayHistoryRules.resumePositionMs(2_000, 0)).isNull()
+    }
+
+    @Test
+    fun `persisted history preferences map to rule values`() {
+        val values = HistoryPreferences(
+            playThresholdPercent = 50,
+            resumeMinPositionMs = 20_000L,
+        ).toRuleValues()
+
+        assertThat(values.playThresholdFraction).isEqualTo(0.5)
+        assertThat(values.resumeMinPositionMs).isEqualTo(20_000L)
+        assertThat(values.resumeMinFraction).isEqualTo(PlayHistoryRules.DEFAULT_RESUME_MIN_FRACTION)
     }
 }

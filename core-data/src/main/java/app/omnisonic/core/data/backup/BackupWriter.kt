@@ -5,6 +5,7 @@ import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.aggregation.PlayAggregateSettings
 import app.omnisonic.core.data.db.entity.PlayEventEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.history.HistoryPreferencesStore
 import app.omnisonic.core.data.history.HistoryRecordingGate
 import app.omnisonic.core.data.json.OmnisonicJson
 import com.squareup.moshi.Types
@@ -28,6 +29,7 @@ class BackupWriter @Inject constructor(
     private val db: OmnisonicDatabase,
     private val aggregateSettings: PlayAggregateSettings,
     private val recordingGate: HistoryRecordingGate,
+    private val historyPreferences: HistoryPreferencesStore,
 ) {
 
     suspend fun writeBackup(
@@ -52,8 +54,11 @@ class BackupWriter @Inject constructor(
         return snapshot.manifest
     }
 
-    suspend fun collectSnapshot(appVersionName: String, styleProfileJson: String? = null): BackupSnapshot =
-        db.withTransaction {
+    suspend fun collectSnapshot(appVersionName: String, styleProfileJson: String? = null): BackupSnapshot {
+        recordingGate.awaitReady()
+        aggregateSettings.awaitReady()
+        val history = historyPreferences.current()
+        return db.withTransaction {
             val sections = mutableListOf<ProviderBackupSection>()
             val entries = mutableListOf<BackupEntry>()
             for (provider in db.providerDao().selectAll()) {
@@ -80,6 +85,8 @@ class BackupWriter @Inject constructor(
                         albumCountRule = options.albumCountRule.name,
                         includeSupportingArtists = options.includeSupportingArtists,
                         pausedProviderIds = recordingGate.pausedProviders.value.toList().sorted(),
+                        playThresholdPercent = history.playThresholdPercent,
+                        resumeMinPositionMs = history.resumeMinPositionMs,
                     ),
                 ),
             )
@@ -98,6 +105,7 @@ class BackupWriter @Inject constructor(
                 listOf(BackupEntry(BackupFormat.MANIFEST_ENTRY, manifestAdapter.toJson(manifest))) + entries,
             )
         }
+    }
 
     private fun SongEntity.carriesUserData(): Boolean =
         playCount > 0 || lastPlayed != null || skipped || lastSkipped != null ||

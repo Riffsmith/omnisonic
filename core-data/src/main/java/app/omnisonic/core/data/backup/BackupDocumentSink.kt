@@ -16,6 +16,6 @@ class SafBackupDocumentSink(
 ) : BackupDocumentSink {
 
     override fun open(): OutputStream =
-        contentResolver.openOutputStream(documentUri, "w")
+        contentResolver.openOutputStream(documentUri, "wt")
             ?: throw IOException("SAF document is not writable: $documentUri")
 }

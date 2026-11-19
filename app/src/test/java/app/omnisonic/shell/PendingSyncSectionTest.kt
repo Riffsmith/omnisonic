@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import app.omnisonic.core.data.db.dao.ProviderIdentityRow
 import app.omnisonic.core.data.sync.OutboxPendingProvider
 import app.omnisonic.core.data.sync.OutboxPendingRepository
 import app.omnisonic.feature.settings.shell.ShellPreferencesStore
@@ -52,6 +53,9 @@ class PendingSyncSectionTest {
                             File("/tmp/opencode", "pending-sync-${System.nanoTime()}.preferences_pb"),
                         ),
                     ),
+                    historySettingsViewModel = testHistorySettingsViewModel(
+                        listOf(ProviderIdentityRow(1, "History provider")),
+                    ),
                 )
             }
         }
@@ -84,6 +88,7 @@ class PendingSyncSectionTest {
                             File("/tmp/opencode", "pending-sync-empty-${System.nanoTime()}.preferences_pb"),
                         ),
                     ),
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                 )
             }
         }

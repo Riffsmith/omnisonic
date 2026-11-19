@@ -10,6 +10,7 @@ import app.omnisonic.core.data.db.aggregation.recomputeArtistCountsForProvider
 import app.omnisonic.core.data.db.entity.PlayEventEntity
 import app.omnisonic.core.data.db.entity.ProviderEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.history.HistoryPreferencesStore
 import app.omnisonic.core.data.history.HistoryRecordingGate
 import app.omnisonic.core.data.json.OmnisonicJson
 import app.omnisonic.provider.api.OutboxActions
@@ -47,6 +48,7 @@ class BackupRestorer @Inject constructor(
     private val db: OmnisonicDatabase,
     private val aggregateSettings: PlayAggregateSettings,
     private val recordingGate: HistoryRecordingGate,
+    private val historyPreferences: HistoryPreferencesStore,
 ) {
 
     suspend fun readBackup(source: BackupDocumentSource): ParsedBackup =
@@ -118,18 +120,25 @@ class BackupRestorer @Inject constructor(
 
     /** Read-only preview: merge counts, unmatched rows and the conflict list, no writes. */
     suspend fun preview(parsed: ParsedBackup): RestorePreview {
+        val resolvedProviders = resolveSections(parsed.sections)
         val providers = parsed.sections.map { parsedSection ->
-            val local = resolveProvider(parsedSection.section)
+            val local = resolvedProviders.getValue(parsedSection.section.providerId)
             val localId = local?.id
             val existingEvents = localId?.let {
                 db.playEventDao().selectByProvider(it)
                     .map { event -> event.externalId to event.playedAtMs }
                     .toHashSet()
-            } ?: emptySet()
+            } ?: hashSetOf()
             var newEvents = 0
             var duplicateEvents = 0
             for (event in parsedSection.events) {
-                if ((event.externalId to event.playedAtMs) in existingEvents) duplicateEvents++ else newEvents++
+                val key = event.externalId to event.playedAtMs
+                if (key in existingEvents) {
+                    duplicateEvents++
+                } else {
+                    newEvents++
+                    existingEvents += key
+                }
             }
             var matched = 0
             var unmatched = 0
@@ -178,10 +187,20 @@ class BackupRestorer @Inject constructor(
         restore(readBackup(input), mode)
 
     suspend fun restore(parsed: ParsedBackup, mode: RestoreMode): RestoreResult {
+        aggregateSettings.awaitReady()
+        recordingGate.awaitReady()
         val results = db.withTransaction {
-            parsed.sections.map { applySection(it, mode, parsed.settings) }
+            val resolvedProviders = resolveSections(parsed.sections)
+            parsed.sections.map {
+                applySection(
+                    it,
+                    mode,
+                    parsed.settings,
+                    resolvedProviders.getValue(it.section.providerId),
+                )
+            }
         }
-        applySettings(parsed.settings)
+        applySettings(parsed.settings, results)
         return RestoreResult(mode, results, settingsApplied = true, parsed.styleProfileJson)
     }
 
@@ -189,9 +208,9 @@ class BackupRestorer @Inject constructor(
         parsedSection: ParsedProviderSection,
         mode: RestoreMode,
         settings: BackupSettingsSnapshot,
+        local: ProviderEntity?,
     ): ProviderRestoreResult {
         val section = parsedSection.section
-        val local = resolveProvider(section)
         if (local == null) {
             return ProviderRestoreResult(
                 section = section,
@@ -242,8 +261,7 @@ class BackupRestorer @Inject constructor(
         var inserted = 0
         for (event in parsedSection.events) {
             val key = event.externalId to event.playedAtMs
-            if (key in knownEvents) continue
-            knownEvents += key
+            if (mode == RestoreMode.MERGE && !knownEvents.add(key)) continue
             eventDao.insert(
                 PlayEventEntity(
                     providerId = providerId,
@@ -290,22 +308,45 @@ class BackupRestorer @Inject constructor(
         )
     }
 
+    private suspend fun resolveSections(
+        sections: List<ParsedProviderSection>,
+    ): Map<Long, ProviderEntity?> {
+        val resolved = sections.associate { it.section.providerId to resolveProvider(it.section) }
+        val duplicateLocalIds = resolved.values.filterNotNull()
+            .groupingBy { it.id }
+            .eachCount()
+            .filterValues { it > 1 }
+            .keys
+        return resolved.mapValues { (_, provider) ->
+            provider?.takeUnless { it.id in duplicateLocalIds }
+        }
+    }
+
     private suspend fun resolveProvider(section: ProviderBackupSection): ProviderEntity? =
         db.providerDao().selectById(section.providerId)
-            ?: db.providerDao().selectByName(section.name).firstOrNull()
+            ?: db.providerDao().selectByName(section.name).singleOrNull()
 
     private suspend fun findSong(providerId: Long, data: SongUserData): SongEntity? =
         data.externalId?.let { db.songDao().selectByProviderAndExternal(providerId, it) }
             ?: data.filePath?.let { db.songDao().selectByProviderAndFilePath(providerId, it) }
 
-    private fun applySettings(settings: BackupSettingsSnapshot) {
+    private suspend fun applySettings(
+        settings: BackupSettingsSnapshot,
+        results: List<ProviderRestoreResult>,
+    ) {
+        historyPreferences.setPlayThresholdPercent(settings.playThresholdPercent)
+        historyPreferences.setResumeMinPositionMs(settings.resumeMinPositionMs)
         aggregateSettings.update(
             PlayAggregateSettings.Options(
                 albumCountRule = AlbumCountRule.valueOf(settings.albumCountRule),
                 includeSupportingArtists = settings.includeSupportingArtists,
             ),
         )
-        val target = settings.pausedProviderIds.toSet()
+        val target = results.mapNotNull { result ->
+            result.localProviderId?.takeIf {
+                result.applied && result.section.providerId in settings.pausedProviderIds
+            }
+        }.toSet()
         val current = recordingGate.pausedProviders.value
         (current - target).forEach { recordingGate.setPaused(it, false) }
         (target - current).forEach { recordingGate.setPaused(it, true) }
@@ -330,6 +371,9 @@ class BackupRestorer @Inject constructor(
         if (bytes.size < 2 || bytes[0] != 'P'.code.toByte() || bytes[1] != 'K'.code.toByte()) {
             throw MalformedBackup("not a ZIP archive")
         }
+        if (!hasCompleteEndOfCentralDirectory(bytes)) {
+            throw MalformedBackup("ZIP end record is missing or truncated")
+        }
         val entries = linkedMapOf<String, String>()
         try {
             ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
@@ -350,6 +394,22 @@ class BackupRestorer @Inject constructor(
         return entries
     }
 
+    private fun hasCompleteEndOfCentralDirectory(bytes: ByteArray): Boolean {
+        if (bytes.size < END_RECORD_SIZE) return false
+        val searchFloor = maxOf(0, bytes.size - END_RECORD_SIZE - MAX_COMMENT_SIZE)
+        for (offset in bytes.size - END_RECORD_SIZE downTo searchFloor) {
+            if (bytes[offset] != 0x50.toByte() || bytes[offset + 1] != 0x4b.toByte() ||
+                bytes[offset + 2] != 0x05.toByte() || bytes[offset + 3] != 0x06.toByte()
+            ) {
+                continue
+            }
+            val commentSize = (bytes[offset + 20].toInt() and 0xff) or
+                ((bytes[offset + 21].toInt() and 0xff) shl 8)
+            if (offset + END_RECORD_SIZE + commentSize == bytes.size) return true
+        }
+        return false
+    }
+
     private fun <T> decode(adapter: JsonAdapter<T>, json: String, entryName: String): T =
         runCatching { adapter.fromJson(json) }.getOrNull()
             ?: throw MalformedEntry(entryName, "undecodable JSON")
@@ -358,6 +418,9 @@ class BackupRestorer @Inject constructor(
         decode(adapter, json, entryName)
 
     private companion object {
+        const val END_RECORD_SIZE = 22
+        const val MAX_COMMENT_SIZE = 65_535
+
         private val manifestAdapter = OmnisonicJson.moshi.adapter(BackupManifest::class.java)
         private val songListAdapter = OmnisonicJson.moshi
             .adapter<List<SongUserData>>(Types.newParameterizedType(List::class.java, SongUserData::class.java))

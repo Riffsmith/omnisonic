@@ -132,6 +132,7 @@ class ShellTabNavigationTest {
                 OmnisonicShell(
                     state = fixedShellState(hasProvider = hasProvider),
                     settingsViewModel = settingsViewModel,
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },

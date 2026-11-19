@@ -40,6 +40,7 @@ class ShellGoldenTest {
                 OmnisonicShell(
                     state = fixedShellState(hasProvider = false),
                     settingsViewModel = settingsViewModel,
+                    historySettingsViewModel = testHistorySettingsViewModel(),
                     providerSetupViewModel = providerSetupViewModel,
                     browseViewModel = testBrowseViewModel(),
                     syncStepViewModelProvider = { stepViewModel },

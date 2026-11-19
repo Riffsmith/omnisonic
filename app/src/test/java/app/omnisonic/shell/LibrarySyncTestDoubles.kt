@@ -1,5 +1,12 @@
 package app.omnisonic.shell
 
+import android.content.Context
+import app.omnisonic.core.data.db.OmnisonicDatabase
+import app.omnisonic.core.data.db.aggregation.PlayAggregateSettings
+import app.omnisonic.core.data.db.dao.ProviderDao
+import app.omnisonic.core.data.db.dao.ProviderIdentityRow
+import app.omnisonic.core.data.history.HistoryPreferencesStore
+import app.omnisonic.core.data.history.HistoryRecordingGate
 import app.omnisonic.core.data.sync.LibrarySyncControl
 import app.omnisonic.core.data.sync.LibrarySyncLastResult
 import app.omnisonic.core.data.sync.LibrarySyncOutcome
@@ -11,6 +18,7 @@ import app.omnisonic.core.data.sync.OutboxPendingRepository
 import app.omnisonic.core.data.sync.OutboxSyncControl
 import app.omnisonic.core.data.sync.OutboxSyncReport
 import app.omnisonic.core.data.sync.OutboxSyncState
+import app.omnisonic.feature.settings.history.HistorySettingsViewModel
 import app.omnisonic.feature.settings.shell.ShellPreferencesStore
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncStepViewModel
@@ -133,3 +141,39 @@ internal fun testPendingSyncViewModel(
 
 internal fun tempShellStore(tag: String): ShellPreferencesStore =
     ShellPreferencesStore.createAt(File("/tmp/opencode", "$tag-${System.nanoTime()}.preferences_pb"))
+
+/**
+ * History settings wiring for shell tests: a real [HistoryPreferencesStore] on a
+ * temp file, a real [HistoryRecordingGate] persisting through it, and a mocked
+ * database/exporter/context for the view model's reads and CSV export.
+ */
+internal class TestHistorySettings(
+    val viewModel: HistorySettingsViewModel,
+    val gate: HistoryRecordingGate,
+    val store: HistoryPreferencesStore,
+)
+
+internal fun testHistorySettings(
+    providers: List<ProviderIdentityRow> = listOf(ProviderIdentityRow(1, "Home server")),
+    tag: String = "history-settings",
+): TestHistorySettings {
+    val store = HistoryPreferencesStore.createAt(
+        File("/tmp/opencode", "$tag-${System.nanoTime()}.preferences_pb"),
+    )
+    val gate = HistoryRecordingGate(store)
+    val providerDao = mockk<ProviderDao>()
+    every { providerDao.observeIdentities() } returns flowOf(providers)
+    val db = mockk<OmnisonicDatabase>()
+    every { db.providerDao() } returns providerDao
+    val context = mockk<Context>()
+    every { context.contentResolver } returns mockk(relaxed = true)
+    return TestHistorySettings(
+        viewModel = HistorySettingsViewModel(store, gate, PlayAggregateSettings(store), db, mockk(), context),
+        gate = gate,
+        store = store,
+    )
+}
+
+internal fun testHistorySettingsViewModel(
+    providers: List<ProviderIdentityRow> = listOf(ProviderIdentityRow(1, "Home server")),
+): HistorySettingsViewModel = testHistorySettings(providers).viewModel

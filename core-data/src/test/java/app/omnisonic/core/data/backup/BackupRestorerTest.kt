@@ -9,6 +9,7 @@ import app.omnisonic.core.data.db.aggregation.AlbumCountRule
 import app.omnisonic.core.data.db.aggregation.PlayAggregateSettings
 import app.omnisonic.core.data.db.entity.ProviderEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.history.HistoryPreferencesStore
 import app.omnisonic.core.data.history.HistoryRecordingGate
 import app.omnisonic.core.data.json.OmnisonicJson
 import com.google.common.truth.Truth.assertThat
@@ -41,7 +42,8 @@ class BackupRestorerTest : DatabaseTestBase() {
     private fun restorer(
         settings: PlayAggregateSettings = PlayAggregateSettings(),
         gate: HistoryRecordingGate = HistoryRecordingGate(),
-    ) = BackupRestorer(db, settings, gate)
+        history: HistoryPreferencesStore = HistoryPreferencesStore.inMemory(),
+    ) = BackupRestorer(db, settings, gate, history)
 
     private suspend fun expectRestoreFailure(
         bytes: ByteArray,
@@ -100,7 +102,9 @@ class BackupRestorerTest : DatabaseTestBase() {
         rule: String = "AVERAGE",
         supporting: Boolean = false,
         paused: List<Long> = emptyList(),
-    ) = settingsAdapter.toJson(BackupSettingsSnapshot(rule, supporting, paused))
+        threshold: Int = HistoryPreferencesStore.DEFAULT_PLAY_THRESHOLD_PERCENT,
+        resumeMin: Long = HistoryPreferencesStore.DEFAULT_RESUME_MIN_POSITION_MS,
+    ) = settingsAdapter.toJson(BackupSettingsSnapshot(rule, supporting, paused, threshold, resumeMin))
 
     private fun songData(
         externalId: String? = "song-1",
@@ -167,6 +171,17 @@ class BackupRestorerTest : DatabaseTestBase() {
         seedLocalState()
 
         val e = expectRestoreFailure("this is not a zip".toByteArray())
+
+        assertThat(e).isInstanceOf(MalformedBackup::class.java)
+        assertNoWrites()
+    }
+
+    @Test
+    fun `truncated zip end record is rejected before any write`() = runDbTest {
+        seedLocalState()
+        val bytes = validZip()
+
+        val e = expectRestoreFailure(bytes.copyOf(bytes.size - 10))
 
         assertThat(e).isInstanceOf(MalformedBackup::class.java)
         assertNoWrites()
@@ -409,15 +424,91 @@ class BackupRestorerTest : DatabaseTestBase() {
             name = "Server one",
             userData = listOf(songData(playCount = 7)),
             events = listOf(event(playedAtMs = 100)),
+            settings = settingsJson(paused = listOf(1)),
         )
+        val gate = HistoryRecordingGate()
 
-        val result = restorer().restore(restorer().readBackup(ByteArrayInputStream(backup)), RestoreMode.MERGE)
+        val result = restorer(gate = gate).restore(
+            restorer(gate = gate).readBackup(ByteArrayInputStream(backup)),
+            RestoreMode.MERGE,
+        )
 
         val r = result.providers.single()
         assertThat(r.localProviderId).isEqualTo(7)
         assertThat(r.songsUpdated).isEqualTo(1)
         assertThat(songDao.selectById(1)!!.playCount).isEqualTo(7)
         assertThat(playEventDao.selectByProvider(7)).hasSize(1)
+        assertThat(gate.pausedProviders.value).containsExactly(7L)
+    }
+
+    @Test
+    fun `duplicate backup events have consistent merge preview and full replace fidelity`() = runDbTest {
+        newProvider(id = 1, name = "Server one")
+        val duplicateEvents = listOf(event(playedAtMs = 100), event(playedAtMs = 100))
+        val backup = validZip(events = duplicateEvents)
+        val reader = restorer()
+        val parsed = reader.readBackup(ByteArrayInputStream(backup))
+
+        val preview = reader.preview(parsed).providers.single()
+        assertThat(preview.newEvents).isEqualTo(1)
+        assertThat(preview.duplicateEvents).isEqualTo(1)
+
+        val merged = reader.restore(parsed, RestoreMode.MERGE).providers.single()
+        assertThat(merged.eventsInserted).isEqualTo(1)
+        assertThat(playEventDao.selectByProvider(1)).hasSize(1)
+
+        val replaced = reader.restore(parsed, RestoreMode.REPLACE).providers.single()
+        assertThat(replaced.eventsRemoved).isEqualTo(1)
+        assertThat(replaced.eventsInserted).isEqualTo(2)
+        assertThat(playEventDao.selectByProvider(1)).hasSize(2)
+    }
+
+    @Test
+    fun `ambiguous provider name fallback is skipped without touching local history`() = runDbTest {
+        newProvider(id = 7, name = "Server one")
+        newProvider(id = 8, name = "Server one")
+        newSong(id = 1, providerId = 7, playCount = 9)
+        playEventDao.recordPlay(7, "song-1", playedAtMs = 50, durationMs = 1_000)
+        val backup = validZip(
+            providerId = 1,
+            name = "Server one",
+            userData = listOf(songData(playCount = 7)),
+            events = listOf(event(playedAtMs = 100)),
+        )
+
+        val reader = restorer()
+        val parsed = reader.readBackup(ByteArrayInputStream(backup))
+        assertThat(reader.preview(parsed).providers.single().localProviderId).isNull()
+        val result = reader.restore(parsed, RestoreMode.REPLACE).providers.single()
+
+        assertThat(result.applied).isFalse()
+        assertThat(result.localProviderId).isNull()
+        assertThat(songDao.selectById(1)!!.playCount).isEqualTo(9)
+        assertThat(playEventDao.selectByProvider(7).map { it.playedAtMs }).containsExactly(50L)
+    }
+
+    @Test
+    fun `backup sections that resolve to the same provider are all skipped`() = runDbTest {
+        newProvider(id = 7, name = "Server one")
+        val sections = listOf(
+            section(1, "Server one", songs = 0, events = 0),
+            section(2, "Server one", songs = 0, events = 0),
+        )
+        val backup = zipBytes(
+            BackupFormat.MANIFEST_ENTRY to manifestJson(providers = sections),
+            BackupFormat.userDataEntry(1) to songListAdapter.toJson(emptyList()),
+            BackupFormat.eventsEntry(1) to eventListAdapter.toJson(emptyList()),
+            BackupFormat.userDataEntry(2) to songListAdapter.toJson(emptyList()),
+            BackupFormat.eventsEntry(2) to eventListAdapter.toJson(emptyList()),
+            BackupFormat.SETTINGS_ENTRY to settingsJson(),
+        )
+
+        val reader = restorer()
+        val result = reader.restore(reader.readBackup(ByteArrayInputStream(backup)), RestoreMode.REPLACE)
+
+        assertThat(result.providers).hasSize(2)
+        assertThat(result.providers.map { it.applied }).containsExactly(false, false)
+        assertThat(result.providers.map { it.localProviderId }).containsExactly(null, null)
     }
 
     @Test
@@ -444,20 +535,50 @@ class BackupRestorerTest : DatabaseTestBase() {
         val settings = PlayAggregateSettings()
         val gate = HistoryRecordingGate()
         gate.setPaused(2, true)
+        val history = HistoryPreferencesStore.inMemory()
         val style = """{"accent":"#123456"}"""
         val backup = validZip(
-            settings = settingsJson(rule = "SUM", supporting = true, paused = listOf(1)),
+            settings = settingsJson(
+                rule = "SUM",
+                supporting = true,
+                paused = listOf(1),
+                threshold = 75,
+                resumeMin = 45_000,
+            ),
             style = style,
         )
 
-        val result = restorer(settings, gate)
-            .restore(restorer(settings, gate).readBackup(ByteArrayInputStream(backup)), RestoreMode.MERGE)
+        val result = restorer(settings, gate, history)
+            .restore(restorer(settings, gate, history).readBackup(ByteArrayInputStream(backup)), RestoreMode.MERGE)
 
         assertThat(result.settingsApplied).isTrue()
         assertThat(result.styleProfileJson).isEqualTo(style)
         assertThat(settings.options().albumCountRule).isEqualTo(AlbumCountRule.SUM)
         assertThat(settings.options().includeSupportingArtists).isTrue()
         assertThat(gate.pausedProviders.value).containsExactly(1L)
+        assertThat(history.current().playThresholdPercent).isEqualTo(75)
+        assertThat(history.current().resumeMinPositionMs).isEqualTo(45_000L)
+    }
+
+    @Test
+    fun `settings without recorder fields decode to their v1 defaults`() = runDbTest {
+        newProvider(id = 1, name = "Server one")
+        val history = HistoryPreferencesStore.inMemory()
+        history.setPlayThresholdPercent(80)
+        history.setResumeMinPositionMs(30_000)
+        val backup = validZip(
+            settings = """{"albumCountRule":"AVERAGE","includeSupportingArtists":false,"pausedProviderIds":[]}""",
+        )
+
+        restorer(history = history).restore(
+            restorer(history = history).readBackup(ByteArrayInputStream(backup)),
+            RestoreMode.MERGE,
+        )
+
+        assertThat(history.current().playThresholdPercent)
+            .isEqualTo(HistoryPreferencesStore.DEFAULT_PLAY_THRESHOLD_PERCENT)
+        assertThat(history.current().resumeMinPositionMs)
+            .isEqualTo(HistoryPreferencesStore.DEFAULT_RESUME_MIN_POSITION_MS)
     }
 
     @Test
@@ -526,7 +647,7 @@ class BackupRestorerTest : DatabaseTestBase() {
         gate.setPaused(1, true)
         val style = """{"accent":"#aabbcc"}"""
         val out = ByteArrayOutputStream()
-        BackupWriter(db, settings, gate).writeBackup(out, "1.2.3", style)
+        BackupWriter(db, settings, gate, HistoryPreferencesStore.inMemory()).writeBackup(out, "1.2.3", style)
         val bytes = out.toByteArray()
 
         val fresh = OmnisonicDatabaseFactory(appContext).openInMemory()
@@ -548,7 +669,12 @@ class BackupRestorerTest : DatabaseTestBase() {
             fresh.songDao().upsert(
                 SongEntity(id = 1, providerId = 1, externalId = "song-1", title = "Song one", updatedAt = 1_000),
             )
-            val freshRestorer = BackupRestorer(fresh, PlayAggregateSettings(), HistoryRecordingGate())
+            val freshRestorer = BackupRestorer(
+                fresh,
+                PlayAggregateSettings(),
+                HistoryRecordingGate(),
+                HistoryPreferencesStore.inMemory(),
+            )
             val parsed = freshRestorer.readBackup(ByteArrayInputStream(bytes))
             assertThat(parsed.manifest.appVersion).isEqualTo("1.2.3")
             assertThat(parsed.styleProfileJson).isEqualTo(style)
