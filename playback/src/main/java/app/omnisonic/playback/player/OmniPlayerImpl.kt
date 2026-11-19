@@ -609,11 +609,13 @@ class OmniPlayerImpl(
         player.addMediaSource(mediaSourceFor(stream))
         val currentIndex = player.currentMediaItemIndex
         if (currentIndex > 0) player.removeMediaItems(0, currentIndex)
-        if (player.mediaItemCount > 2) player.removeMediaItems(1, player.mediaItemCount - 1)
+        if (player.mediaItemCount > 2) player.removeMediaItems(2, player.mediaItemCount)
     }
 
     private fun trimEngineTail() {
         val player = engine.player as ExoPlayer
+        val currentIndex = player.currentMediaItemIndex
+        if (player.currentMediaItem != null && currentIndex > 0) player.removeMediaItems(0, currentIndex)
         if (player.mediaItemCount > 1) player.removeMediaItems(1, player.mediaItemCount)
     }
 

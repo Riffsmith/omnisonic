@@ -857,6 +857,25 @@ class QueuePlayerImplTest {
     }
 
     @Test
+    fun `auto advance to the last entry adopts it and prepares no next`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1), entry(2)))
+        val playedBefore = f.playerFake.played.size
+
+        f.queue.onEngineAutoAdvanced(entry(2))
+
+        assertThat(f.playerFake.played).hasSize(playedBefore)
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(2L)
+        assertThat(f.queue.state.value.playIndex).isEqualTo(1)
+        assertThat(f.bus.emitted.finishes().single().entry.queueItemId).isEqualTo(1L)
+        val changed = f.bus.emitted.trackChanges().last()
+        assertThat(changed.previous?.queueItemId).isEqualTo(1L)
+        assertThat(changed.current?.queueItemId).isEqualTo(2L)
+        assertThat(changed.cause).isEqualTo(TrackChangeCause.AUTO_ADVANCE)
+        assertThat(f.playerFake.prepared.last()).isNull()
+    }
+
+    @Test
     fun `auto advance to an unexpected entry resyncs to the queue current`() {
         val f = newFixture()
         f.queue.setQueue(listOf(entry(1), entry(2)))

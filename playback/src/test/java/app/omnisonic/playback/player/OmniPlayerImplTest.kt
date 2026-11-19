@@ -641,6 +641,46 @@ class OmniPlayerImplTest {
     }
 
     @Test
+    fun `prepareNext null after an auto advance to the last item keeps that item playing`() {
+        val player = newPlayer()
+        val spy = ListenerSpy()
+        player.setListener(spy)
+        val states = mutableListOf<Int>()
+        player.exposedPlayer().addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                states += playbackState
+            }
+        })
+        serveWav(durationMs = 5_000)
+        serveWav(durationMs = 5_000)
+
+        player.play(httpStream(), entry(externalId = "song-1", queueItemId = 1))
+        player.prepareNext(
+            httpStream(path = "/track-2.wav", externalId = "song-2", queueItemId = 2),
+        )
+        await("auto advance") { spy.autoAdvances.map { it.queueItemId }.contains(2L) }
+
+        player.prepareNext(null)
+        val engine = checkNotNull(player.activeEngine())
+        await("engine tail trimmed") { engine.mediaItemCount <= 1 }
+
+        assertThat(engine.currentMediaItem?.mediaId).isEqualTo("2")
+        assertThat(engine.playbackState).isEqualTo(Player.STATE_READY)
+        assertThat(engine.playWhenReady).isTrue()
+        assertThat(engine.isPlaying).isTrue()
+        assertThat(player.exposedPlayer().currentMediaItem?.mediaId).isEqualTo("2")
+        assertThat(player.exposedPlayer().playbackState).isEqualTo(Player.STATE_READY)
+        assertThat(player.exposedPlayer().isPlaying).isTrue()
+        assertThat(states).doesNotContain(Player.STATE_ENDED)
+        assertThat(spy.finished).isEmpty()
+
+        await("last track ends naturally", timeoutMs = 20_000) {
+            spy.finished.map { it.queueItemId }.contains(2L)
+        }
+        assertThat(spy.finished.map { it.queueItemId }).containsExactly(2L)
+    }
+
+    @Test
     fun `prepare next before play joins the engine playlist at start`() {
         val player = newPlayer()
         serveWav(durationMs = 5_000)
