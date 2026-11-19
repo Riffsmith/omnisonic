@@ -54,6 +54,9 @@ interface PlayEventDao {
     @Query("SELECT * FROM play_events WHERE providerId = :providerId ORDER BY playedAtMs")
     suspend fun selectByProvider(providerId: Long): List<PlayEventEntity>
 
+    @Query("SELECT * FROM play_events ORDER BY providerId, playedAtMs, id")
+    suspend fun selectAllOrdered(): List<PlayEventEntity>
+
     @Query("SELECT * FROM play_events_daily WHERE providerId = :providerId ORDER BY date, externalId")
     suspend fun selectDailyByProvider(providerId: Long): List<PlaybackDayRollup>
 
