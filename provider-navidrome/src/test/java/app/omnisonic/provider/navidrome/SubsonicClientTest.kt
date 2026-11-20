@@ -997,4 +997,37 @@ class SubsonicClientTest {
             assertThat(delete.encodedPath).endsWith("/rest/deleteBookmark.view")
         }
     }
+
+    @Test
+    fun `download endpoints list the preferred block then the alternate`() {
+        val primary = ConnectionBlock("http", "primary.example", 8080, "/one")
+        val secondary = ConnectionBlock("http", "secondary.example", 8443, "/two")
+        val client = testClient(testConnection(primary, secondary))
+
+        val urls = client.downloadEndpoints("song-1", 320, "mp3")
+
+        assertThat(urls).hasSize(2)
+        assertThat(urls[0]).startsWith("http://primary.example:8080/one/rest/download.view")
+        assertThat(urls[1]).startsWith("http://secondary.example:8443/two/rest/download.view")
+        val preferred = urls[0].toHttpUrl()
+        assertThat(preferred.queryParameter("id")).isEqualTo("song-1")
+        assertThat(preferred.queryParameter("maxBitRate")).isEqualTo("320")
+        assertThat(preferred.queryParameter("format")).isEqualTo("mp3")
+        urls.forEach { raw ->
+            val endpoint = raw.toHttpUrl()
+            assertThat(endpoint.queryParameter("id")).isEqualTo("song-1")
+            assertThat(endpoint.queryParameter("maxBitRate")).isEqualTo("320")
+            assertThat(endpoint.queryParameter("format")).isEqualTo("mp3")
+            assertThat(endpoint.queryParameter("u")).isEqualTo("admin")
+            assertThat(endpoint.queryParameter("t")).isEqualTo(md5hex(TEST_PASSWORD + endpoint.queryParameter("s")))
+        }
+
+        val learnedSecondary = testClient(
+            testConnection(primary, secondary).copy(lastWorkingBlock = ProviderConnection.SECONDARY_BLOCK),
+        ).downloadEndpoints("song-1", 320, "mp3")
+        assertThat(learnedSecondary[0]).startsWith("http://secondary.example:8443/two/rest/download.view")
+        assertThat(learnedSecondary[1]).startsWith("http://primary.example:8080/one/rest/download.view")
+
+        assertThat(testClient(testConnection(primary)).downloadEndpoints("song-1")).hasSize(1)
+    }
 }

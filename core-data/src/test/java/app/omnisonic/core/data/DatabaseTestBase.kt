@@ -32,6 +32,7 @@ import app.omnisonic.core.data.db.entity.AlbumEntity
 import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.ChapterEntity
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
+import app.omnisonic.core.data.db.entity.DownloadStatus
 import app.omnisonic.core.data.db.entity.GenreEntity
 import app.omnisonic.core.data.db.entity.InternetRadioEntity
 import app.omnisonic.core.data.db.entity.LibrarySourceEntity
@@ -249,19 +250,31 @@ abstract class DatabaseTestBase {
         return outboxDao.selectByProvider(providerId).first()
     }
 
-    protected suspend fun seedDownloadItem(providerId: Long): DownloadItemEntity {
+    protected suspend fun seedDownloadItem(
+        providerId: Long,
+        status: DownloadStatus = DownloadStatus.PENDING,
+        mediaKey: String = "key-1",
+        errorCount: Int = 0,
+        progressPercent: Int = 0,
+        lastError: String? = null,
+        createdAt: Long = 1_000,
+        updatedAt: Long = 1_000,
+    ): DownloadItemEntity {
         downloadDao.upsert(
             DownloadItemEntity(
                 id = 0,
-                mediaKey = "key-1",
+                mediaKey = mediaKey,
                 providerId = providerId,
-                status = "pending",
+                status = status.name,
                 title = "Track one",
-                createdAt = 1_000,
-                updatedAt = 1_000,
+                progressPercent = progressPercent,
+                errorCount = errorCount,
+                lastError = lastError,
+                createdAt = createdAt,
+                updatedAt = updatedAt,
             ),
         )
-        return downloadDao.selectByMediaKey("key-1") ?: error("download row missing")
+        return downloadDao.selectByMediaKey(mediaKey) ?: error("download row missing")
     }
 
     protected suspend fun seedOfflineFile(providerId: Long): OfflineFileEntity {

@@ -4,28 +4,28 @@ import app.omnisonic.core.data.db.DownloadKeys
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
 import app.omnisonic.core.data.db.entity.DownloadStatus
-import app.omnisonic.core.data.providers.DefaultTraitsSource
 import app.omnisonic.core.data.providers.ProviderTraitsSource
-import app.omnisonic.provider.api.AllowAllRunGate
 import app.omnisonic.provider.api.DownloadEnqueueResult
 import app.omnisonic.provider.api.ProviderRunGate
 import app.omnisonic.provider.api.ProviderStatus
 import app.omnisonic.provider.api.ProviderTraits
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
- * Typed entry into the download pipeline. Consults the provider's traits
- * first (a permanent capability: unsupported providers always get the typed
- * rejection) and the [ProviderStatusTracker] run gate second (transient:
- * offline or not on required Wi-Fi defers with nothing written). Enqueueing
- * an already-known media key is idempotent and never resets progress.
+ * Typed entry into the download pipeline. Consults the provider's traits first
+ * (a permanent capability: unsupported providers always get the typed
+ * rejection) and the run gate second (transient: blocked providers defer with
+ * nothing written). Insertion is delegated to [DownloadWorkerCoordinator] so
+ * the global-pause check and the insert share one lock; an already-known media
+ * key is a strict whole-row no-op in every state.
+ *
+ * Constructed explicitly by the download wiring with real provider traits and
+ * the production run gate — there is deliberately no injectable fallback.
  */
-@Singleton
-class DownloadEnqueuer @Inject constructor(
+class DownloadEnqueuer(
     private val db: OmnisonicDatabase,
-    private val traitsSource: ProviderTraitsSource = DefaultTraitsSource,
-    private val runGate: ProviderRunGate = AllowAllRunGate,
+    private val coordinator: DownloadWorkerCoordinator,
+    private val traitsSource: ProviderTraitsSource,
+    private val runGate: ProviderRunGate,
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -40,7 +40,7 @@ class DownloadEnqueuer @Inject constructor(
         exportTarget: String? = null,
         autoRuleId: Long? = null,
     ): DownloadEnqueueResult {
-        if (!traitsFor(providerId).supportsDownload) {
+        if (traitsFor(providerId)?.supportsDownload != true) {
             return DownloadEnqueueResult.SkippedDownloadUnsupported
         }
         val status = runGate.check(providerId)
@@ -48,7 +48,7 @@ class DownloadEnqueuer @Inject constructor(
             return DownloadEnqueueResult.BlockedByStatus(status)
         }
         val now = nowMs()
-        db.downloadDao().insertIgnoring(
+        coordinator.enqueue(
             DownloadItemEntity(
                 mediaKey = DownloadKeys.mediaKey(providerId, externalId, transcodeBitrateKbps, format),
                 providerId = providerId,
@@ -66,8 +66,8 @@ class DownloadEnqueuer @Inject constructor(
         return DownloadEnqueueResult.Enqueued
     }
 
-    private suspend fun traitsFor(providerId: Long): ProviderTraits {
-        val api = db.providerDao().selectById(providerId)?.api ?: return ProviderTraits()
+    private suspend fun traitsFor(providerId: Long): ProviderTraits? {
+        val api = db.providerDao().selectById(providerId)?.api ?: return null
         return traitsSource.traitsFor(api)
     }
 }

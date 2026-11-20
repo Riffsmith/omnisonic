@@ -66,6 +66,13 @@ class CredentialRedactor(
             "secret",
             "apikey",
             "api_key",
+            "signature",
+            "sig",
+            "x-amz-signature",
+            "x-amz-credential",
+            "x-amz-security-token",
+            "x-goog-signature",
+            "x-goog-credential",
         )
     }
 }

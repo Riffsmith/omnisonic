@@ -4,6 +4,7 @@ import app.omnisonic.core.data.db.entity.AlbumArtistEntity
 import app.omnisonic.core.data.db.entity.AlbumEntity
 import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
+import app.omnisonic.core.data.db.entity.DownloadStatus
 import app.omnisonic.core.data.db.entity.GenreEntity
 import app.omnisonic.core.data.db.entity.InternetRadioEntity
 import app.omnisonic.core.data.db.entity.LibrarySourceEntity
@@ -198,7 +199,7 @@ class UpsertSafetyTest : DatabaseTestBase() {
             DownloadItemEntity(
                 mediaKey = "key-1",
                 providerId = 1,
-                status = "pending",
+                status = DownloadStatus.PENDING.name,
                 title = "Old download",
                 createdAt = 1_000,
                 updatedAt = 1_000,
@@ -227,7 +228,7 @@ class UpsertSafetyTest : DatabaseTestBase() {
                 DownloadItemEntity(
                     mediaKey = "key-1",
                     providerId = 1,
-                    status = "completed",
+                    status = DownloadStatus.PAUSED.name,
                     title = "New download",
                     createdAt = 1_000,
                     updatedAt = 2_000,

@@ -15,6 +15,7 @@ import app.omnisonic.provider.api.ProviderArtist
 import app.omnisonic.provider.api.ProviderBookmark
 import app.omnisonic.provider.api.ProviderCapabilities
 import app.omnisonic.provider.api.ProviderConnection
+import app.omnisonic.provider.api.remoteEndpoint
 import app.omnisonic.provider.api.requireRemote
 import app.omnisonic.provider.api.ProviderDirectory
 import app.omnisonic.provider.api.ProviderFatalException
@@ -322,6 +323,20 @@ class SubsonicClient(
     override fun downloadUrl(externalId: String, maxBitRateKbps: Int?, format: String?): String =
         mediaUrl("download", externalId, maxBitRateKbps, format)
 
+    /**
+     * Both blocks of one subsonic-shaped connection serve the same entity, so a
+     * download may move to the alternate block after a connect failure. The
+     * preferred block stays first; auth parameters are rebuilt per block.
+     */
+    override fun downloadEndpoints(externalId: String, maxBitRateKbps: Int?, format: String?): List<String> {
+        val remote = connection.remoteEndpoint ?: return emptyList()
+        val preferred = preferredBlock()
+        val alternate = if (preferred == remote.primary) remote.secondary else remote.primary
+        return listOfNotNull(preferred, alternate)
+            .distinctBy { it.baseUrl() }
+            .map { block -> buildUrl(block, Endpoint.DOWNLOAD, mediaParams(externalId, maxBitRateKbps, format)) }
+    }
+
     override suspend fun submitPlays(externalId: String, timestamps: List<Long>): Int {
         if (timestamps.isEmpty()) return 0
         var accepted = 0
@@ -413,14 +428,15 @@ class SubsonicClient(
         AlbumListType.RANDOM -> "random"
     }
 
-    private fun mediaUrl(path: String, externalId: String, maxBitRateKbps: Int?, format: String?): String {
-        val params = buildList {
+    private fun mediaUrl(path: String, externalId: String, maxBitRateKbps: Int?, format: String?): String =
+        buildUrl(preferredBlock(), path, mediaParams(externalId, maxBitRateKbps, format))
+
+    private fun mediaParams(externalId: String, maxBitRateKbps: Int?, format: String?): List<Pair<String, String>> =
+        buildList {
             add("id" to externalId)
             maxBitRateKbps?.let { add("maxBitRate" to it.toString()) }
             format?.let { add("format" to it) }
         }
-        return buildUrl(preferredBlock(), path, params)
-    }
 
     private fun preferredBlock(): ConnectionBlock {
         val remote = connection.requireRemote()

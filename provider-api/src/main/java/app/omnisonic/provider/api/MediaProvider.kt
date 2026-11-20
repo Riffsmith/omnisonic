@@ -29,6 +29,19 @@ interface MediaProvider {
     fun downloadUrl(externalId: String, maxBitRateKbps: Int? = null, format: String? = null): String?
 
     /**
+     * Ordered download endpoints for connection failover: the currently
+     * preferred block first, then the alternate block. Empty means the
+     * provider offers only [downloadUrl]. Every endpoint addresses the same
+     * representation; callers must still use the registry MEDIA client and
+     * must never append bytes across representations.
+     */
+    fun downloadEndpoints(
+        externalId: String,
+        maxBitRateKbps: Int? = null,
+        format: String? = null,
+    ): List<String> = emptyList()
+
+    /**
      * Reports the given play timestamps to the server (one submission per
      * timestamp, in order). The result is the length of the accepted prefix:
      * submission stops at the first rejection, so later timestamps are not

@@ -48,6 +48,19 @@ class CredentialRedactorTest {
     }
 
     @Test
+    fun signedUrlCredentialsAreRedacted() {
+        val scrubbed = redactor.scrub(
+            "https://host/media?id=42&X-Amz-Signature=abc&X-Amz-Credential=user%2Frole&" +
+                "X-Goog-Signature=def&signature=ghi&sig=jkl",
+        )
+
+        assertThat(scrubbed).isEqualTo(
+            "https://host/media?id=42&X-Amz-Signature=[REDACTED]&X-Amz-Credential=[REDACTED]&" +
+                "X-Goog-Signature=[REDACTED]&signature=[REDACTED]&sig=[REDACTED]",
+        )
+    }
+
+    @Test
     fun nonCredentialQueryParamsAreKept() {
         assertThat(redactor.scrub("https://host/stream?maxBitRate=320&id=42"))
             .isEqualTo("https://host/stream?maxBitRate=320&id=42")

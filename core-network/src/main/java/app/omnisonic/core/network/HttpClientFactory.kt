@@ -98,8 +98,10 @@ class HttpClientFactory(
 
     private fun suppressTransparentEncoding(): Interceptor =
         Interceptor { chain ->
+            val request = chain.request()
+            if (request.header(ACCEPT_ENCODING_HEADER) != null) return@Interceptor chain.proceed(request)
             chain.proceed(
-                chain.request().newBuilder()
+                request.newBuilder()
                     .header(ACCEPT_ENCODING_HEADER, "")
                     .build(),
             )
@@ -107,7 +109,12 @@ class HttpClientFactory(
 
     private fun stripAcceptEncoding(): Interceptor =
         Interceptor { chain ->
-            chain.proceed(chain.request().newBuilder().removeHeader(ACCEPT_ENCODING_HEADER).build())
+            val request = chain.request()
+            if (request.header(ACCEPT_ENCODING_HEADER).isNullOrEmpty()) {
+                chain.proceed(request.newBuilder().removeHeader(ACCEPT_ENCODING_HEADER).build())
+            } else {
+                chain.proceed(request)
+            }
         }
 
     private fun unwrapResponseEncodings(): Interceptor =

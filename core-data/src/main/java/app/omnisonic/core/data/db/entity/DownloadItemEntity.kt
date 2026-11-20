@@ -31,7 +31,7 @@ data class DownloadItemEntity(
     val errorCount: Int = 0,
     val lastError: String? = null,
     val transcodeBitrateKbps: Int? = null,
-    /** Keep the finished file in the transient playback cache instead of a durable copy. */
+    /** Rolling offline-media intent retained for task-5 publication; this is not playback-cache ownership. */
     val tempCache: Boolean = false,
     /** Durable export destination (e.g. `MEDIASTORE_DOWNLOADS`); null = app-private storage. */
     val exportTarget: String? = null,

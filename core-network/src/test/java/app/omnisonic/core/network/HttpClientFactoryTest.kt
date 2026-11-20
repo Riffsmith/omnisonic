@@ -138,6 +138,26 @@ class HttpClientFactoryTest {
     }
 
     @Test
+    fun mediaRequestsPreserveExplicitIdentityEncoding() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("raw-media"))
+            server.start()
+            val client = HttpClientFactory(OmnisonicLogger(RecordingSink())).create(
+                ConnectionSpec(profile = ClientProfile.MEDIA),
+            )
+
+            client.newCall(
+                Request.Builder()
+                    .url(server.url("/media"))
+                    .header("Accept-Encoding", "identity")
+                    .build(),
+            ).execute().use { it.body!!.bytes() }
+
+            assertThat(server.takeRequest().getHeader("Accept-Encoding")).isEqualTo("identity")
+        }
+    }
+
+    @Test
     fun nativeDecoderLoadFailureIsWrappedAsIoException() {
         MockWebServer().use { server ->
             server.enqueue(

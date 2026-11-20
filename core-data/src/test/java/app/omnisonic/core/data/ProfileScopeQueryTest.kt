@@ -128,6 +128,11 @@ class ProfileScopeQueryTest {
                 "countByPlaylist",
                 "selectMaxPosition",
             ),
+            "DownloadDao.kt" to setOf(
+                "selectByMediaKey",
+                "selectById",
+                "selectByProvider",
+            ),
             "SearchDao.kt" to emptySet(),
         ).map { (name, exempt) -> directory.resolve(name) to exempt }
     }
