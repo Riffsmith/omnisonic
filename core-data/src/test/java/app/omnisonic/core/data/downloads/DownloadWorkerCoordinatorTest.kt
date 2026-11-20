@@ -58,12 +58,14 @@ class DownloadWorkerCoordinatorTest : DatabaseTestBase() {
         settings: DownloadQueueSettingsStore = DownloadQueueSettingsStore.inMemory(),
         runGate: ProviderRunGate = ProviderRunGate { ProviderStatus.OK },
         repository: DownloadQueueRepository = repository(),
+        workStart: DownloadWorkStart = DownloadWorkStart.None,
     ) = DownloadWorkerCoordinator(
         repository = repository,
         settings = settings,
         runGate = runGate,
         workerCount = workerCount,
         nowMs = { now },
+        workStart = workStart,
     )
 
     private suspend fun seed(
@@ -783,5 +785,98 @@ class DownloadWorkerCoordinatorTest : DatabaseTestBase() {
 
         assertThat(coordinator.reportProgress(lease, 250)).isTrue()
         assertThat(row(seeded.id)!!.progressPercent).isEqualTo(100)
+    }
+
+    @Test
+    fun `worker count changes admit new slots without preempting active leases`() = runDbTest {
+        repeat(4) { seed(providerId = 1, mediaKey = "k$it", createdAt = 1_000L + it) }
+        val coordinator = coordinator(workerCount = 1)
+
+        val first = coordinator.claimNext(ProfileScope.Unrestricted)!!
+        assertThat(coordinator.claimNext(ProfileScope.Unrestricted)).isNull()
+
+        coordinator.updateWorkerCount(3)
+        val second = coordinator.claimNext(ProfileScope.Unrestricted)!!
+        val third = coordinator.claimNext(ProfileScope.Unrestricted)!!
+        assertThat(coordinator.claimNext(ProfileScope.Unrestricted)).isNull()
+        assertThat(coordinator.activeLeaseCount()).isEqualTo(3)
+
+        coordinator.updateWorkerCount(1)
+        assertThat(coordinator.workerCount).isEqualTo(1)
+        assertThat(coordinator.activeLeaseCount()).isEqualTo(3)
+
+        coordinator.complete(first)
+        coordinator.complete(second)
+        coordinator.complete(third)
+        assertThat(coordinator.claimNext(ProfileScope.Unrestricted)).isNotNull()
+        assertThat(coordinator.claimNext(ProfileScope.Unrestricted)).isNull()
+    }
+
+    @Test
+    fun `active progress and lease flows expose claimed work for the notification`() = runDbTest {
+        val seeded = seed(providerId = 1, mediaKey = "k1", progressPercent = 7)
+        val coordinator = coordinator()
+
+        assertThat(coordinator.activeLeases.value).isEqualTo(0)
+        val lease = coordinator.claimNext(ProfileScope.Unrestricted)!!
+
+        assertThat(coordinator.activeLeases.value).isEqualTo(1)
+        assertThat(coordinator.activeProgress.value).containsExactly(
+            DownloadActiveProgress(rowId = seeded.id, title = "Track one", progressPercent = 7),
+        )
+
+        coordinator.reportProgress(lease, 42)
+        assertThat(coordinator.activeProgress.value.single().progressPercent).isEqualTo(42)
+
+        coordinator.reportProgress(lease, -1)
+        assertThat(coordinator.activeProgress.value.single().progressPercent).isEqualTo(-1)
+
+        coordinator.complete(lease)
+        assertThat(coordinator.activeLeases.value).isEqualTo(0)
+        assertThat(coordinator.activeProgress.value).isEmpty()
+    }
+
+    @Test
+    fun `committed mutations request the foreground runtime without duplicate signals`() = runDbTest {
+        val starts = mutableListOf<Unit>()
+        val coordinator = coordinator(workStart = DownloadWorkStart { starts += Unit })
+        val pending = DownloadItemEntity(
+            id = 0,
+            mediaKey = "enqueue-1",
+            providerId = 1,
+            status = DownloadStatus.PENDING.name,
+            title = "Track",
+            createdAt = 1_000,
+            updatedAt = 1_000,
+        )
+
+        assertThat(coordinator.enqueue(pending)).isTrue()
+        assertThat(starts).hasSize(1)
+        assertThat(coordinator.enqueue(pending)).isFalse()
+        assertThat(starts).hasSize(1)
+
+        val failed = seed(providerId = 1, mediaKey = "failed-1", status = DownloadStatus.FAILED)
+        assertThat(coordinator.retry(failed.id)).isTrue()
+        assertThat(starts).hasSize(2)
+
+        val paused = seed(providerId = 1, mediaKey = "paused-1", status = DownloadStatus.USER_PAUSED)
+        assertThat(coordinator.resumeOne(paused.id)).isTrue()
+        assertThat(starts).hasSize(3)
+
+        coordinator.pauseAll()
+        assertThat(starts).hasSize(3)
+        assertThat(coordinator.resumeAll()).isEqualTo(3)
+        assertThat(starts).hasSize(4)
+    }
+
+    @Test
+    fun `startup recovery never resets a row owned by a live lease`() = runDbTest {
+        val seeded = seed(providerId = 1, mediaKey = "k1")
+        val coordinator = coordinator()
+
+        val lease = coordinator.claimNext(ProfileScope.Unrestricted)!!
+        assertThat(coordinator.recoverOnStartup()).isEqualTo(0)
+        assertThat(row(seeded.id)!!.status).isEqualTo(DownloadStatus.ACTIVE.name)
+        assertThat(coordinator.reportProgress(lease, 25)).isTrue()
     }
 }

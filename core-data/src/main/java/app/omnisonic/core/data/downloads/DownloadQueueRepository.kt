@@ -41,6 +41,21 @@ class DownloadQueueRepository(private val dao: DownloadDao) {
     suspend fun claim(row: DownloadItemEntity): Boolean =
         dao.claimIfPending(row.id, row.updatedAt, row.errorCount) == 1
 
+    /**
+     * Delay until the earliest pending retry, or null when no `PENDING` row
+     * exists. Zero means work is already due; a caller that cannot claim it
+     * must wait for an external trigger instead of polling.
+     */
+    suspend fun pendingDueDelayMs(scope: ProfileScope, nowMs: Long): Long? {
+        val pending = dao.selectByStatus(DownloadStatus.PENDING.name, scope)
+        if (pending.isEmpty()) return null
+        val earliest = pending.minOf { DownloadLifecycleRules.effectiveDueAtMs(it.updatedAt, it.errorCount) }
+        return (earliest - nowMs).coerceAtLeast(0L)
+    }
+
+    suspend fun pendingCount(scope: ProfileScope): Int =
+        dao.selectByStatus(DownloadStatus.PENDING.name, scope).size
+
     /** `-1` stays the persisted indeterminate marker; otherwise the percent is bounded. */
     suspend fun reportProgress(id: Long, progressPercent: Int): Boolean {
         val bounded = if (progressPercent < 0) {

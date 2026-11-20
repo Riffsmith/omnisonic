@@ -53,4 +53,9 @@ object DownloadWiringModule {
     @Singleton
     fun downloadAuthReporting(tracker: ProviderStatusTracker): DownloadAuthReporting =
         ProviderAuthReporting(tracker)
+
+    @Provides
+    @Singleton
+    fun downloadQueueRepository(database: OmnisonicDatabase): DownloadQueueRepository =
+        DownloadQueueRepository(database.downloadDao())
 }

@@ -8,6 +8,9 @@ import app.omnisonic.provider.api.ProviderStatus
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -29,6 +32,26 @@ data class DownloadLease(
 /** Why an active transfer must stop before it finishes: pause preserves `.part`, cancel deletes it. */
 enum class DownloadInterruption { PAUSE, CANCEL }
 
+/** One active transfer as the foreground notification sees it (`-1` is unknown length). */
+data class DownloadActiveProgress(
+    val rowId: Long,
+    val title: String?,
+    val progressPercent: Int,
+)
+
+/**
+ * Process-wide wake request after a committed queue mutation. The foreground
+ * service starts (or re-checks) its worker loop; the coordinator itself never
+ * touches Android service APIs.
+ */
+fun interface DownloadWorkStart {
+    fun requestStart()
+
+    companion object {
+        val None = DownloadWorkStart {}
+    }
+}
+
 /**
  * Process-singleton queue mutation and claiming coordinator
  * (`.agents/plans/phase-7-tasks.md` §claim and race protocol). One mutex
@@ -47,29 +70,55 @@ class DownloadWorkerCoordinator(
     private val runGate: ProviderRunGate,
     workerCount: Int,
     private val nowMs: () -> Long = System::currentTimeMillis,
+    private val workStart: DownloadWorkStart = DownloadWorkStart.None,
 ) {
 
     private val mutex = Mutex()
     private val leasesByRow = LinkedHashMap<Long, DownloadLease>()
+    private val progressByRow = LinkedHashMap<Long, DownloadActiveProgress>()
     private val interruptions = LinkedHashMap<Long, CompletableDeferred<DownloadInterruption?>>()
     private val nextToken = AtomicLong()
+    private val _activeLeases = MutableStateFlow(0)
+    private val _activeProgress = MutableStateFlow<List<DownloadActiveProgress>>(emptyList())
 
-    val workerCount: Int = DownloadLifecycleRules.sanitizeWorkerCount(workerCount)
+    @Volatile
+    private var currentWorkerCount = DownloadLifecycleRules.sanitizeWorkerCount(workerCount)
+
+    /** Dynamic cap: a decrease never preempts running leases, later claims respect it. */
+    val workerCount: Int get() = currentWorkerCount
+
+    val activeLeases: StateFlow<Int> = _activeLeases.asStateFlow()
+
+    val activeProgress: StateFlow<List<DownloadActiveProgress>> = _activeProgress.asStateFlow()
 
     suspend fun activeLeaseCount(): Int = mutex.withLock { leasesByRow.size }
+
+    /** Worker-count changes arrive from persisted settings while the loop runs. */
+    suspend fun updateWorkerCount(requested: Int): Unit = mutex.withLock {
+        currentWorkerCount = DownloadLifecycleRules.sanitizeWorkerCount(requested)
+    }
 
     /**
      * The status on [item] is ignored: this coordinator owns the initial state
      * (`PENDING`, or `PAUSED` while the global gate is set) and checks the gate
      * under the same lock as the insert.
      */
-    suspend fun enqueue(item: DownloadItemEntity): Boolean = mutex.withLock {
-        val paused = settings.isGloballyPaused()
-        repository.insertIfAbsent(item.copy(status = DownloadLifecycleRules.enqueueStatus(paused).name))
+    suspend fun enqueue(item: DownloadItemEntity): Boolean {
+        val inserted = mutex.withLock {
+            val paused = settings.isGloballyPaused()
+            repository.insertIfAbsent(item.copy(status = DownloadLifecycleRules.enqueueStatus(paused).name))
+        }
+        if (inserted) workStart.requestStart()
+        return inserted
     }
 
-    /** Runs before workers start and reconciles both sides of the persisted gate/row write order. */
+    /**
+     * Runs before workers start and reconciles both sides of the persisted
+     * gate/row write order. Live leases are never reset: another service
+     * instance (or a second start) must not park this process's active rows.
+     */
     suspend fun recoverOnStartup(): Int = mutex.withLock {
+        if (leasesByRow.isNotEmpty()) return@withLock 0
         val paused = settings.isGloballyPaused()
         val recovered = repository.recoverOrphanedActive(paused)
         if (paused) repository.pauseAllRows()
@@ -83,7 +132,7 @@ class DownloadWorkerCoordinator(
      * still considered.
      */
     suspend fun claimNext(scope: ProfileScope): DownloadLease? = mutex.withLock {
-        if (leasesByRow.size >= workerCount || settings.isGloballyPaused()) return@withLock null
+        if (leasesByRow.size >= currentWorkerCount || settings.isGloballyPaused()) return@withLock null
         val now = nowMs()
         for (row in repository.selectDue(scope, now)) {
             if (leasesByRow.containsKey(row.id)) continue
@@ -96,7 +145,13 @@ class DownloadWorkerCoordinator(
                 errorCount = row.errorCount,
             )
             leasesByRow[row.id] = lease
+            progressByRow[row.id] = DownloadActiveProgress(
+                rowId = row.id,
+                title = row.title,
+                progressPercent = normalizeProgress(row.progressPercent),
+            )
             interruptions[row.id] = CompletableDeferred()
+            publishLeaseState()
             return@withLock lease
         }
         null
@@ -104,7 +159,16 @@ class DownloadWorkerCoordinator(
 
     suspend fun reportProgress(lease: DownloadLease, progressPercent: Int): Boolean = mutex.withLock {
         if (!isCurrent(lease)) return@withLock false
-        repository.reportProgress(lease.rowId, progressPercent)
+        val applied = repository.reportProgress(lease.rowId, progressPercent)
+        if (applied) {
+            progressByRow[lease.rowId] = DownloadActiveProgress(
+                rowId = lease.rowId,
+                title = progressByRow[lease.rowId]?.title,
+                progressPercent = normalizeProgress(progressPercent),
+            )
+            publishLeaseState()
+        }
+        applied
     }
 
     suspend fun recordFailure(lease: DownloadLease, message: String?): DownloadStatus? = mutex.withLock {
@@ -119,6 +183,8 @@ class DownloadWorkerCoordinator(
         if (deleted) {
             interruptions.remove(lease.rowId)?.complete(null)
             leasesByRow.remove(lease.rowId)
+            progressByRow.remove(lease.rowId)
+            publishLeaseState()
         }
         deleted
     }
@@ -135,6 +201,8 @@ class DownloadWorkerCoordinator(
         if (applied) {
             interruptions.remove(lease.rowId)?.complete(null)
             leasesByRow.remove(lease.rowId)
+            progressByRow.remove(lease.rowId)
+            publishLeaseState()
         }
         applied
     }
@@ -165,6 +233,8 @@ class DownloadWorkerCoordinator(
             repository.releaseActiveLease(lease.rowId, paused)
             interruptions.remove(lease.rowId)?.complete(null)
             leasesByRow.remove(lease.rowId)
+            progressByRow.remove(lease.rowId)
+            publishLeaseState()
         }
     }
 
@@ -177,10 +247,14 @@ class DownloadWorkerCoordinator(
     }
 
     /** Releases globally paused rows first, then clears the gate. */
-    suspend fun resumeAll(): Int = mutex.withLock {
-        val released = repository.releaseGloballyPausedRows()
-        settings.setGloballyPaused(false)
-        released
+    suspend fun resumeAll(): Int {
+        val released = mutex.withLock {
+            val count = repository.releaseGloballyPausedRows()
+            settings.setGloballyPaused(false)
+            count
+        }
+        if (released > 0) workStart.requestStart()
+        return released
     }
 
     suspend fun pauseOne(rowId: Long): Boolean = mutex.withLock {
@@ -189,8 +263,10 @@ class DownloadWorkerCoordinator(
         paused
     }
 
-    suspend fun resumeOne(rowId: Long): Boolean = mutex.withLock {
-        repository.resumeOne(rowId, settings.isGloballyPaused())
+    suspend fun resumeOne(rowId: Long): Boolean {
+        val resumed = mutex.withLock { repository.resumeOne(rowId, settings.isGloballyPaused()) }
+        if (resumed) workStart.requestStart()
+        return resumed
     }
 
     suspend fun cancel(rowId: Long): Boolean = mutex.withLock {
@@ -199,16 +275,32 @@ class DownloadWorkerCoordinator(
         cancelled
     }
 
-    suspend fun retry(rowId: Long): Boolean = mutex.withLock {
-        repository.retry(rowId, settings.isGloballyPaused(), nowMs())
+    suspend fun retry(rowId: Long): Boolean {
+        val retried = mutex.withLock {
+            repository.retry(rowId, settings.isGloballyPaused(), nowMs())
+        }
+        if (retried) workStart.requestStart()
+        return retried
     }
 
-    suspend fun retryAll(): Int = mutex.withLock {
-        repository.retryAllFailed(settings.isGloballyPaused(), nowMs())
+    suspend fun retryAll(): Int {
+        val retried = mutex.withLock {
+            repository.retryAllFailed(settings.isGloballyPaused(), nowMs())
+        }
+        if (retried > 0) workStart.requestStart()
+        return retried
     }
 
     private fun isCurrent(lease: DownloadLease): Boolean =
         leasesByRow[lease.rowId]?.token == lease.token
+
+    private fun publishLeaseState() {
+        _activeLeases.value = leasesByRow.size
+        _activeProgress.value = progressByRow.values.toList()
+    }
+
+    private fun normalizeProgress(percent: Int): Int =
+        if (percent < 0) DownloadLifecycleRules.PROGRESS_UNKNOWN else percent.coerceIn(0, 100)
 
     private fun signal(rowId: Long, interruption: DownloadInterruption) {
         interruptions[rowId]?.complete(interruption)
