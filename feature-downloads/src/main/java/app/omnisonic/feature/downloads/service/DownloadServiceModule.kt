@@ -1,6 +1,9 @@
 package app.omnisonic.feature.downloads.service
 
+import app.omnisonic.core.data.downloads.AutomaticRuleReactionFactory
 import app.omnisonic.core.data.downloads.DownloadCompletionRecovery
+import app.omnisonic.core.data.downloads.DownloadEnqueuePort
+import app.omnisonic.core.data.downloads.DownloadEnqueuerFactory
 import app.omnisonic.core.data.downloads.DownloadExportPublisher
 import app.omnisonic.core.data.downloads.DownloadQueueCancellation
 import app.omnisonic.core.data.downloads.DownloadQueueRepository
@@ -37,6 +40,15 @@ abstract class DownloadServiceBindings {
     @Binds
     @Singleton
     abstract fun downloadQueueCancellation(impl: ForegroundDownloadRuntime): DownloadQueueCancellation
+
+    /** One process-wide command surface for the downloads workspace and library actions. */
+    @Binds
+    @Singleton
+    abstract fun downloadUserActions(impl: ForegroundDownloadRuntime): DownloadUserActions
+
+    @Binds
+    @Singleton
+    abstract fun downloadEnqueuePort(impl: ForegroundDownloadRuntime): DownloadEnqueuePort
 
     @Binds
     @Singleton
@@ -90,7 +102,9 @@ object DownloadServiceProviders {
         notifications: DownloadNotificationCenter,
         connectivity: DownloadConnectivityObserver,
         handlers: DownloadTransferHandlerFactory,
+        enqueuerFactory: DownloadEnqueuerFactory,
         workStart: DownloadWorkStart,
+        automaticRuleReactions: AutomaticRuleReactionFactory,
         logger: OmnisonicLogger,
     ): ForegroundDownloadRuntime = ForegroundDownloadRuntime(
         repository = repository,
@@ -105,7 +119,9 @@ object DownloadServiceProviders {
         notifications = notifications,
         connectivity = connectivity,
         handlers = handlers,
+        enqueuerFactory = enqueuerFactory,
         workStart = workStart,
+        automaticRuleReactions = automaticRuleReactions,
         logger = logger,
     )
 }

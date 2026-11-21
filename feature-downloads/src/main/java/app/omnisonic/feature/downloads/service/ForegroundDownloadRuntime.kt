@@ -1,8 +1,11 @@
 package app.omnisonic.feature.downloads.service
 
 import app.omnisonic.core.data.db.ProfileScope
+import app.omnisonic.core.data.downloads.AutomaticRuleReactionCoordinator
+import app.omnisonic.core.data.downloads.AutomaticRuleReactionFactory
 import app.omnisonic.core.data.downloads.DownloadActiveProgress
 import app.omnisonic.core.data.downloads.DownloadCompletionRecovery
+import app.omnisonic.core.data.downloads.DownloadEnqueuerFactory
 import app.omnisonic.core.data.downloads.DownloadExportPublisher
 import app.omnisonic.core.data.downloads.DownloadLease
 import app.omnisonic.core.data.downloads.DownloadQueueCancellation
@@ -10,6 +13,7 @@ import app.omnisonic.core.data.downloads.DownloadQueueRepository
 import app.omnisonic.core.data.downloads.DownloadQueueSettingsStore
 import app.omnisonic.core.data.downloads.DownloadTransferFailure
 import app.omnisonic.core.data.downloads.DownloadTransferResult
+import app.omnisonic.core.data.downloads.DownloadUserEnqueue
 import app.omnisonic.core.data.downloads.description
 import app.omnisonic.core.data.downloads.DownloadWorkStart
 import app.omnisonic.core.data.downloads.DownloadWorkerCoordinator
@@ -18,6 +22,7 @@ import app.omnisonic.core.data.downloads.OfflineRootWorkGate
 import app.omnisonic.core.data.downloads.OfflineStorage
 import app.omnisonic.core.data.network.NetworkMonitor
 import app.omnisonic.core.model.log.OmnisonicLogger
+import app.omnisonic.provider.api.DownloadEnqueueResult
 import app.omnisonic.provider.api.ProviderRunGate
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -60,11 +65,13 @@ class ForegroundDownloadRuntime(
     private val notifications: DownloadNotificationCenter,
     private val connectivity: DownloadConnectivityObserver,
     private val handlers: DownloadTransferHandlerFactory,
+    private val enqueuerFactory: DownloadEnqueuerFactory,
     private val workStart: DownloadWorkStart,
+    private val automaticRuleReactions: AutomaticRuleReactionFactory,
     private val logger: OmnisonicLogger,
     private val clock: () -> Long = System::currentTimeMillis,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : DownloadServiceRuntime, OfflineRootWorkGate, DownloadQueueCancellation {
+) : DownloadServiceRuntime, OfflineRootWorkGate, DownloadQueueCancellation, DownloadUserActions {
 
     private class Session(val job: Job)
 
@@ -139,6 +146,26 @@ class ForegroundDownloadRuntime(
 
     /** Manual offline delete cancels its equivalent row through the one process-wide coordinator. */
     override suspend fun cancel(rowId: Long): Boolean = coordinator().cancel(rowId)
+
+    override suspend fun pauseItem(rowId: Long): Boolean = coordinator().pauseOne(rowId)
+
+    override suspend fun resumeItem(rowId: Long): Boolean = coordinator().resumeOne(rowId)
+
+    override suspend fun retry(rowId: Long): Boolean = coordinator().retry(rowId)
+
+    override suspend fun retryAll(): Int = coordinator().retryAll()
+
+    override suspend fun enqueue(request: DownloadUserEnqueue): DownloadEnqueueResult {
+        val target = request.destination.exportTarget()
+        return enqueuerFactory.create(coordinator(), runGate).enqueue(
+            providerId = request.providerId,
+            externalId = request.externalId,
+            title = request.title,
+            imagePath = request.imagePath,
+            tempCache = false,
+            exportTarget = target,
+        )
+    }
 
     override fun serviceStopping() {
         onIdle = null
@@ -227,7 +254,25 @@ class ForegroundDownloadRuntime(
         val coordinator = coordinator()
         ensureRecovered(coordinator)
         val handler = handlers.create(coordinator)
-        connectivity.start { signalExternal() }
+        val reactions = automaticRuleReactions.create(coordinator, runGate)
+        val reactionJob = processScope.launch {
+            try {
+                reactions.run()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                logger.error(TAG, "automatic-rule reaction loop failed", failure)
+            }
+        }
+        // A rule-triggered start may have no queue work yet. Let the first pass
+        // commit its wanted rows before the worker loop is allowed to idle, or
+        // the session can exit before the rule ever expands (task 8a).
+        reactions.runInitialPass()
+        connectivity.start {
+            signalExternal()
+            // Waking the workers cannot create rule rows: the pass must run again.
+            reactions.requestPass()
+        }
         try {
             coroutineScope {
                 val progressJob = launch {
@@ -259,6 +304,7 @@ class ForegroundDownloadRuntime(
         } catch (failure: Exception) {
             logger.error(TAG, "download session failed; claims are released by their workers", failure)
         } finally {
+            reactionJob.cancel()
             connectivity.stop()
         }
     }

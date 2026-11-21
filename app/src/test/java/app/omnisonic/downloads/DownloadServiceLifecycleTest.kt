@@ -11,6 +11,13 @@ import app.omnisonic.feature.downloads.service.DownloadService
 import app.omnisonic.feature.downloads.service.DownloadServiceProviders
 import app.omnisonic.feature.downloads.service.DownloadServiceBindings
 import app.omnisonic.feature.downloads.service.DownloadServiceRuntime
+import app.omnisonic.feature.downloads.service.DownloadUserActions
+import app.omnisonic.core.data.downloads.DownloadEnqueuePort
+import app.omnisonic.core.data.downloads.DownloadQueueCancellation
+import app.omnisonic.core.data.downloads.DownloadUserEnqueue
+import app.omnisonic.core.data.downloads.DownloadWorkStart
+import app.omnisonic.core.data.downloads.OfflineRootWorkGate
+import app.omnisonic.provider.api.DownloadEnqueueResult
 import com.google.common.truth.Truth.assertThat
 import dagger.Module
 import dagger.Provides
@@ -164,6 +171,19 @@ private object FakeRuntime : DownloadServiceRuntime {
     }
 }
 
+private object FakeUserActions : DownloadUserActions {
+    override suspend fun enqueue(request: DownloadUserEnqueue): DownloadEnqueueResult =
+        DownloadEnqueueResult.Enqueued
+
+    override suspend fun pauseAll() = Unit
+    override suspend fun resumeAll() = Unit
+    override suspend fun pauseItem(rowId: Long): Boolean = true
+    override suspend fun resumeItem(rowId: Long): Boolean = true
+    override suspend fun retry(rowId: Long): Boolean = true
+    override suspend fun retryAll(): Int = 0
+    override suspend fun cancel(rowId: Long): Boolean = true
+}
+
 private object FakeNotifications : DownloadNotificationCenter {
     override fun ensureChannel() {
         OrderLog.events += "channel"
@@ -193,4 +213,24 @@ object FakeDownloadServiceModule {
     @Provides
     @Singleton
     fun notifications(): DownloadNotificationCenter = FakeNotifications
+
+    @Provides
+    @Singleton
+    fun rootGate(): OfflineRootWorkGate = OfflineRootWorkGate.NoWorkers
+
+    @Provides
+    @Singleton
+    fun cancellation(): DownloadQueueCancellation = DownloadQueueCancellation.Direct
+
+    @Provides
+    @Singleton
+    fun workStart(): DownloadWorkStart = DownloadWorkStart.None
+
+    @Provides
+    @Singleton
+    fun userActions(): DownloadUserActions = FakeUserActions
+
+    @Provides
+    @Singleton
+    fun enqueuePort(actions: DownloadUserActions): DownloadEnqueuePort = actions
 }

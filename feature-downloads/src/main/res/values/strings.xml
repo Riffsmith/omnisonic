@@ -18,4 +18,87 @@
     <string name="download_notification_progress">%1$d%%</string>
     <string name="download_action_pause">Pause</string>
     <string name="download_action_resume">Resume</string>
+
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_back">Back</string>
+    <string name="downloads_tab_queue">Queue</string>
+    <string name="downloads_tab_offline">Offline</string>
+    <string name="downloads_tab_rules">Automatic rules</string>
+    <string name="downloads_pause_all">Pause all</string>
+    <string name="downloads_resume_all">Resume all</string>
+    <string name="downloads_retry_all">Retry failed</string>
+    <string name="downloads_loading">Loading downloads</string>
+    <string name="downloads_failed">Downloads could not be loaded.</string>
+    <plurals name="downloads_failed_count">
+        <item quantity="one">%1$d failed item</item>
+        <item quantity="other">%1$d failed items</item>
+    </plurals>
+
+    <string name="downloads_queue_empty_title">Nothing queued</string>
+    <string name="downloads_queue_empty_body">Downloads you start from your library show up here.</string>
+    <string name="downloads_status_pending">Waiting</string>
+    <string name="downloads_status_paused">Paused</string>
+    <string name="downloads_status_user_paused">Paused by you</string>
+    <string name="downloads_status_active">Downloading</string>
+    <string name="downloads_status_failed">Failed</string>
+    <string name="downloads_status_unknown">Unknown state</string>
+    <string name="downloads_progress_percent">%1$d%%</string>
+    <string name="downloads_attempt_count">Attempt %1$d of %2$d</string>
+    <string name="downloads_attempt_parked">Stopped after %1$d attempts</string>
+    <string name="downloads_untitled">Untitled</string>
+    <string name="downloads_pause_item">Pause %1$s</string>
+    <string name="downloads_resume_item">Resume %1$s</string>
+    <string name="downloads_retry_item">Retry %1$s</string>
+    <string name="downloads_cancel_item">Cancel %1$s</string>
+    <string name="downloads_cancel_title">Cancel this download?</string>
+    <string name="downloads_cancel_body">“%1$s” is removed from the queue and its partial file is deleted.</string>
+    <string name="downloads_cancel_confirm">Cancel download</string>
+    <string name="downloads_keep">Keep download</string>
+
+    <string name="downloads_offline_empty_title">No offline media</string>
+    <string name="downloads_offline_empty_body">Completed keep-offline downloads appear here.</string>
+    <string name="downloads_offline_permanent">Permanent</string>
+    <string name="downloads_offline_rolling">Rolling</string>
+    <string name="downloads_offline_automatic">From an automatic rule</string>
+    <string name="downloads_offline_meta">%1$s · %2$s</string>
+    <string name="downloads_offline_variant">%1$d kbps</string>
+    <string name="downloads_offline_variant_auto">Automatic quality</string>
+    <string name="downloads_offline_pin">Keep permanently</string>
+    <string name="downloads_offline_unpin">Make rolling</string>
+    <string name="downloads_offline_delete">Delete offline copy of %1$s</string>
+    <string name="downloads_offline_delete_title">Delete the offline copy?</string>
+    <string name="downloads_offline_delete_body">“%1$s” is removed from this device. The library item stays on the provider.</string>
+    <string name="downloads_offline_delete_confirm">Delete copy</string>
+
+    <string name="downloads_rules_empty_title">No automatic rules</string>
+    <string name="downloads_rules_empty_body">Add a rule to keep favorites, playlists or albums downloaded automatically.</string>
+    <string name="downloads_rule_kind_favorites">Favorite songs</string>
+    <string name="downloads_rule_kind_playlist">Playlist</string>
+    <string name="downloads_rule_kind_album">Album</string>
+    <string name="downloads_rule_target">Target: %1$s</string>
+    <string name="downloads_rule_remove">Remove automatic rule for %1$s</string>
+    <string name="downloads_rule_remove_title">Remove this automatic rule?</string>
+    <string name="downloads_rule_remove_body">New downloads stop immediately. Files only this rule wanted are cleaned up after the next verified catalog pass; copies used by another rule, permanent copies and exported files stay.</string>
+    <string name="downloads_rule_remove_confirm">Remove rule</string>
+    <string name="downloads_rule_add_favorites">Add a favorites rule</string>
+    <string name="downloads_rule_add_playlist">Add a playlist rule</string>
+    <string name="downloads_rule_add_album">Add an album rule</string>
+    <string name="downloads_rule_existing">Already added</string>
+    <string name="downloads_rule_pick_playlist">Choose a playlist</string>
+    <string name="downloads_rule_pick_album">Choose an album</string>
+    <string name="downloads_rule_candidates_empty">No matching items in the local library.</string>
+    <string name="downloads_rule_candidates_failed">Rules could not be loaded.</string>
+    <string name="downloads_rule_candidates_retry">Reload</string>
+    <string name="downloads_rule_cancel">Cancel</string>
+    <string name="downloads_provider_section">%1$s</string>
+    <string name="downloads_notice_offline_deleted">Offline copy deleted</string>
+    <string name="downloads_notice_offline_delete_failed">The offline copy could not be deleted</string>
+    <string name="downloads_notice_ownership_failed">That change could not be saved</string>
+    <string name="downloads_notice_rule_added">Automatic rule added</string>
+    <string name="downloads_notice_rule_removed">Automatic rule removed</string>
+    <string name="downloads_notice_rule_failed">The automatic rule could not be changed</string>
+
+    <string name="downloads_default_action">Default library download action</string>
+    <string name="downloads_default_offline">Keep offline</string>
+    <string name="downloads_default_export">Export to Downloads</string>
 </resources>

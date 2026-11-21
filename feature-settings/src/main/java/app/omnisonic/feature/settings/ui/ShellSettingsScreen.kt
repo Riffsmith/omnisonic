@@ -30,6 +30,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.omnisonic.feature.settings.R
+import app.omnisonic.feature.settings.downloads.DownloadSettingsSection
+import app.omnisonic.feature.settings.downloads.DownloadSettingsViewModel
 import app.omnisonic.feature.settings.history.HistorySettingsSection
 import app.omnisonic.feature.settings.history.HistorySettingsViewModel
 import app.omnisonic.feature.settings.shell.MainTab
@@ -52,6 +54,8 @@ import app.omnisonic.style.OmnisonicTheme
 fun ShellSettingsScreen(
     appVersion: String,
     onOpenProviders: () -> Unit,
+    onOpenDownloads: () -> Unit = {},
+    downloadSettingsViewModel: DownloadSettingsViewModel? = null,
     syncViewModel: LibrarySyncManagerViewModel,
     pendingSyncViewModel: PendingSyncViewModel,
     viewModel: ShellSettingsViewModel = hiltViewModel(),
@@ -74,6 +78,8 @@ fun ShellSettingsScreen(
         syncViewModel = syncViewModel,
         pendingSyncViewModel = pendingSyncViewModel,
         historySettingsViewModel = historySettingsViewModel,
+        onOpenDownloads = onOpenDownloads,
+        downloadSettingsViewModel = downloadSettingsViewModel,
         onShareLogs = onShareLogs,
         onSetNetworkLogging = viewModel::setNetworkLogging,
     )
@@ -90,6 +96,8 @@ private fun ShellSettingsContent(
     syncViewModel: LibrarySyncManagerViewModel,
     pendingSyncViewModel: PendingSyncViewModel,
     historySettingsViewModel: HistorySettingsViewModel,
+    onOpenDownloads: () -> Unit,
+    downloadSettingsViewModel: DownloadSettingsViewModel?,
     onShareLogs: () -> Unit,
     onSetNetworkLogging: (Boolean) -> Unit,
 ) {
@@ -141,6 +149,17 @@ private fun ShellSettingsContent(
         }
         LibrarySyncManagerSection(viewModel = syncViewModel)
         PendingSyncSection(viewModel = pendingSyncViewModel)
+        if (downloadSettingsViewModel != null) {
+            DownloadSettingsSection(
+                viewModel = downloadSettingsViewModel,
+                onOpenDownloads = onOpenDownloads,
+            )
+        } else {
+            SectionHeader(stringResource(R.string.settings_group_downloads))
+            TextButton(onClick = onOpenDownloads) {
+                Text(stringResource(R.string.settings_open_downloads))
+            }
+        }
         HistorySettingsSection(viewModel = historySettingsViewModel)
         SectionHeader(stringResource(R.string.settings_group_playback))
         NotificationSettingsRow()

@@ -4,6 +4,7 @@ import android.content.Context
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.network.ProviderStatusTracker
 import app.omnisonic.core.data.providers.ProviderClientRegistry
+import app.omnisonic.core.data.sync.LibrarySyncStatusRepository
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.provider.api.ProviderRegistry
 import dagger.Module
@@ -62,6 +63,73 @@ object DownloadWiringModule {
     @Singleton
     fun downloadQueueRepository(database: OmnisonicDatabase): DownloadQueueRepository =
         DownloadQueueRepository(database.downloadDao())
+
+    /** Pin/unpin and the pruner share one ownership lock, closing the delete/pin race. */
+    @Provides
+    @Singleton
+    fun offlineOwnershipGuard(): OfflineOwnershipGuard = OfflineOwnershipGuard()
+
+    @Provides
+    @Singleton
+    fun downloadWorkspaceRepository(
+        database: OmnisonicDatabase,
+        ownership: OfflineOwnershipGuard,
+    ): DownloadWorkspaceRepository = DownloadWorkspaceRepository(database, ownership)
+
+    @Provides
+    @Singleton
+    fun downloadEnqueuerFactory(
+        database: OmnisonicDatabase,
+        providers: ProviderRegistry,
+    ): DownloadEnqueuerFactory = DownloadEnqueuerFactory(database, providers::traitsFor)
+
+    /** Verified automatic-rule generations survive download sessions for task 8b. */
+    @Provides
+    @Singleton
+    fun automaticRuleGenerationStore(): AutomaticRuleGenerationStore =
+        AutomaticRuleGenerationStore()
+
+    @Provides
+    @Singleton
+    fun automaticRuleRepository(database: OmnisonicDatabase): AutomaticRuleRepository =
+        AutomaticRuleRepository(database)
+
+    /** Library enqueue/rule actions share the runtime-provided one-process enqueue port. */
+    @Provides
+    @Singleton
+    fun libraryDownloadActions(
+        database: OmnisonicDatabase,
+        enqueuePort: DownloadEnqueuePort,
+        rules: AutomaticRuleRepository,
+        settings: DownloadQueueSettingsStore,
+        workStart: DownloadWorkStart,
+    ): LibraryDownloadActions = LibraryDownloadActions(
+        db = database,
+        enqueuePort = enqueuePort,
+        rules = rules,
+        settings = settings,
+        workStart = workStart,
+    )
+
+    @Provides
+    @Singleton
+    fun automaticRuleReactionFactory(
+        database: OmnisonicDatabase,
+        providers: ProviderRegistry,
+        syncStatus: LibrarySyncStatusRepository,
+        generations: AutomaticRuleGenerationStore,
+        storage: OfflineStorage,
+        logger: OmnisonicLogger,
+        ownership: OfflineOwnershipGuard,
+    ): AutomaticRuleReactionFactory = AutomaticRuleReactionFactory(
+        database = database,
+        traitsFor = providers::traitsFor,
+        syncStatus = syncStatus,
+        generations = generations,
+        storage = storage,
+        logger = logger,
+        ownership = ownership,
+    )
 
     @Provides
     @Singleton

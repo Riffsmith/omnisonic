@@ -87,6 +87,7 @@ class ShellNavHostTest {
                     nowPlayingViewModelProvider = { testNowPlayingViewModel() },
                     queueViewModelProvider = { testQueueViewModel() },
                     historyViewModelProvider = { testHistoryViewModel() },
+                    downloadsViewModelProvider = { testDownloadsViewModel() },
                     modifier = Modifier,
                 )
             }
@@ -111,6 +112,19 @@ class ShellNavHostTest {
         val nav = setNavHost(ShellRoutes.PROVIDER_SETUP)
         assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.PROVIDER_SETUP)
     }
+
+    @Test
+    fun downloadsRoutePopsBackToThePreviousDestination() {
+        val nav = setNavHost(ShellRoutes.HOME)
+        composeRule.runOnIdle { nav.navigate(ShellRoutes.DOWNLOADS) { launchSingleTop = true } }
+        composeRule.waitForIdle()
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.DOWNLOADS)
+
+        composeRule.runOnIdle { nav.popBackStack() }
+        composeRule.waitForIdle()
+
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.HOME)
+    }
 }
 
 @RunWith(RobolectricTestRunner::class)
@@ -120,7 +134,11 @@ class ShellTabNavigationTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun setContent(hasProvider: Boolean = true): NavHostController {
+    private fun setContent(
+        hasProvider: Boolean = true,
+        openDownloadsRequest: Boolean = false,
+        onDownloadsHandled: () -> Unit = {},
+    ): NavHostController {
         val settingsViewModel = ShellSettingsViewModel(
             ShellPreferencesStore.createAt(File("/tmp/opencode", "tabnav-${System.nanoTime()}.preferences_pb")),
         )
@@ -140,6 +158,9 @@ class ShellTabNavigationTest {
                     pendingSyncViewModel = testPendingSyncViewModel(),
                     searchViewModel = testSearchViewModel(),
                     navController = rememberNavController().also { nav = it },
+                    downloadsViewModelProvider = { testDownloadsViewModel() },
+                    openDownloadsRequest = openDownloadsRequest,
+                    onOpenDownloadsHandled = onDownloadsHandled,
                 )
             }
         }
@@ -169,6 +190,17 @@ class ShellTabNavigationTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("Set up a provider").assertExists()
+    }
+
+    @Test
+    fun downloadsDeepLinkRequestNavigatesAndIsAcknowledged() {
+        var handled = false
+        val nav = setContent(openDownloadsRequest = true, onDownloadsHandled = { handled = true })
+
+        composeRule.waitForIdle()
+
+        assertThat(nav.currentDestination?.route).isEqualTo(ShellRoutes.DOWNLOADS)
+        assertThat(handled).isTrue()
     }
 
     @Test

@@ -18,11 +18,12 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Migration harness for the v1 baseline and the first approved additive step
- * (Phase 7 task 5a, D-43). The harness seeds a database from the exported
- * `1.json`, runs the real `1 -> 2` migration path, validates the result against
- * the new `2.json` export, and proves the offline read-model backfill preserves
- * every v1 path and source id.
+ * Migration harness for the v1 baseline and the approved additive steps:
+ * the offline read model (Phase 7 task 5a, D-43) and the automatic-rule table
+ * (task 7a, D-47). The harness seeds exported baselines, runs the real
+ * migration path, and validates against the newest export. The v2 case proves
+ * existing rows survive and that the new table is writable and uniquely indexed;
+ * the fresh-database case checks provider-delete trigger installation.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -41,10 +42,12 @@ class MigrationHarnessTest {
     }
 
     @Test
-    fun `the current baseline is v2 with exactly one additive migration step`() {
-        assertThat(OmnisonicDatabase.SCHEMA_VERSION).isEqualTo(2)
-        assertThat(Migrations.ALL.map { it.startVersion to it.endVersion }).containsExactly(1 to 2)
-        assertThat(OmnisonicDatabase.migrationsForSteps()).hasLength(1)
+    fun `the current baseline is v3 with two additive migration steps`() {
+        assertThat(OmnisonicDatabase.SCHEMA_VERSION).isEqualTo(3)
+        assertThat(Migrations.ALL.map { it.startVersion to it.endVersion })
+            .containsExactly(1 to 2, 2 to 3)
+            .inOrder()
+        assertThat(OmnisonicDatabase.migrationsForSteps()).hasLength(2)
     }
 
     @Test
@@ -56,16 +59,20 @@ class MigrationHarnessTest {
             seedV1(v1)
         }
 
-        helper.runMigrationsAndValidate(name, 2, true, *Migrations.ALL.toTypedArray()).use { db ->
+        helper.runMigrationsAndValidate(name, 3, true, *Migrations.ALL.toTypedArray()).use { db ->
             assertRenamedColumns(db)
             assertPlayEventsDailyView(db)
             assertQueueState(db)
             assertOfflineReadModelUpgrade(db)
+            db.query("SELECT COUNT(*) FROM download_rules").use { cursor ->
+                assertThat(cursor.moveToFirst()).isTrue()
+                assertThat(cursor.getInt(0)).isEqualTo(0)
+            }
         }
     }
 
     @Test
-    fun `v2 baseline creates through the harness and accepts the new read model`() {
+    fun `v2 baseline seeds through the harness and gains the rule table`() {
         val name = "migration-harness-v2.db"
         appContext.deleteDatabase(name)
 
@@ -79,13 +86,55 @@ class MigrationHarnessTest {
                 ) VALUES (21, 42, 'SONG', 'stream:42:song-1:auto:auto', 'OfflineMedias/a/hash.flac', 4096, 'Track One', 1000, 1, 'song-1')
                 """.trimIndent(),
             )
+            db.execSQL(
+                """
+                INSERT INTO download_queue (
+                    id, mediaKey, providerId, status, progressPercent, errorCount,
+                    tempCache, autoRuleId, createdAt, updatedAt
+                ) VALUES (31, 'stream:42:song-1:auto:auto', 42, 'PENDING', 0, 0, 1, 77, 1000, 2000)
+                """.trimIndent(),
+            )
         }
 
-        helper.runMigrationsAndValidate(name, 2, true, *Migrations.ALL.toTypedArray()).use { db ->
+        helper.runMigrationsAndValidate(name, 3, true, *Migrations.ALL.toTypedArray()).use { db ->
             db.query("SELECT tempCache, externalId FROM offline_media WHERE id = 21").use { cursor ->
                 assertThat(cursor.moveToFirst()).isTrue()
                 assertThat(cursor.getInt(0)).isEqualTo(1)
                 assertThat(cursor.getString(1)).isEqualTo("song-1")
+            }
+            db.query("SELECT autoRuleId FROM download_queue WHERE id = 31").use { cursor ->
+                assertThat(cursor.moveToFirst()).isTrue()
+                assertThat(cursor.getLong(0)).isEqualTo(77)
+            }
+
+            db.execSQL(
+                """
+                INSERT INTO download_rules (providerId, kind, targetExternalId, transcodeBitrateKbps, format, createdAt, updatedAt)
+                VALUES (42, 'FAVORITES', '', NULL, NULL, 1000, 1000)
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                INSERT INTO download_rules (providerId, kind, targetExternalId, transcodeBitrateKbps, format, createdAt, updatedAt)
+                VALUES (42, 'PLAYLIST', 'pl-1', 192, 'mp3', 1000, 1000)
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                INSERT OR IGNORE INTO download_rules (providerId, kind, targetExternalId, transcodeBitrateKbps, format, createdAt, updatedAt)
+                VALUES (42, 'PLAYLIST', 'pl-1', 320, 'flac', 2000, 2000)
+                """.trimIndent(),
+            )
+            db.query("SELECT kind, targetExternalId, transcodeBitrateKbps FROM download_rules ORDER BY kind").use { cursor ->
+                assertThat(cursor.moveToFirst()).isTrue()
+                assertThat(cursor.getString(0)).isEqualTo("FAVORITES")
+                assertThat(cursor.getString(1)).isEqualTo("")
+                assertThat(cursor.isNull(2)).isTrue()
+                assertThat(cursor.moveToNext()).isTrue()
+                assertThat(cursor.getString(0)).isEqualTo("PLAYLIST")
+                assertThat(cursor.getString(1)).isEqualTo("pl-1")
+                assertThat(cursor.getInt(2)).isEqualTo(192)
+                assertThat(cursor.moveToNext()).isFalse()
             }
         }
     }
@@ -141,6 +190,7 @@ class MigrationHarnessTest {
             }
             assertThat(triggerNames).hasSize(ProviderCascadeTriggers.CREATE_STATEMENTS.size)
             assertThat(triggerNames).containsNoDuplicates()
+            assertThat(triggerNames).contains("trg_provider_delete_download_rules")
         } finally {
             db.close()
         }

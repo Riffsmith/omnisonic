@@ -66,6 +66,9 @@ import app.omnisonic.feature.library.history.HistoryViewModel
 import app.omnisonic.feature.library.miniplayer.MiniPlayerUiState
 import app.omnisonic.feature.library.miniplayer.MiniPlayerViewModel
 import app.omnisonic.feature.library.nowplaying.NowPlayingViewModel
+import app.omnisonic.feature.downloads.workspace.DownloadsRoute
+import app.omnisonic.feature.downloads.workspace.DownloadsViewModel
+import app.omnisonic.feature.library.downloads.LibraryDownloadActionsViewModel
 import app.omnisonic.feature.library.queue.QueueViewModel
 import app.omnisonic.feature.library.ui.AlbumDetailRoute
 import app.omnisonic.feature.library.ui.ArtistDetailRoute
@@ -78,6 +81,7 @@ import app.omnisonic.feature.library.ui.PlayerSheetDrag
 import app.omnisonic.feature.library.ui.PlaylistDetailRoute
 import app.omnisonic.feature.library.ui.QueueRoute
 import app.omnisonic.feature.search.search.SearchViewModel
+import app.omnisonic.feature.settings.downloads.DownloadSettingsViewModel
 import app.omnisonic.feature.settings.history.HistorySettingsViewModel
 import app.omnisonic.feature.settings.providers.ProviderSetupRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupViewModel
@@ -107,6 +111,8 @@ fun OmnisonicApp(
     pendingSyncViewModel: PendingSyncViewModel = hiltViewModel(),
     miniPlayerViewModel: MiniPlayerViewModel = hiltViewModel(),
     searchViewModel: SearchViewModel = hiltViewModel(),
+    openDownloadsRequest: Boolean = false,
+    onOpenDownloadsHandled: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val miniPlayer by miniPlayerViewModel.state.collectAsStateWithLifecycle()
@@ -140,8 +146,12 @@ fun OmnisonicApp(
                     viewModel.logUserAction("mini-player:next")
                     miniPlayerViewModel.next()
                 },
+                libraryDownloadViewModelProvider = { hiltViewModel() },
+                downloadSettingsViewModelProvider = { hiltViewModel() },
                 onRouteChanged = viewModel::logNavigation,
                 onUserAction = viewModel::logUserAction,
+                openDownloadsRequest = openDownloadsRequest,
+                onOpenDownloadsHandled = onOpenDownloadsHandled,
             )
         }
     }
@@ -176,8 +186,13 @@ fun OmnisonicShell(
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel = { hiltViewModel() },
     queueViewModelProvider: @Composable () -> QueueViewModel = { hiltViewModel() },
     historyViewModelProvider: @Composable () -> HistoryViewModel = { hiltViewModel() },
+    downloadsViewModelProvider: @Composable () -> DownloadsViewModel = { hiltViewModel() },
+    libraryDownloadViewModelProvider: @Composable () -> LibraryDownloadActionsViewModel? = { null },
+    downloadSettingsViewModelProvider: @Composable () -> DownloadSettingsViewModel? = { null },
     onRouteChanged: (String) -> Unit = {},
     onUserAction: (String) -> Unit = {},
+    openDownloadsRequest: Boolean = false,
+    onOpenDownloadsHandled: () -> Unit = {},
 ) {
     val controller = navController ?: rememberNavController()
     val backStackEntry by controller.currentBackStackEntryAsState()
@@ -239,6 +254,16 @@ fun OmnisonicShell(
         val route = backStackEntry?.destination?.route ?: state.startRoute
         if (route in tabRoutes && state.tabs.none { it.id == route }) {
             state.tabs.firstOrNull()?.let { onTabSelect(it.id) }
+        }
+    }
+
+    // Notification content intent: cold and warm launches arrive as the same
+    // request, so one effect navigates the extend-only downloads route and
+    // hands back consumption. Back then behaves like any pushed destination.
+    LaunchedEffect(openDownloadsRequest) {
+        if (openDownloadsRequest) {
+            controller.navigate(ShellRoutes.DOWNLOADS) { launchSingleTop = true }
+            onOpenDownloadsHandled()
         }
     }
 
@@ -415,6 +440,10 @@ fun OmnisonicShell(
                         nowPlayingViewModelProvider = nowPlayingViewModelProvider,
                         queueViewModelProvider = queueViewModelProvider,
                         historyViewModelProvider = historyViewModelProvider,
+                        downloadsViewModelProvider = downloadsViewModelProvider,
+                        libraryDownloadViewModelProvider = libraryDownloadViewModelProvider,
+                        downloadSettingsViewModelProvider = downloadSettingsViewModelProvider,
+                        onOpenDownloads = { controller.navigateTo(ShellRoutes.DOWNLOADS) },
                         onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                         onTabTapped = onTabTapped,
                         onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
@@ -453,6 +482,10 @@ fun OmnisonicShell(
                     nowPlayingViewModelProvider = nowPlayingViewModelProvider,
                     queueViewModelProvider = queueViewModelProvider,
                     historyViewModelProvider = historyViewModelProvider,
+                    downloadsViewModelProvider = downloadsViewModelProvider,
+                    libraryDownloadViewModelProvider = libraryDownloadViewModelProvider,
+                    downloadSettingsViewModelProvider = downloadSettingsViewModelProvider,
+                    onOpenDownloads = { controller.navigateTo(ShellRoutes.DOWNLOADS) },
                     onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                     onTabTapped = onTabTapped,
                     onOpenSection = { controller.navigateTo(ShellRoutes.section(it.id)) },
@@ -511,6 +544,10 @@ private fun ShellContentArea(
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel,
     queueViewModelProvider: @Composable () -> QueueViewModel,
     historyViewModelProvider: @Composable () -> HistoryViewModel,
+    downloadsViewModelProvider: @Composable () -> DownloadsViewModel,
+    libraryDownloadViewModelProvider: @Composable () -> LibraryDownloadActionsViewModel?,
+    downloadSettingsViewModelProvider: @Composable () -> DownloadSettingsViewModel?,
+    onOpenDownloads: () -> Unit,
     onOpenSetup: () -> Unit,
     onTabTapped: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
@@ -534,6 +571,8 @@ private fun ShellContentArea(
             nowPlayingViewModelProvider = nowPlayingViewModelProvider,
             queueViewModelProvider = queueViewModelProvider,
             historyViewModelProvider = historyViewModelProvider,
+            downloadsViewModelProvider = downloadsViewModelProvider,
+            libraryDownloadViewModelProvider = libraryDownloadViewModelProvider,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 0f else 1f)
@@ -547,9 +586,11 @@ private fun ShellContentArea(
             hasProvider = state.hasProvider,
             settingsViewModel = settingsViewModel,
             historySettingsViewModel = historySettingsViewModel,
+            downloadSettingsViewModel = downloadSettingsViewModelProvider(),
             syncManagerViewModel = syncManagerViewModel,
             pendingSyncViewModel = pendingSyncViewModel,
             searchViewModel = searchViewModel,
+            onOpenDownloads = onOpenDownloads,
             onOpenSetup = onOpenSetup,
             onSelectTab = onTabTapped,
             onOpenSection = onOpenSection,
@@ -649,6 +690,8 @@ internal fun ShellNavHost(
     nowPlayingViewModelProvider: @Composable () -> NowPlayingViewModel = { hiltViewModel() },
     queueViewModelProvider: @Composable () -> QueueViewModel = { hiltViewModel() },
     historyViewModelProvider: @Composable () -> HistoryViewModel = { hiltViewModel() },
+    downloadsViewModelProvider: @Composable () -> DownloadsViewModel = { hiltViewModel() },
+    libraryDownloadViewModelProvider: @Composable () -> LibraryDownloadActionsViewModel? = { null },
     // Destination-scoped on purpose: the step resolves the provider row in init,
     // so it must be created when the route opens, never at app launch.
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
@@ -738,6 +781,7 @@ internal fun ShellNavHost(
                 viewModel = detailViewModelProvider(),
                 albumId = entry.arguments?.getLong(ShellRoutes.ARG_ALBUM_ID) ?: 0L,
                 onBack = { navController.popBackStack() },
+                downloadViewModel = libraryDownloadViewModelProvider(),
             )
         }
         composable(
@@ -769,6 +813,7 @@ internal fun ShellNavHost(
                 viewModel = detailViewModelProvider(),
                 playlistId = entry.arguments?.getLong(ShellRoutes.ARG_PLAYLIST_ID) ?: 0L,
                 onBack = { navController.popBackStack() },
+                downloadViewModel = libraryDownloadViewModelProvider(),
             )
         }
         composable(
@@ -796,6 +841,12 @@ internal fun ShellNavHost(
         }
         composable(ShellRoutes.HISTORY) {
             HistoryRoute(viewModel = historyViewModelProvider())
+        }
+        composable(ShellRoutes.DOWNLOADS) {
+            DownloadsRoute(
+                viewModel = downloadsViewModelProvider(),
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }

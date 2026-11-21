@@ -347,6 +347,21 @@ class DownloadWorkerCoordinator(
         cancelled
     }
 
+    /**
+     * Prune-only cancellation. The row is re-read under the same roster lock
+     * that destination conversion and manual ownership take, so a row
+     * converted to an export destination (or detached from its automatic rule)
+     * after the pruner's snapshot is never deleted. Returns false when the row
+     * is gone or no longer an automatic rolling candidate.
+     */
+    suspend fun cancelIfAutomaticRolling(rowId: Long): Boolean = mutex.withLock {
+        val row = repository.selectById(rowId) ?: return@withLock false
+        if (row.autoRuleId == null || !row.tempCache || row.exportTarget != null) return@withLock false
+        val cancelled = repository.cancel(rowId)
+        if (cancelled) signal(rowId, DownloadInterruption.CANCEL)
+        cancelled
+    }
+
     suspend fun retry(rowId: Long): Boolean {
         val retried = mutex.withLock {
             repository.retry(rowId, settings.isGloballyPaused(), nowMs())

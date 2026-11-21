@@ -915,4 +915,45 @@ class DownloadWorkerCoordinatorTest : DatabaseTestBase() {
         assertThat(row(seeded.id)!!.status).isEqualTo(DownloadStatus.ACTIVE.name)
         assertThat(coordinator.reportProgress(lease, 25)).isTrue()
     }
+
+    @Test
+    fun `automatic pruning cancellation refuses rows whose ownership changed`() = runDbTest {
+        val automatic = automaticRow("automatic")
+        val exported = automaticRow("exported", exportTarget = "MEDIASTORE_DOWNLOADS")
+        val manual = automaticRow("manual", autoRuleId = null)
+        val permanent = automaticRow("permanent", tempCache = false)
+        val coordinator = coordinator()
+
+        assertThat(coordinator.cancelIfAutomaticRolling(exported.id)).isFalse()
+        assertThat(coordinator.cancelIfAutomaticRolling(manual.id)).isFalse()
+        assertThat(coordinator.cancelIfAutomaticRolling(permanent.id)).isFalse()
+        assertThat(row(exported.id)?.exportTarget).isEqualTo("MEDIASTORE_DOWNLOADS")
+        assertThat(row(manual.id)).isNotNull()
+        assertThat(row(permanent.id)).isNotNull()
+
+        assertThat(coordinator.cancelIfAutomaticRolling(automatic.id)).isTrue()
+        assertThat(row(automatic.id)).isNull()
+        assertThat(coordinator.cancelIfAutomaticRolling(automatic.id)).isFalse()
+    }
+
+    private suspend fun automaticRow(
+        mediaKey: String,
+        autoRuleId: Long? = 1L,
+        tempCache: Boolean = true,
+        exportTarget: String? = null,
+    ): DownloadItemEntity {
+        downloadDao.upsert(
+            DownloadItemEntity(
+                mediaKey = mediaKey,
+                providerId = 1,
+                status = DownloadStatus.PENDING.name,
+                tempCache = tempCache,
+                exportTarget = exportTarget,
+                autoRuleId = autoRuleId,
+                createdAt = 1_000,
+                updatedAt = 1_000,
+            ),
+        )
+        return downloadDao.selectByMediaKey(mediaKey) ?: error("row missing")
+    }
 }

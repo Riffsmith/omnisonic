@@ -7,7 +7,10 @@ import app.omnisonic.core.data.db.OmnisonicDatabaseFactory
 import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
 import app.omnisonic.core.data.db.entity.DownloadStatus
+import app.omnisonic.core.data.downloads.AutomaticRuleGenerationStore
+import app.omnisonic.core.data.downloads.AutomaticRuleReactionFactory
 import app.omnisonic.core.data.downloads.DownloadAuthReporting
+import app.omnisonic.core.data.downloads.DownloadEnqueuerFactory
 import app.omnisonic.core.data.downloads.DownloadCompletionRecovery
 import app.omnisonic.core.data.downloads.DownloadExportPublisher
 import app.omnisonic.core.data.downloads.DownloadLease
@@ -32,10 +35,12 @@ import app.omnisonic.core.data.downloads.OfflineRootSource
 import app.omnisonic.core.data.downloads.OfflineStorage
 import app.omnisonic.core.data.network.NetworkMonitor
 import app.omnisonic.core.data.network.NetworkState
+import app.omnisonic.core.data.sync.LibrarySyncStatusRepository
 import app.omnisonic.core.model.log.LogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.provider.api.ProviderRunGate
 import app.omnisonic.provider.api.ProviderStatus
+import app.omnisonic.provider.api.ProviderTraits
 import com.google.common.truth.Truth.assertThat
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -199,7 +204,16 @@ class DownloadTransferIntegrationTest {
             notifications = NoNotifications,
             connectivity = NoConnectivity,
             handlers = countingFactory,
+            enqueuerFactory = DownloadEnqueuerFactory(db) { ProviderTraits() },
             workStart = app.omnisonic.core.data.downloads.DownloadWorkStart.None,
+            automaticRuleReactions = AutomaticRuleReactionFactory(
+                database = db,
+                traitsFor = { ProviderTraits() },
+                syncStatus = LibrarySyncStatusRepository(),
+                generations = AutomaticRuleGenerationStore(),
+                storage = storage,
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
+            ),
             logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
             clock = { testScheduler.currentTime },
             ioDispatcher = StandardTestDispatcher(testScheduler),

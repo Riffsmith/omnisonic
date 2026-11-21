@@ -5,8 +5,9 @@ package app.omnisonic.shell
  * contract: extend only, never rename; screens, shortcuts and future gesture
  * targets reference these strings).
  *
- * Reserved names, deliberately absent (do not squat): downloads, profiles,
- * styles, styleEditor, lyrics.
+ * Reserved names, deliberately absent (do not squat): profiles, styles,
+ * styleEditor, lyrics. `downloads` was reserved for Phase 7 task 9 and is now
+ * the downloads workspace destination.
  */
 object ShellRoutes {
     const val HOME = "home"
@@ -23,6 +24,7 @@ object ShellRoutes {
     const val NOW_PLAYING = "nowplaying"
     const val QUEUE = "queue"
     const val HISTORY = "history"
+    const val DOWNLOADS = "downloads"
 
     const val ARG_SECTION = "section"
     const val ARG_ALBUM_ID = "albumId"
@@ -52,5 +54,6 @@ object ShellRoutes {
         NOW_PLAYING,
         QUEUE,
         HISTORY,
+        DOWNLOADS,
     )
 }

@@ -6,9 +6,12 @@ import androidx.room.migration.Migration
 import app.omnisonic.core.data.db.dao.AggregateDao
 import app.omnisonic.core.data.db.dao.AlbumArtistDao
 import app.omnisonic.core.data.db.dao.AlbumDao
+import app.omnisonic.core.data.db.dao.AutomaticRuleCatalogDao
+import app.omnisonic.core.data.db.dao.AutomaticRuleChangeDao
 import app.omnisonic.core.data.db.dao.ArtistDao
 import app.omnisonic.core.data.db.dao.ChapterDao
 import app.omnisonic.core.data.db.dao.DownloadDao
+import app.omnisonic.core.data.db.dao.DownloadRuleDao
 import app.omnisonic.core.data.db.dao.GenreDao
 import app.omnisonic.core.data.db.dao.InternetRadioDao
 import app.omnisonic.core.data.db.dao.LibrarySourceDao
@@ -29,6 +32,7 @@ import app.omnisonic.core.data.db.entity.AlbumEntity
 import app.omnisonic.core.data.db.entity.ArtistEntity
 import app.omnisonic.core.data.db.entity.ChapterEntity
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
+import app.omnisonic.core.data.db.entity.DownloadRuleEntity
 import app.omnisonic.core.data.db.entity.GenreEntity
 import app.omnisonic.core.data.db.entity.InternetRadioEntity
 import app.omnisonic.core.data.db.entity.LibrarySourceEntity
@@ -63,6 +67,7 @@ import app.omnisonic.core.data.db.entity.SyncStatusEntity
         PlayEventEntity::class,
         OutboxItemEntity::class,
         DownloadItemEntity::class,
+        DownloadRuleEntity::class,
         OfflineFileEntity::class,
         SavedFilterEntity::class,
         SyncStatusEntity::class,
@@ -90,6 +95,9 @@ abstract class OmnisonicDatabase : RoomDatabase() {
     abstract fun playEventDao(): PlayEventDao
     abstract fun outboxDao(): OutboxDao
     abstract fun downloadDao(): DownloadDao
+    abstract fun downloadRuleDao(): DownloadRuleDao
+    abstract fun automaticRuleCatalogDao(): AutomaticRuleCatalogDao
+    abstract fun automaticRuleChangeDao(): AutomaticRuleChangeDao
     abstract fun offlineFileDao(): OfflineFileDao
     abstract fun savedFilterDao(): SavedFilterDao
     abstract fun syncStatusDao(): SyncStatusDao
@@ -100,11 +108,13 @@ abstract class OmnisonicDatabase : RoomDatabase() {
     companion object {
         /**
          * v1 was the clean pre-release baseline (FIX-15 / D-11 option B). v2 is
-         * the first approved additive change (Phase 7 task 5a, D-43):
+         * the approved offline read model (Phase 7 task 5a, D-43):
          * `offline_media.tempCache` plus a nullable `externalId` lookup column
-         * and index, migrated by [Migrations.MIGRATION_1_2].
+         * and index, migrated by [Migrations.MIGRATION_1_2]. v3 adds the
+         * provider-owned `download_rules` table (task 7a, D-47) via
+         * [Migrations.MIGRATION_2_3]; no existing table changes.
          */
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         const val DATABASE_FILE = "omnisonic.db"
 
         fun migrationsForSteps(): Array<Migration> = Migrations.ALL.toTypedArray()

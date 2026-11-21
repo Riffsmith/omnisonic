@@ -91,13 +91,18 @@ class HistorySettingsViewModelTest {
 
         viewModel.setPlayThresholdPercent(50)
         viewModel.setResumeMinPositionMs(30_000L)
+        // Both setters are independent writes; waiting on only one can read the other mid-flight.
         withTimeoutOrNull(2_000) {
-            while (store.current().playThresholdPercent != 50) delay(10)
+            while (store.current().let { it.playThresholdPercent != 50 || it.resumeMinPositionMs != 30_000L }) {
+                delay(10)
+            }
         }
         assertThat(store.current().playThresholdPercent).isEqualTo(50)
         assertThat(store.current().resumeMinPositionMs).isEqualTo(30_000L)
         withTimeoutOrNull(2_000) {
-            while (viewModel.state.value.playThresholdPercent != 50) delay(10)
+            while (viewModel.state.value.let { it.playThresholdPercent != 50 || it.resumeMinPositionMs != 30_000L }) {
+                delay(10)
+            }
         }
         assertThat(viewModel.state.value.playThresholdPercent).isEqualTo(50)
         assertThat(viewModel.state.value.resumeMinPositionMs).isEqualTo(30_000L)
@@ -105,7 +110,9 @@ class HistorySettingsViewModelTest {
         viewModel.setPlayThresholdPercent(0)
         viewModel.setResumeMinPositionMs(-1L)
         withTimeoutOrNull(2_000) {
-            while (store.current().playThresholdPercent != 1) delay(10)
+            while (store.current().let { it.playThresholdPercent != 1 || it.resumeMinPositionMs != 0L }) {
+                delay(10)
+            }
         }
         assertThat(store.current().playThresholdPercent).isEqualTo(1)
         assertThat(store.current().resumeMinPositionMs).isEqualTo(0L)

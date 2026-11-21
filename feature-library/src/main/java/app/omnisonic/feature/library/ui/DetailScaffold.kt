@@ -16,10 +16,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
@@ -28,16 +40,40 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import app.omnisonic.core.data.db.entity.PlaylistEntryEntity
 import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.downloads.DownloadDestination
 import app.omnisonic.feature.library.R
+import app.omnisonic.feature.library.downloads.LibraryDownloadNotice
 import app.omnisonic.feature.library.browse.BrowseUiState
 import app.omnisonic.provider.api.CoverImageKey
 import app.omnisonic.style.OmnisonicTheme
+import kotlinx.coroutines.delay
+
+/** Header download entry points; null on screens that do not offer downloads. */
+data class DetailDownloadActionsUi(
+    val enabled: Boolean,
+    val busy: Boolean,
+    val preferredDestination: DownloadDestination,
+    val ruleEnabled: Boolean,
+    val ruleSupported: Boolean,
+    val notice: LibraryDownloadNotice?,
+    val onDownloadPreferred: () -> Unit,
+    val onKeepOffline: () -> Unit,
+    val onExport: () -> Unit,
+    val onToggleRule: () -> Unit,
+    val onDismissNotice: () -> Unit,
+)
+
+/** Per-song entries for the same two destinations. */
+data class SongDownloadActionsUi(
+    val onKeepOffline: (Long) -> Unit,
+    val onExport: (Long) -> Unit,
+)
 
 /**
  * Detail header (UI_SPEC.md §3.5): art/placeholder, title, subtitle, meta
  * line, play + shuffle. Sizes and colors come from tokens only; the
  * favorite action has no write path yet and stays out until the favorites
- * phase ships it.
+ * phase ships it. [downloadActions] adds the task-9c entry points below Play.
  */
 @Composable
 internal fun DetailHeader(
@@ -47,6 +83,7 @@ internal fun DetailHeader(
     meta: String?,
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
+    downloadActions: DetailDownloadActionsUi? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
@@ -107,7 +144,101 @@ internal fun DetailHeader(
                 onClick = onShuffle,
             )
         }
+        downloadActions?.let { actions ->
+            HeaderDownloadRow(actions)
+        }
     }
+}
+
+@Composable
+private fun HeaderDownloadRow(actions: DetailDownloadActionsUi) {
+    val tokens = OmnisonicTheme.tokens
+    var menuOpen by remember { mutableStateOf(false) }
+    val primaryLabel = stringResource(
+        if (actions.preferredDestination == DownloadDestination.OFFLINE) {
+            R.string.detail_download_keep_offline
+        } else {
+            R.string.detail_download_export
+        },
+    )
+    LaunchedEffect(actions.notice) {
+        if (actions.notice != null) {
+            delay(NOTICE_DWELL_MS)
+            actions.onDismissNotice()
+        }
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = tokens.layout.pagePadding),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = actions.onDownloadPreferred, enabled = actions.enabled && !actions.busy) {
+                Text(primaryLabel)
+            }
+            Box {
+                IconButton(
+                    onClick = { menuOpen = true },
+                    enabled = actions.enabled && !actions.busy,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = stringResource(R.string.detail_download_more),
+                    )
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.detail_download_keep_offline)) },
+                        onClick = {
+                            menuOpen = false
+                            actions.onKeepOffline()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.detail_download_export)) },
+                        onClick = {
+                            menuOpen = false
+                            actions.onExport()
+                        },
+                    )
+                }
+            }
+            TextButton(
+                onClick = actions.onToggleRule,
+                enabled = actions.ruleSupported && !actions.busy,
+            ) {
+                Text(
+                    stringResource(
+                        if (actions.ruleEnabled) {
+                            R.string.detail_download_automatic_on
+                        } else {
+                            R.string.detail_download_automatic
+                        },
+                    ),
+                )
+            }
+        }
+        actions.notice?.let { notice ->
+            Text(
+                text = stringResource(notice.text()),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryDownloadNotice.text(): Int = when (this) {
+    LibraryDownloadNotice.QUEUED -> R.string.detail_notice_queued
+    LibraryDownloadNotice.PARTIAL -> R.string.detail_notice_partial
+    LibraryDownloadNotice.BLOCKED -> R.string.detail_notice_blocked
+    LibraryDownloadNotice.UNSUPPORTED -> R.string.detail_notice_unsupported
+    LibraryDownloadNotice.DESTINATION_CONFLICT -> R.string.detail_notice_conflict
+    LibraryDownloadNotice.EMPTY -> R.string.detail_notice_empty
+    LibraryDownloadNotice.RULE_ENABLED -> R.string.detail_notice_rule_on
+    LibraryDownloadNotice.RULE_DISABLED -> R.string.detail_notice_rule_off
+    LibraryDownloadNotice.RULE_FAILED -> R.string.detail_notice_rule_failed
 }
 
 @Composable
@@ -252,6 +383,8 @@ internal fun metaLine(parts: List<String?>): String? =
 
 private const val META_SEPARATOR = " · "
 
+private const val NOTICE_DWELL_MS = 4_000L
+
 
 @Composable
 private fun Modifier.detailPlaceholderBackground(): Modifier {
@@ -268,6 +401,7 @@ internal fun TrackListBody(
     content: BrowseUiState.Content<SongEntity>,
     onPlayFrom: (Int) -> Unit,
     onLoadMore: () -> Unit,
+    songActions: SongDownloadActionsUi? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
@@ -279,7 +413,11 @@ internal fun TrackListBody(
         ),
     ) {
         itemsIndexed(content.items, key = { _, song -> song.id }) { index, song ->
-            TrackRow(song = song, onClick = { onPlayFrom(index) })
+            TrackRow(
+                song = song,
+                onClick = { onPlayFrom(index) },
+                downloadActions = songActions,
+            )
         }
         if (content.hasMore) {
             item(key = "load-more") {
@@ -297,6 +435,7 @@ internal fun TrackListBody(
 internal fun TrackRow(
     song: SongEntity,
     onClick: () -> Unit,
+    downloadActions: SongDownloadActionsUi? = null,
 ) {
     val tokens = OmnisonicTheme.tokens
     Row(
@@ -339,6 +478,46 @@ internal fun TrackRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        if (downloadActions != null) {
+            SongDownloadMenu(
+                title = song.title,
+                onKeepOffline = { downloadActions.onKeepOffline(song.id) },
+                onExport = { downloadActions.onExport(song.id) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SongDownloadMenu(
+    title: String,
+    onKeepOffline: () -> Unit,
+    onExport: () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                imageVector = Icons.Filled.MoreVert,
+                contentDescription = stringResource(R.string.detail_song_actions, title),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.detail_download_keep_offline)) },
+                onClick = {
+                    open = false
+                    onKeepOffline()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.detail_download_export)) },
+                onClick = {
+                    open = false
+                    onExport()
+                },
+            )
+        }
     }
 }
 
@@ -348,6 +527,7 @@ internal fun EntryListBody(
     content: BrowseUiState.Content<PlaylistEntryEntity>,
     onPlayFrom: (Int) -> Unit,
     onLoadMore: () -> Unit,
+    songActions: SongDownloadActionsUi? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = OmnisonicTheme.tokens
@@ -359,7 +539,11 @@ internal fun EntryListBody(
         ),
     ) {
         itemsIndexed(content.items, key = { _, entry -> entry.id }) { index, entry ->
-            EntryRow(entry = entry, onClick = { onPlayFrom(index) })
+            EntryRow(
+                entry = entry,
+                onClick = { onPlayFrom(index) },
+                downloadActions = songActions,
+            )
         }
         if (content.hasMore) {
             item(key = "load-more") {
@@ -377,6 +561,7 @@ internal fun EntryListBody(
 internal fun EntryRow(
     entry: PlaylistEntryEntity,
     onClick: () -> Unit,
+    downloadActions: SongDownloadActionsUi? = null,
 ) {
     val tokens = OmnisonicTheme.tokens
     Row(
@@ -417,6 +602,14 @@ internal fun EntryRow(
                 text = formatDuration(duration),
                 style = OmnisonicTheme.tokens.typography.caption.toTextStyle(),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        val entrySongId = entry.songId
+        if (downloadActions != null && entrySongId != null) {
+            SongDownloadMenu(
+                title = entry.title,
+                onKeepOffline = { downloadActions.onKeepOffline(entrySongId) },
+                onExport = { downloadActions.onExport(entrySongId) },
             )
         }
     }

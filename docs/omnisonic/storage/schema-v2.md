@@ -1,34 +1,37 @@
-# Database schema — v1 baseline + additive v2 read model (`schema-v2.md`)
+# Database schema — v1 baseline + additive v2/v3 steps (`schema-v2.md`)
 
 Purpose: Record the exported database baselines, their table
 and column vocabulary, the sync-run stamp columns, the queue snapshot, the
-per-play history view, the first approved additive migration, and the
+per-play history view, the approved additive migrations, and the
 migration-harness contract.
 
 How derived: own-source reading of the Room entities, DAOs and
 `OmnisonicDatabaseFactory`, the exported Room schema artifacts
-`core-data/schemas/app.omnisonic.core.data.db.OmnisonicDatabase/1.json` and
-`2.json`, and in-repository migration-harness runs. Evidence categories:
-own-source reading, exported Room schema artifacts, in-repository test runs.
+`core-data/schemas/app.omnisonic.core.data.db.OmnisonicDatabase/1.json`,
+`2.json` and `3.json`, and in-repository migration-harness runs. Evidence
+categories: own-source reading, exported Room schema artifacts, in-repository
+test runs.
 
 Confidence:
-- [VERIFIED] `OmnisonicDatabase.SCHEMA_VERSION = 2`; `Migrations.ALL` carries
-  exactly `MIGRATION_1_2`; neither database builder installs a destructive
-  fallback.
-- [VERIFIED] `1.json` (untouched) and `2.json` (newly exported) are the
-  exported schemas. v1 contains every final entity, the renamed column labels,
-  `lastSeenSyncId` on songs/albums/artists/playlists, `queue_state.positionMs`,
-  and the `play_events_daily` view; v2 adds only the `offline_media` read-model
-  columns and lookup index.
-- [VERIFIED] `MigrationHarnessTest` seeds a database from `1.json`, runs the
-  real `1 → 2` migration, validates it against `2.json`, and reopens the seeded
-  database through the production factory.
+- [VERIFIED] `OmnisonicDatabase.SCHEMA_VERSION = 3`; `Migrations.ALL` carries
+  exactly `MIGRATION_1_2` and `MIGRATION_2_3`; neither database builder installs
+  a destructive fallback.
+- [VERIFIED] `1.json` and `2.json` (untouched) and `3.json` (newly exported)
+  are the exported schemas. v1 contains every final entity, the renamed column
+  labels, `lastSeenSyncId` on songs/albums/artists/playlists,
+  `queue_state.positionMs`, and the `play_events_daily` view; v2 adds the
+  `offline_media` read model; v3 adds only the provider-owned `download_rules`
+  table and its unique identity index.
+- [VERIFIED] `MigrationHarnessTest` seeds the `1.json` and `2.json` baselines,
+  runs the real migration path, validates against `3.json`, reopens a seeded
+  database through the production factory, and proves the rule cascade trigger
+  is installed.
 - [UNKNOWN] Behaviour on a large production database — no released database
   exists; the harness uses small fixture rows.
 
-Date: 2026-11-20
+Date: 2026-11-21
 
-Links: `library-sync-ownership.md`, `sqlite-api29-floor.md`,
+Links: `automatic-rules.md`, `library-sync-ownership.md`, `sqlite-api29-floor.md`,
 `aggregate-null-semantics.md`, `outbox-contract.md`, `download-completion.md`,
 `../decisions.md`
 
@@ -42,12 +45,13 @@ pre-release v2/v3 chain.
 
 The pre-release v1 → v2 → v3 migration chain, its old schema exports and its
 migration harness were removed in FIX-15. No database from that chain was ever
-released. The repository shipped one clean v1 baseline, and the first approved
-additive change is the Phase 7 task-5a offline read-model step (D-43):
+released. The repository shipped one clean v1 baseline, followed by two
+approved additive steps: the Phase 7 task-5a offline read model (D-43) and the
+task-7a automatic-rule table (D-47):
 
 ```kotlin
-const val SCHEMA_VERSION = 2
-val Migrations.ALL: List<Migration> = listOf(MIGRATION_1_2)
+const val SCHEMA_VERSION = 3
+val Migrations.ALL: List<Migration> = listOf(MIGRATION_1_2, MIGRATION_2_3)
 ```
 
 Every future schema change appends exactly one migration to `Migrations.ALL`
@@ -70,6 +74,24 @@ approved change, and an existing exported baseline is never edited.
   path, source id or row is rewritten or deleted.
 
 `download_queue` and every other table are unchanged.
+
+## The v2 → v3 automatic-rule step (D-47)
+
+`MIGRATION_2_3` creates one new table and its unique index; no existing table,
+column or row changes [VERIFIED]:
+
+- `download_rules` — `id`, `providerId`, `kind` (stored by NAME), non-null
+  `targetExternalId`, optional `transcodeBitrateKbps`/`format`, `createdAt`,
+  `updatedAt`.
+- Unique `index_download_rules_providerId_kind_targetExternalId` on
+  `(providerId, kind, targetExternalId)` is the deterministic duplicate key.
+  FAVORITES uses the empty-string target sentinel because SQLite UNIQUE treats
+  NULLs as distinct.
+- `ProviderCascadeTriggers` gained `download_rules`, so a provider delete
+  removes its rules alongside queue and offline rows.
+
+Rule identity, the sentinel rationale, scoped reads and the expansion/pruning
+boundary are documented in `automatic-rules.md`.
 
 ## Column vocabulary
 
@@ -104,7 +126,8 @@ Generic identifiers such as `providerId`, `externalId`, `playCount`,
 | `chapters` | Chapter/segment rows attached to songs and albums |
 | `play_events` | One immutable row per play or skip |
 | `outbox_items` | Pending provider user-data changes |
-| `download_queue` | Download tasks, owned by a provider |
+| `download_queue` | Download tasks, owned by a provider; nullable `autoRuleId` is enqueue-time intent, not ownership |
+| `download_rules` | Provider-owned FAVORITES/PLAYLIST/ALBUM rules; v3 adds the table with the unique `(providerId, kind, targetExternalId)` identity index |
 | `offline_media` | Offline files and their source keys; v2 adds `tempCache` (rolling intent) and nullable `externalId` with a `(providerId, externalId)` lookup index |
 | `saved_filters` | Saved search/library filters |
 | `sync_state` | Per-provider sync status |
@@ -164,16 +187,19 @@ classification and the sync write rules live in `library-sync-ownership.md`.
 
 [VERIFIED] `MigrationHarnessTest`:
 
-1. asserts the current baseline is version 2 with exactly one `1 → 2` step;
+1. asserts the current baseline is version 3 with exactly the ordered
+   `1 → 2` and `2 → 3` steps;
 2. seeds `1.json` with fixture rows exercising the renamed labels plus three
    `offline_media` rows (plain, colon-containing and unparseable source keys)
-   and a `download_queue` row, runs `Migrations.ALL` to version 2 and validates
-   the schema against `2.json`, asserting preserved paths/source ids, the
+   and a `download_queue` row, runs `Migrations.ALL` to version 3 and validates
+   the schema against `3.json`, asserting preserved paths/source ids, the
    permanent default and the tolerant `externalId` backfill;
-3. creates a fresh `2.json` database and proves the new columns are writable;
+3. seeds `2.json` with offline and queue rows, upgrades to 3, and proves those
+   rows survive, the rule table is writable, the unique index rejects a
+   duplicate, and the favorites sentinel is stored;
 4. reopens the v1-seeded database through `OmnisonicDatabaseFactory`, which
    proves Room's identity-hash validation, the real migration path and trigger
-   installation on the production path.
+   installation on the production path (including the rule trigger).
 
 The harness is structural (Room schema validation plus direct SQLite queries)
 because a Robolectric SQLite image cannot faithfully reproduce every on-device

@@ -8,6 +8,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface DownloadDao {
@@ -49,6 +50,19 @@ interface DownloadDao {
 
     suspend fun selectAll(scope: ProfileScope): List<DownloadItemEntity> =
         selectAllRaw(scope.excludedProviderIds.joinToString(","))
+
+    /** Live queue rows for the downloads workspace; hidden providers stay out of the read. */
+    @Query(
+        """
+        SELECT * FROM download_queue
+        WHERE instr(',' || :excludedProviderIdsCsv || ',', ',' || providerId || ',') = 0
+        ORDER BY createdAt, id
+        """,
+    )
+    fun observeAllRaw(excludedProviderIdsCsv: String): Flow<List<DownloadItemEntity>>
+
+    fun observeAll(scope: ProfileScope): Flow<List<DownloadItemEntity>> =
+        observeAllRaw(scope.excludedProviderIds.joinToString(","))
 
     @Query(
         """

@@ -45,6 +45,22 @@
     <string name="detail_artist_top_tracks">Top tracks</string>
     <string name="detail_artist_albums">Albums</string>
 
+    <string name="detail_download_keep_offline">Keep offline</string>
+    <string name="detail_download_export">Export to Downloads</string>
+    <string name="detail_download_more">More download options</string>
+    <string name="detail_download_automatic">Automatic download</string>
+    <string name="detail_download_automatic_on">Automatic download on</string>
+    <string name="detail_song_actions">Download options for %1$s</string>
+    <string name="detail_notice_queued">Download added to the queue</string>
+    <string name="detail_notice_partial">Some items could not be queued</string>
+    <string name="detail_notice_blocked">The provider is unavailable right now</string>
+    <string name="detail_notice_unsupported">This provider does not support downloads</string>
+    <string name="detail_notice_conflict">An existing download targets the other destination</string>
+    <string name="detail_notice_empty">Nothing to download</string>
+    <string name="detail_notice_rule_on">Automatic downloads are on for this item</string>
+    <string name="detail_notice_rule_off">Automatic downloads are off for this item</string>
+    <string name="detail_notice_rule_failed">The automatic rule could not be changed</string>
+
     <plurals name="detail_meta_songs">
         <item quantity="one">%d song</item>
         <item quantity="other">%d songs</item>

@@ -15,6 +15,14 @@ import kotlinx.coroutines.withContext
 fun interface DownloadQueueCancellation {
     suspend fun cancel(rowId: Long): Boolean
 
+    /**
+     * Prune-only cancellation. A coordinator-backed host re-reads the row under
+     * its roster lock so a row converted to an export destination after the
+     * prune snapshot is never deleted; a host without a roster falls back to the
+     * unconditional delete, which the pruner has already revalidated.
+     */
+    suspend fun cancelIfAutomaticRolling(rowId: Long): Boolean = cancel(rowId)
+
     companion object {
         val Direct = DownloadQueueCancellation { false }
     }

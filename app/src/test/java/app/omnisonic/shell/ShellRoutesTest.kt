@@ -28,6 +28,7 @@ class ShellRoutesTest {
             "nowplaying",
             "queue",
             "history",
+            "downloads",
         ).inOrder()
     }
 

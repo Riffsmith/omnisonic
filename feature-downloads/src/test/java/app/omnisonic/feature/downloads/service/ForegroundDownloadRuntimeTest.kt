@@ -8,7 +8,14 @@ import app.omnisonic.core.data.db.OmnisonicDatabaseFactory
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
 import app.omnisonic.core.data.db.entity.DownloadStatus
 import app.omnisonic.core.data.db.entity.OfflineFileEntity
+import app.omnisonic.core.data.db.entity.ProviderEntity
+import app.omnisonic.core.data.db.entity.SongEntity
+import app.omnisonic.core.data.downloads.AutomaticRuleGenerationStore
+import app.omnisonic.core.data.downloads.AutomaticRuleKind
+import app.omnisonic.core.data.downloads.AutomaticRuleReactionFactory
+import app.omnisonic.core.data.downloads.AutomaticRuleRepository
 import app.omnisonic.core.data.downloads.DownloadCompletionRecovery
+import app.omnisonic.core.data.downloads.DownloadEnqueuerFactory
 import app.omnisonic.core.data.downloads.DownloadExportPublisher
 import app.omnisonic.core.data.downloads.DownloadLease
 import app.omnisonic.core.data.downloads.DownloadQueueRepository
@@ -40,10 +47,12 @@ import app.omnisonic.core.data.downloads.OfflineRootSource
 import app.omnisonic.core.data.downloads.OfflineStorage
 import app.omnisonic.core.data.network.NetworkMonitor
 import app.omnisonic.core.data.network.NetworkState
+import app.omnisonic.core.data.sync.LibrarySyncStatusRepository
 import app.omnisonic.core.model.log.LogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.provider.api.ProviderRunGate
 import app.omnisonic.provider.api.ProviderStatus
+import app.omnisonic.provider.api.ProviderTraits
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import java.io.File
@@ -88,6 +97,7 @@ class ForegroundDownloadRuntimeTest {
     private lateinit var handlers: FakeHandlers
     private lateinit var exportStore: RecordingExportStore
     private lateinit var exportSessions: ExportSessionJournal
+    private lateinit var ruleGenerations: AutomaticRuleGenerationStore
 
     private val logLines = mutableListOf<String>()
 
@@ -106,6 +116,7 @@ class ForegroundDownloadRuntimeTest {
         handlers = FakeHandlers()
         exportStore = RecordingExportStore()
         exportSessions = ExportSessionJournal(File(temp.root, "export-sessions"))
+        ruleGenerations = AutomaticRuleGenerationStore()
     }
 
     @After
@@ -485,6 +496,99 @@ class ForegroundDownloadRuntimeTest {
     }
 
     @Test
+    fun `a rule added during a session expands through the runtime`() = runTest {
+        settings.setWorkerCount(1)
+        seedRuleSource()
+        seed("keepalive")
+        val gate = CompletableDeferred<Unit>()
+        handlers.onTransfer = {
+            gate.await()
+            DownloadTransferResult.Completed("done", 1)
+        }
+        val runtime = runtime(StandardTestDispatcher(testScheduler))
+        val key = DownloadKeys.mediaKey(1, "song-1", null, null)
+
+        try {
+            runtime.serviceStarted { }
+            pumpUntil { handlers.claims.size == 1 }
+
+            AutomaticRuleRepository(db).add(1, AutomaticRuleKind.FAVORITES)
+            pumpUntil { row(key) != null }
+            assertThat(row(key)!!.tempCache).isTrue()
+
+            AutomaticRuleRepository(db).remove(1, AutomaticRuleKind.FAVORITES, "")
+            pumpUntil { row(key) == null }
+        } finally {
+            gate.complete(Unit)
+            runtime.serviceStopping()
+        }
+    }
+
+    @Test
+    fun `a rule-only session expands and claims before it can go idle`() = runTest {
+        settings.setWorkerCount(1)
+        seedRuleSource()
+        AutomaticRuleRepository(db).add(1, AutomaticRuleKind.FAVORITES)
+        val transferGate = CompletableDeferred<Unit>()
+        handlers.onTransfer = {
+            transferGate.await()
+            DownloadTransferResult.Completed("done", 1)
+        }
+        val runtime = runtime(StandardTestDispatcher(testScheduler))
+        val key = DownloadKeys.mediaKey(1, "song-1", null, null)
+
+        try {
+            runtime.serviceStarted { }
+            pumpUntil { handlers.claims.size == 1 }
+            assertThat(row(key)!!.status).isEqualTo(DownloadStatus.ACTIVE.name)
+        } finally {
+            transferGate.complete(Unit)
+            runtime.serviceStopping()
+        }
+    }
+
+    @Test
+    fun `connectivity retries an automatic expansion blocked by the provider gate`() = runTest {
+        settings.setWorkerCount(1)
+        seedRuleSource()
+        seed("keepalive")
+        val transferGate = CompletableDeferred<Unit>()
+        handlers.onTransfer = {
+            transferGate.await()
+            DownloadTransferResult.Completed("done", 1)
+        }
+        val runtime = runtime(StandardTestDispatcher(testScheduler))
+        val key = DownloadKeys.mediaKey(1, "song-1", null, null)
+
+        try {
+            runtime.serviceStarted { }
+            pumpUntil { handlers.claims.size == 1 }
+
+            gateStatus = ProviderStatus.OFFLINE
+            AutomaticRuleRepository(db).add(1, AutomaticRuleKind.FAVORITES)
+            pumpUntil {
+                val state = ruleGenerations.state.value
+                state.verified && state.generation?.expansions?.singleOrNull()?.blockedCount == 1
+            }
+            repeatRealPumps(30)
+            assertThat(row(key)).isNull()
+            val blockedSequence = ruleGenerations.state.value.generation!!.sequence
+
+            gateStatus = ProviderStatus.OK
+            connectivity.emit()
+
+            pumpUntil {
+                row(key) != null &&
+                    ruleGenerations.state.value.generation!!.sequence > blockedSequence
+            }
+            assertThat(row(key)!!.tempCache).isTrue()
+        } finally {
+            transferGate.complete(Unit)
+            runtime.serviceStopping()
+        }
+    }
+
+    @Test
     fun `a worker count increase admits another slot while running`() = runTest {
         settings.setWorkerCount(1)
         seed("one")
@@ -581,13 +685,49 @@ class ForegroundDownloadRuntimeTest {
             notifications = notifications,
             connectivity = connectivity,
             handlers = handlers,
+            enqueuerFactory = DownloadEnqueuerFactory(db) { ProviderTraits() },
             workStart = app.omnisonic.core.data.downloads.DownloadWorkStart.None,
+            automaticRuleReactions = AutomaticRuleReactionFactory(
+                database = db,
+                traitsFor = { ProviderTraits() },
+                syncStatus = LibrarySyncStatusRepository(),
+                generations = ruleGenerations,
+                storage = storage,
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
+            ),
             logger = OmnisonicLogger(LogSink { level, tag, message, error ->
                 logLines += "$level/$tag: $message ${error?.stackTraceToString()?.take(400)}"
                 while (logLines.size > 40) logLines.removeAt(0)
             }),
             clock = { dispatcher.scheduler.currentTime },
             ioDispatcher = dispatcher,
+        )
+    }
+
+    private suspend fun seedRuleSource() {
+        db.providerDao().upsert(
+            ProviderEntity(
+                id = 1,
+                name = "provider-1",
+                api = "api-test",
+                primaryScheme = "https",
+                primaryHost = "host-1.example",
+                primaryPort = 443,
+                primaryPath = "/",
+                username = "user-1",
+                createdAt = 1_000,
+                updatedAt = 1_000,
+            ),
+        )
+        db.songDao().upsert(
+            SongEntity(
+                id = 1,
+                providerId = 1,
+                externalId = "song-1",
+                title = "Favorite",
+                isFavorite = true,
+                updatedAt = 1_000,
+            ),
         )
     }
 

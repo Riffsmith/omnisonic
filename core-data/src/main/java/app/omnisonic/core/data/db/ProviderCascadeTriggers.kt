@@ -20,6 +20,7 @@ object ProviderCascadeTriggers {
         "outbox_items",
         "offline_media",
         "download_queue",
+        "download_rules",
         "sync_state",
         "queue_entries",
     ).map { table ->

@@ -55,6 +55,10 @@ class DownloadQueueSettingsStore(
             )
         }
 
+    /** Last explicit keep-offline/export choice; the library primary action follows it. */
+    val preferredDestination: Flow<DownloadDestination> = dataStore.data
+        .map { DownloadDestination.fromStored(it[Keys.PREFERRED_DESTINATION]) }
+
     val rootState: Flow<DownloadRootState> = dataStore.data
         .map { prefs ->
             DownloadRootState(
@@ -87,6 +91,10 @@ class DownloadQueueSettingsStore(
 
     suspend fun setWifiOnly(enabled: Boolean) = write {
         it[Keys.WIFI_ONLY] = enabled
+    }
+
+    suspend fun setPreferredDestination(destination: DownloadDestination): Unit {
+        write { it[Keys.PREFERRED_DESTINATION] = destination.name }
     }
 
     suspend fun setRootSelection(selection: OfflineRootSelection) = write {
@@ -157,6 +165,7 @@ class DownloadQueueSettingsStore(
         val GLOBALLY_PAUSED = booleanPreferencesKey("downloads.globally_paused")
         val WORKER_COUNT = intPreferencesKey("downloads.worker_count")
         val WIFI_ONLY = booleanPreferencesKey("downloads.wifi_only")
+        val PREFERRED_DESTINATION = stringPreferencesKey("downloads.preferred_destination")
         val ROOT_SELECTION = stringPreferencesKey("downloads.root_selection")
         val ROOT_ACTIVE_VOLUME = stringPreferencesKey("downloads.root_active_volume")
         val ROOT_GENERATION = longPreferencesKey("downloads.root_generation")

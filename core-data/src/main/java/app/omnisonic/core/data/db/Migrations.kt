@@ -5,11 +5,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * Explicit upgrade steps only. The pre-release database started at one clean
- * v1 baseline (FIX-15 / D-11 option B); the first approved schema change is the
- * additive offline read-model step below (Phase 7 task 5a, D-43). The migration
- * harness seeds the released `1.json` and validates the result against `2.json`.
- * Destructive fallback is intentionally absent: an unknown schema must fail
- * loudly instead of dropping user data.
+ * v1 baseline (FIX-15 / D-11 option B); the approved additive steps are the
+ * offline read model (Phase 7 task 5a, D-43) and the automatic-rule table
+ * (task 7a, D-47). The migration harness seeds each exported baseline and
+ * validates the result against the newest export. Destructive fallback is
+ * intentionally absent: an unknown schema must fail loudly instead of dropping
+ * user data.
  */
 object Migrations {
 
@@ -32,7 +33,30 @@ object Migrations {
         }
     }
 
-    val ALL: List<Migration> = listOf(MIGRATION_1_2)
+    /**
+     * Additive provider-owned rule table (Phase 7 task 7a, D-47): no existing
+     * table or row is touched. The unique `(providerId, kind, targetExternalId)`
+     * index is the deterministic duplicate rule; FAVORITES uses the empty-string
+     * target sentinel because SQLite UNIQUE treats NULLs as distinct.
+     */
+    val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `download_rules` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`providerId` INTEGER NOT NULL, `kind` TEXT NOT NULL, " +
+                    "`targetExternalId` TEXT NOT NULL, `transcodeBitrateKbps` INTEGER, " +
+                    "`format` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL)",
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                    "`index_download_rules_providerId_kind_targetExternalId` " +
+                    "ON `download_rules` (`providerId`, `kind`, `targetExternalId`)",
+            )
+        }
+    }
+
+    val ALL: List<Migration> = listOf(MIGRATION_1_2, MIGRATION_2_3)
 
     private fun backfillExternalIds(db: SupportSQLiteDatabase) {
         val updates = mutableListOf<Pair<String, Long>>()
