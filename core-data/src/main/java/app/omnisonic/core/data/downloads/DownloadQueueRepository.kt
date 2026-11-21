@@ -19,6 +19,8 @@ class DownloadQueueRepository(private val dao: DownloadDao) {
 
     suspend fun selectById(id: Long): DownloadItemEntity? = dao.selectById(id)
 
+    suspend fun selectByMediaKey(mediaKey: String): DownloadItemEntity? = dao.selectByMediaKey(mediaKey)
+
     suspend fun selectVisible(scope: ProfileScope): List<DownloadItemEntity> = dao.selectAll(scope)
 
     /**
@@ -117,6 +119,10 @@ class DownloadQueueRepository(private val dao: DownloadDao) {
         dao.resumeOneIfUserPaused(id, DownloadLifecycleRules.resumeTarget(globallyPaused).name) == 1
 
     suspend fun cancel(id: Long): Boolean = dao.deleteById(id) == 1
+
+    /** Explicit destination change; false while a worker owns the row or the row is gone. */
+    suspend fun convertDestination(id: Long, exportTarget: String?): Boolean =
+        dao.convertDestinationIfSettled(id, exportTarget) == 1
 
     suspend fun retry(id: Long, globallyPaused: Boolean, retriedAtMs: Long): Boolean =
         dao.retryIfFailed(id, DownloadLifecycleRules.resumeTarget(globallyPaused).name, retriedAtMs) == 1

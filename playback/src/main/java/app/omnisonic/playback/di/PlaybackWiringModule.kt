@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
+import app.omnisonic.core.data.downloads.OfflinePlaybackSource
 import app.omnisonic.core.data.history.HistoryPreferencesStore
 import app.omnisonic.core.data.providers.ProviderClientRegistry
 import app.omnisonic.core.data.repository.SongRepository
@@ -50,6 +51,9 @@ import app.omnisonic.playback.source.AutoplayQueueSource
 import app.omnisonic.playback.source.RadioQueueSource
 import app.omnisonic.playback.source.SearchPlayQueueSource
 import app.omnisonic.playback.stream.MediaProviderLookup
+import app.omnisonic.playback.stream.OfflineFirstStreamResolver
+import app.omnisonic.playback.stream.OfflineStreamCandidate
+import app.omnisonic.playback.stream.OfflineStreamLookup
 import app.omnisonic.playback.stream.ProviderStreamResolver
 import app.omnisonic.playback.stream.SongReplayGainSource
 import app.omnisonic.playback.stream.SongRowLookup
@@ -160,7 +164,16 @@ object PlaybackWiringModule {
 
     @Provides
     @Singleton
-    fun streamResolver(resolver: ProviderStreamResolver): StreamResolver = resolver
+    fun offlineStreamLookup(source: OfflinePlaybackSource): OfflineStreamLookup =
+        OfflineStreamLookup { providerId, externalId ->
+            source.filesFor(providerId, externalId).map { file ->
+                OfflineStreamCandidate(file.id, file.sourceKey, file.uri, file.downloadedAtMs)
+            }
+        }
+
+    @Provides
+    @Singleton
+    fun streamResolver(resolver: OfflineFirstStreamResolver): StreamResolver = resolver
 
     @Provides
     @Singleton

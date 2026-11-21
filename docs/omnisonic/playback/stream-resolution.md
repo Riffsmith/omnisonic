@@ -62,7 +62,7 @@ Confidence:
 Date: 2026-11-07 (resume bullet corrected 2026-11-11 from on-device evidence —
 see `start-position-investigation.md`)
 
-Links: `stream-cache-identity.md`, `controller-and-events.md`,
+Links: `offline-resolution.md`, `stream-cache-identity.md`, `controller-and-events.md`,
 `sink-processors.md`, `../storage/library-sync-ownership.md` (resume-point
 column ownership), `../protocol/scrobble-timestamps.md` (D-8 submission policy)
 
@@ -70,10 +70,12 @@ column ownership), `../protocol/scrobble-timestamps.md` (D-8 submission policy)
 
 ## Resolver
 
-[VERIFIED] `ProviderStreamResolver(MediaProviderLookup, SongRowLookup)` is the
-production `StreamResolver`. `MediaProviderLookup` adapts
-`ProviderClientRegistry.providerFor` (cached per provider row, rebuilt on
-edit); `SongRowLookup` adapts the core-data `SongRepository` song-row read.
+[VERIFIED] `ProviderStreamResolver(MediaProviderLookup)` is the provider half
+of the production `StreamResolver`; since Phase 7 task 5c the bound resolver is
+`OfflineFirstStreamResolver`, which offers a readable downloaded file first and
+otherwise delegates to `ProviderStreamResolver` (`offline-resolution.md`,
+D-45). `MediaProviderLookup` adapts `ProviderClientRegistry.providerFor`
+(cached per provider row, rebuilt on edit).
 
 [VERIFIED] `SongRowLookup` no longer serves the resolver — it exists for
 `SongReplayGainSource` only (the interface and its Hilt binding stay). The
@@ -84,6 +86,12 @@ resume decision behind a policy seam rather than a raw column read.
 [VERIFIED] `ResolvedStream.cacheKey` stays the contract default
 (`StreamKey(providerId, externalId)` — see `stream-cache-identity.md`);
 transcode variants do not exist until Phase 8.
+
+[VERIFIED] `OfflineFirstStreamResolver` never alters the online result: a
+non-radio entry is offered its readable stored file first (`file://`,
+`DIRECT_URI`, `requiresNetwork = false`, start 0), radio entries go straight to
+the provider, and an offline miss or lookup failure delegates unchanged
+(resolver tests; `offline-resolution.md`).
 
 ## Replay-gain source
 

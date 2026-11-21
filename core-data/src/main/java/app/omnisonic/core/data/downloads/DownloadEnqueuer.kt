@@ -48,7 +48,7 @@ class DownloadEnqueuer(
             return DownloadEnqueueResult.BlockedByStatus(status)
         }
         val now = nowMs()
-        coordinator.enqueue(
+        val attempt = coordinator.enqueueChecked(
             DownloadItemEntity(
                 mediaKey = DownloadKeys.mediaKey(providerId, externalId, transcodeBitrateKbps, format),
                 providerId = providerId,
@@ -63,7 +63,11 @@ class DownloadEnqueuer(
                 updatedAt = now,
             ),
         )
-        return DownloadEnqueueResult.Enqueued
+        return when (attempt) {
+            EnqueueAttempt.Inserted, EnqueueAttempt.Duplicate -> DownloadEnqueueResult.Enqueued
+            is EnqueueAttempt.DuplicateOtherDestination ->
+                DownloadEnqueueResult.NeedsDestinationChange(attempt.existingExportTarget)
+        }
     }
 
     private suspend fun traitsFor(providerId: Long): ProviderTraits? {

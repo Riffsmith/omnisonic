@@ -99,13 +99,12 @@ abstract class OmnisonicDatabase : RoomDatabase() {
 
     companion object {
         /**
-         * Clean pre-release baseline (FIX-15 / D-11 option B). It already
-         * contains every final table, column and view, including the
-         * sync-run stamps (`lastSeenSyncId`) and `queue_state.positionMs`.
-         * There is no released schema and no migration chain; a future
-         * schema change starts at v1 → v2.
+         * v1 was the clean pre-release baseline (FIX-15 / D-11 option B). v2 is
+         * the first approved additive change (Phase 7 task 5a, D-43):
+         * `offline_media.tempCache` plus a nullable `externalId` lookup column
+         * and index, migrated by [Migrations.MIGRATION_1_2].
          */
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
         const val DATABASE_FILE = "omnisonic.db"
 
         fun migrationsForSteps(): Array<Migration> = Migrations.ALL.toTypedArray()

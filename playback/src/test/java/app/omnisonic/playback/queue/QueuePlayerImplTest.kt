@@ -683,6 +683,73 @@ class QueuePlayerImplTest {
     }
 
     @Test
+    fun `an unresolvable prepared next advances instead of ending the queue`() {
+        val f = newFixture(FakeStreamResolver(failures = setOf(2L)))
+        f.queue.setQueue(listOf(entry(1), entry(2), entry(3)))
+
+        assertThat(f.playerFake.prepared.last()).isNull()
+
+        f.queue.onEngineFinishedCurrent()
+
+        assertThat(f.playerFake.played.map { it.entry.queueItemId }).containsExactly(1L, 3L).inOrder()
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(3L)
+        assertThat(f.bus.emitted.trackChanges().any { it.current == null }).isFalse()
+    }
+
+    @Test
+    fun `a missing offline next prepares and adopts the network fallback`() {
+        val resolver = object : StreamResolver {
+            override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? = when (entry.queueItemId) {
+                1L -> ResolvedStream(
+                    entry = entry,
+                    uri = "file:///offline/1.flac",
+                    requiresNetwork = false,
+                )
+                2L -> ResolvedStream(
+                    entry = entry,
+                    uri = "http://host/stream/2",
+                    requiresNetwork = true,
+                )
+                else -> null
+            }
+        }
+        val f = newFixture(resolver)
+        f.queue.setQueue(listOf(entry(1), entry(2)))
+
+        val prepared = checkNotNull(f.playerFake.prepared.last())
+        assertThat(prepared.entry.queueItemId).isEqualTo(2L)
+        assertThat(prepared.requiresNetwork).isTrue()
+
+        f.queue.onEngineAutoAdvanced(entry(2))
+
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(2L)
+        assertThat(f.playerFake.prepared.last()).isNull()
+    }
+
+    @Test
+    fun `repeat one restarts the same direct offline source`() {
+        val direct = object : StreamResolver {
+            override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream =
+                ResolvedStream(
+                    entry = entry,
+                    uri = "file:///offline/${entry.queueItemId}.flac",
+                    requiresNetwork = false,
+                )
+        }
+        val f = newFixture(direct)
+        f.queue.setQueue(listOf(entry(1)))
+        f.queue.setRepeatMode(RepeatMode.ONE)
+
+        f.queue.onEngineFinishedCurrent()
+
+        assertThat(f.playerFake.played).hasSize(2)
+        assertThat(f.playerFake.played.map { it.stream.uri })
+            .containsExactly("file:///offline/1.flac", "file:///offline/1.flac")
+        assertThat(f.playerFake.played.all { !it.stream.requiresNetwork }).isTrue()
+        assertThat(f.playerFake.prepared.last()).isNull()
+    }
+
+    @Test
     fun `engine errors advance without a Skipped emission`() {
         val f = newFixture()
         f.queue.setQueue(listOf(entry(1), entry(2)))

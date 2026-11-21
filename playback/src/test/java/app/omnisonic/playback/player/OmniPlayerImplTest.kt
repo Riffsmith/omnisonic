@@ -694,6 +694,60 @@ class OmniPlayerImplTest {
     }
 
     @Test
+    fun `offline file plays directly without populating the streaming cache`() = runBlocking<Unit> {
+        settings.setCacheFirst(true)
+        val player = newPlayer()
+        val spy = ListenerSpy()
+        player.setListener(spy)
+        val stream = offlineStream(offlineWavFile(durationMs = 5_000))
+
+        await("cache-first default applied") { cacheManager.defaultCacheFirst }
+        assertThat(player.dataSourceFactoryFor(stream).createDataSource())
+            .isNotInstanceOf(CacheDataSource::class.java)
+
+        player.play(stream, stream.entry)
+        await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
+
+        player.seekTo(1_000)
+        await("seek applied") { player.exposedPlayer().currentPosition >= 900 }
+        player.pause()
+        await("paused") { !player.exposedPlayer().playWhenReady }
+        assertThat(player.exposedPlayer().isPlaying).isFalse()
+        player.resume()
+        await("resumed") { player.exposedPlayer().playWhenReady }
+        await("offline file ends naturally", timeoutMs = 20_000) {
+            spy.finished.any { it.queueItemId == stream.entry.queueItemId }
+        }
+
+        assertThat(cacheManager.cachedBytesFor(stream.cacheKey)).isEqualTo(0)
+        assertThat(spy.errors).isEmpty()
+    }
+
+    @Test
+    fun `offline file restarts at the captured position after an engine swap`() = runBlocking<Unit> {
+        val player = newPlayer()
+        val stream = offlineStream(offlineWavFile(durationMs = 20_000))
+
+        player.play(stream, stream.entry)
+        await("ready") { player.exposedPlayer().playbackState == Player.STATE_READY }
+        player.seekTo(2_000)
+        await("seek applied") { player.exposedPlayer().currentPosition >= 1_900 }
+
+        val exposed = player.exposedPlayer()
+        player.applyEngineConfig(EngineConfig(minBufferMs = 45_000))
+
+        await("swapped engine ready at the captured position") {
+            exposed.playbackState == Player.STATE_READY &&
+                exposed.currentMediaItem?.mediaId == stream.entry.queueItemId.toString() &&
+                exposed.currentPosition >= 1_800
+        }
+        assertThat(exposed.playWhenReady).isTrue()
+        assertThat(player.dataSourceFactoryFor(stream).createDataSource())
+            .isNotInstanceOf(CacheDataSource::class.java)
+        assertThat(cacheManager.cachedBytesFor(stream.cacheKey)).isEqualTo(0)
+    }
+
+    @Test
     fun `errors surface to the player listener`() {
         val player = newPlayer()
         val spy = ListenerSpy()
@@ -775,6 +829,19 @@ class OmniPlayerImplTest {
                 }
         }
     }
+
+    private fun offlineWavFile(durationMs: Int = 5_000): File =
+        File(context.cacheDir, "offline-${System.nanoTime()}.wav").apply {
+            writeBytes(wavBytes(durationMs))
+        }
+
+    private fun offlineStream(file: File, externalId: String = "song-1"): ResolvedStream = ResolvedStream(
+        entry = entry(externalId = externalId),
+        uri = java.net.URI("file", "", file.absolutePath, null).toString(),
+        requiresNetwork = false,
+        cacheKey = "stream:1:$externalId:auto:auto",
+        transport = StreamTransport.DIRECT_URI,
+    )
 
     private fun serveWav(durationMs: Int = 300) {
         server.enqueue(MockResponse().setBody(okio.Buffer().write(wavBytes(durationMs))))

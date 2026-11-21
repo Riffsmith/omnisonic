@@ -2,19 +2,40 @@ package app.omnisonic.feature.downloads.service
 
 import android.app.Notification
 import androidx.test.core.app.ApplicationProvider
+import app.omnisonic.core.data.db.DownloadKeys
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.db.OmnisonicDatabaseFactory
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
 import app.omnisonic.core.data.db.entity.DownloadStatus
+import app.omnisonic.core.data.db.entity.OfflineFileEntity
+import app.omnisonic.core.data.downloads.DownloadCompletionRecovery
+import app.omnisonic.core.data.downloads.DownloadExportPublisher
 import app.omnisonic.core.data.downloads.DownloadLease
 import app.omnisonic.core.data.downloads.DownloadQueueRepository
 import app.omnisonic.core.data.downloads.DownloadQueueSettingsStore
 import app.omnisonic.core.data.downloads.DownloadTransferBlock
 import app.omnisonic.core.data.downloads.DownloadTransferFailure
+import app.omnisonic.core.data.downloads.DownloadTransferJournal
 import app.omnisonic.core.data.downloads.DownloadTransferResult
+import app.omnisonic.core.data.downloads.DownloadTransferState
 import app.omnisonic.core.data.downloads.DownloadWorkerCoordinator
+import app.omnisonic.core.data.downloads.ExportCopyOutcome
+import app.omnisonic.core.data.downloads.ExportDocumentPresence
+import app.omnisonic.core.data.downloads.ExportDocumentRef
+import app.omnisonic.core.data.downloads.ExportDocumentRequest
+import app.omnisonic.core.data.downloads.PendingExportDocument
+import app.omnisonic.core.data.downloads.ExportDocumentStore
+import app.omnisonic.core.data.downloads.ExportNaming
+import app.omnisonic.core.data.downloads.ExportSession
+import app.omnisonic.core.data.downloads.ExportSessionJournal
+import app.omnisonic.core.data.downloads.ExportSessionPhase
+import app.omnisonic.core.data.downloads.OfflineFileSweep
+import app.omnisonic.core.data.downloads.OfflineMediaIdentity
+import app.omnisonic.core.data.downloads.OfflineMediaRepository
+import app.omnisonic.core.data.downloads.OfflinePathResult
 import app.omnisonic.core.data.downloads.OfflinePathRules
 import app.omnisonic.core.data.downloads.OfflineRoot
+import app.omnisonic.core.data.downloads.OfflineRootSelection
 import app.omnisonic.core.data.downloads.OfflineRootSource
 import app.omnisonic.core.data.downloads.OfflineStorage
 import app.omnisonic.core.data.network.NetworkMonitor
@@ -65,6 +86,8 @@ class ForegroundDownloadRuntimeTest {
     private lateinit var connectivity: FakeConnectivity
     private lateinit var network: FakeNetwork
     private lateinit var handlers: FakeHandlers
+    private lateinit var exportStore: RecordingExportStore
+    private lateinit var exportSessions: ExportSessionJournal
 
     private val logLines = mutableListOf<String>()
 
@@ -81,6 +104,8 @@ class ForegroundDownloadRuntimeTest {
         connectivity = FakeConnectivity()
         network = FakeNetwork()
         handlers = FakeHandlers()
+        exportStore = RecordingExportStore()
+        exportSessions = ExportSessionJournal(File(temp.root, "export-sessions"))
     }
 
     @After
@@ -138,12 +163,37 @@ class ForegroundDownloadRuntimeTest {
         val runtime = runtime(StandardTestDispatcher(testScheduler))
 
         runtime.serviceStarted { }
-        pumpUntil { handlers.claims.size == 2 }
+        pumpUntil { row("bad")?.errorCount == 1 }
         assertThat(failedOnce).isTrue()
+        assertThat(handlers.claims).hasSize(2)
 
+        advanceTimeBy(10_000)
+        pumpUntil { handlers.claims.size == 3 }
         goodGate.complete(Unit)
         pumpUntil { row("bad") == null && row("good") == null }
         assertThat(locks.acquired).containsExactlyElementsIn(locks.released)
+    }
+
+    @Test
+    fun `an escaping worker failure is counted and backed off instead of spinning`() = runTest {
+        settings.setWorkerCount(1)
+        seed("bad")
+        handlers.onTransfer = { throw IOException("persistent worker crash") }
+        val runtime = runtime(StandardTestDispatcher(testScheduler))
+        var idle = false
+
+        runtime.serviceStarted { idle = true }
+        pumpUntil { row("bad")?.errorCount == 1 }
+        pumpUntil { handlers.coordinator!!.activeLeaseCount() == 0 }
+        assertThat(handlers.claims).hasSize(1)
+
+        for (expected in 2..6) {
+            advanceTimeBy(10_000)
+            pumpUntil { handlers.claims.size >= expected }
+        }
+        pumpUntil { row("bad")?.status == DownloadStatus.FAILED.name && idle }
+        assertThat(handlers.claims).hasSize(6)
+        assertThat(row("bad")!!.errorCount).isEqualTo(6)
     }
 
     @Test
@@ -314,6 +364,127 @@ class ForegroundDownloadRuntimeTest {
     }
 
     @Test
+    fun `the root gate waits for a claim already inside the provider gate`() = runTest {
+        settings.setWorkerCount(1)
+        seed("first")
+        val providerGateEntered = CompletableDeferred<Unit>()
+        val releaseProviderGate = CompletableDeferred<Unit>()
+        val finishTransfer = CompletableDeferred<Unit>()
+        handlers.onTransfer = {
+            finishTransfer.await()
+            DownloadTransferResult.Completed("done", 1)
+        }
+        val runtime = runtime(
+            StandardTestDispatcher(testScheduler),
+            providerGate = ProviderRunGate {
+                providerGateEntered.complete(Unit)
+                releaseProviderGate.await()
+                ProviderStatus.OK
+            },
+        )
+
+        runtime.serviceStarted { }
+        pumpUntil { providerGateEntered.isCompleted }
+        val paused = async { runtime.pauseForRootChange() }
+        runCurrent()
+        assertThat(paused.isCompleted).isFalse()
+
+        releaseProviderGate.complete(Unit)
+        pumpUntil { handlers.claims.size == 1 }
+        assertThat(paused.isCompleted).isFalse()
+
+        finishTransfer.complete(Unit)
+        pumpUntil { paused.isCompleted }
+    }
+
+    @Test
+    fun `startup recovery finishes a pending root move before adopting files`() = runTest {
+        val target = File(temp.root, "target").apply { mkdirs() }
+        settings.publishRoot(OfflineRootSelection.Volume("test-root"), "test-root", 1)
+        val mediaKey = DownloadKeys.mediaKey(1, "song-1", null, null)
+        seed(mediaKey)
+        val plan = (OfflinePathRules.plan(OfflineMediaIdentity(1, "/music/song-1.flac")) as OfflinePathResult.Planned).plan
+        val finalFile = File(root, plan.relativePath).apply {
+            parentFile?.mkdirs()
+            writeBytes(ByteArray(64) { (it % 251).toByte() })
+        }
+        val part = File(root, plan.relativePartPath)
+        DownloadTransferJournal().write(
+            part,
+            DownloadTransferState(identityHash = plan.hash, totalBytes = 64, mediaKey = mediaKey),
+        )
+        settings.beginRootMove(OfflineRootSelection.Volume("target"), "target", 2)
+        val runtime = runtime(StandardTestDispatcher(testScheduler), additionalRoots = listOf(OfflineRoot("target", target)))
+        var idle = false
+
+        runtime.serviceStarted { idle = true }
+        pumpUntil { idle }
+
+        val moved = File(target, plan.relativePath)
+        assertThat(moved.length()).isEqualTo(64)
+        assertThat(finalFile.exists()).isFalse()
+        assertThat(db.offlineFileDao().selectBySourceKey(mediaKey)!!.offlinePath).isEqualTo(plan.relativePath)
+        assertThat(db.downloadDao().selectByMediaKey(mediaKey)).isNull()
+        assertThat(handlers.claims).isEmpty()
+    }
+
+    @Test
+    fun `startup recovery adopts a crash orphan before any claim`() = runTest {
+        val mediaKey = DownloadKeys.mediaKey(1, "song-1", null, null)
+        seed(mediaKey)
+        val plan = (OfflinePathRules.plan(OfflineMediaIdentity(1, "/music/song-1.flac")) as OfflinePathResult.Planned).plan
+        val finalFile = File(root, plan.relativePath).apply {
+            parentFile?.mkdirs()
+            writeBytes(ByteArray(64) { (it % 251).toByte() })
+        }
+        val part = File(root, plan.relativePartPath)
+        DownloadTransferJournal().write(
+            part,
+            DownloadTransferState(
+                identityHash = plan.hash,
+                totalBytes = finalFile.length(),
+                mediaKey = mediaKey,
+            ),
+        )
+        val runtime = runtime(StandardTestDispatcher(testScheduler))
+        var idle = false
+
+        runtime.serviceStarted { idle = true }
+        pumpUntil { idle }
+
+        assertThat(handlers.claims).isEmpty()
+        assertThat(db.downloadDao().selectByMediaKey(mediaKey)).isNull()
+        val offline = db.offlineFileDao().selectBySourceKey(mediaKey)
+        assertThat(offline).isNotNull()
+        assertThat(offline!!.offlinePath).isEqualTo(plan.relativePath)
+        assertThat(offline.sizeBytes).isEqualTo(64)
+        assertThat(finalFile.exists()).isTrue()
+        assertThat(DownloadTransferJournal().stateFile(part).exists()).isFalse()
+    }
+
+    @Test
+    fun `startup recovery sweeps an offline row whose file is gone before any claim`() = runTest {
+        File(root, OfflinePathRules.MEDIA_DIRECTORY_NAME).mkdirs()
+        db.offlineFileDao().upsert(
+            OfflineFileEntity(
+                providerId = 1,
+                mediaType = "SONG",
+                sourceKey = DownloadKeys.mediaKey(1, "gone", null, null),
+                offlinePath = "OfflineMedias/0/missing.flac",
+                sizeBytes = 64,
+            ),
+        )
+        val runtime = runtime(StandardTestDispatcher(testScheduler))
+        var idle = false
+
+        runtime.serviceStarted { idle = true }
+        pumpUntil { idle }
+
+        assertThat(db.offlineFileDao().count()).isEqualTo(0)
+        assertThat(handlers.claims).isEmpty()
+    }
+
+    @Test
     fun `a worker count increase admits another slot while running`() = runTest {
         settings.setWorkerCount(1)
         seed("one")
@@ -336,19 +507,76 @@ class ForegroundDownloadRuntimeTest {
         pumpUntil { row("one") == null && row("two") == null }
     }
 
-    private fun runtime(dispatcher: TestDispatcher): ForegroundDownloadRuntime =
-        ForegroundDownloadRuntime(
+    @Test
+    fun `an export session settles its row before app-private orphan adoption`() = runTest {
+        settings.setWorkerCount(1)
+        val key = DownloadKeys.mediaKey(1, "song-1", null, null)
+        seed(key, status = DownloadStatus.PENDING, exportTarget = "content://media/external_primary/downloads/9")
+        val request = ExportNaming.request(key, "Track", "flac")
+        val ref = exportStore.insertPending(request)!!
+        exportStore.clearPending(ref)
+        exportSessions.write(
+            ExportSession(key, ref.uri, request.displayName, request.mimeType, 4, ExportSessionPhase.PUBLISHED),
+        )
+        val plan = (OfflinePathRules.plan(OfflineMediaIdentity(1, "/music/track.flac")) as OfflinePathResult.Planned).plan
+        val orphan = File(root, plan.relativePath).apply {
+            parentFile?.mkdirs()
+            writeBytes(ByteArray(4))
+        }
+        DownloadTransferJournal().write(
+            File(root, plan.relativePartPath),
+            DownloadTransferState(identityHash = plan.hash, totalBytes = 4, mediaKey = key),
+        )
+
+        val runtime = runtime(StandardTestDispatcher(testScheduler))
+        runtime.serviceStarted { }
+
+        pumpUntil { row(key) == null && !orphan.exists() }
+        assertThat(db.offlineFileDao().count()).isEqualTo(0)
+        assertThat(exportStore.documents).hasSize(1)
+        assertThat(exportSessions.read(key)).isNull()
+    }
+
+    private fun runtime(
+        dispatcher: TestDispatcher,
+        providerGate: ProviderRunGate = ProviderRunGate { gateStatus },
+        additionalRoots: List<OfflineRoot> = emptyList(),
+    ): ForegroundDownloadRuntime {
+        val storage = OfflineStorage(
+            roots = OfflineRootSource { listOf(OfflineRoot("test-root", root)) + additionalRoots },
+            settings = settings,
+            usableSpace = { freeBytes },
+            writableProbe = { true },
+            ioDispatcher = dispatcher,
+        )
+        return ForegroundDownloadRuntime(
             repository = DownloadQueueRepository(db.downloadDao()),
             settings = settings,
-            storage = OfflineStorage(
-                roots = OfflineRootSource { listOf(OfflineRoot("test-root", root)) },
-                settings = settings,
-                usableSpace = { freeBytes },
-                writableProbe = { true },
+            storage = storage,
+            completionRecovery = DownloadCompletionRecovery(
+                db = db,
+                storage = storage,
+                publisher = OfflineMediaRepository(db),
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
+                ioDispatcher = dispatcher,
+            ),
+            exportPublisher = DownloadExportPublisher(
+                queues = DownloadQueueRepository(db.downloadDao()),
+                offline = OfflineMediaRepository(db),
+                storage = storage,
+                store = exportStore,
+                sessions = exportSessions,
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
+                ioDispatcher = dispatcher,
+            ),
+            offlineSweep = OfflineFileSweep(
+                db = db,
+                storage = storage,
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
                 ioDispatcher = dispatcher,
             ),
             network = network,
-            runGate = ProviderRunGate { gateStatus },
+            runGate = providerGate,
             locks = locks,
             notifications = notifications,
             connectivity = connectivity,
@@ -361,6 +589,7 @@ class ForegroundDownloadRuntimeTest {
             clock = { dispatcher.scheduler.currentTime },
             ioDispatcher = dispatcher,
         )
+    }
 
     private suspend fun seed(
         mediaKey: String,
@@ -369,6 +598,7 @@ class ForegroundDownloadRuntimeTest {
         errorCount: Int = 0,
         progressPercent: Int = 0,
         updatedAt: Long = 1_000,
+        exportTarget: String? = null,
     ): Long = db.downloadDao().upsert(
         DownloadItemEntity(
             mediaKey = mediaKey,
@@ -379,6 +609,7 @@ class ForegroundDownloadRuntimeTest {
             errorCount = errorCount,
             createdAt = 1_000,
             updatedAt = updatedAt,
+            exportTarget = exportTarget,
         ),
     )
 
@@ -479,4 +710,39 @@ class ForegroundDownloadRuntimeTest {
             }
         }
     }
+}
+
+private class RecordingExportStore : ExportDocumentStore {
+
+    class Document(var pending: Boolean, var bytes: ByteArray)
+
+    val documents = LinkedHashMap<String, Document>()
+    private var nextId = 1L
+
+    override suspend fun insertPending(request: ExportDocumentRequest): ExportDocumentRef {
+        val uri = "content://media/external/downloads/${nextId++}"
+        documents[uri] = Document(pending = true, bytes = ByteArray(0))
+        return ExportDocumentRef(uri)
+    }
+
+    override suspend fun writeTruncating(ref: ExportDocumentRef, source: File): ExportCopyOutcome {
+        val document = documents[ref.uri] ?: return ExportCopyOutcome.WriteFailed
+        document.bytes = source.readBytes()
+        return ExportCopyOutcome.Copied(document.bytes.size.toLong())
+    }
+
+    override suspend fun clearPending(ref: ExportDocumentRef): Boolean {
+        val document = documents[ref.uri] ?: return false
+        document.pending = false
+        return true
+    }
+
+    override suspend fun delete(ref: ExportDocumentRef): Boolean = documents.remove(ref.uri) != null
+
+    override suspend fun presence(ref: ExportDocumentRef): ExportDocumentPresence {
+        val document = documents[ref.uri] ?: return ExportDocumentPresence.MISSING
+        return if (document.pending) ExportDocumentPresence.PENDING else ExportDocumentPresence.VISIBLE
+    }
+
+    override suspend fun pendingMatches(mediaKey: String, title: String?): List<PendingExportDocument> = emptyList()
 }

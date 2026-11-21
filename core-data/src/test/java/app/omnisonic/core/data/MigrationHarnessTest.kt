@@ -18,13 +18,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Migration harness for the clean v1 baseline (FIX-15 / D-11 option B).
- *
- * There is no released schema and no migration step yet. The harness seeds a
- * database from the exported `1.json`, runs the real migration path (the
- * identity step today) and validates the result against the same export. When
- * a future v1 -> v2 step is added, [Migrations.ALL] carries it and this test
- * shape already exercises `1.json` -> new export.
+ * Migration harness for the v1 baseline and the first approved additive step
+ * (Phase 7 task 5a, D-43). The harness seeds a database from the exported
+ * `1.json`, runs the real `1 -> 2` migration path, validates the result against
+ * the new `2.json` export, and proves the offline read-model backfill preserves
+ * every v1 path and source id.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -43,10 +41,10 @@ class MigrationHarnessTest {
     }
 
     @Test
-    fun `the current baseline is one schema with no shipped migration step`() {
-        assertThat(OmnisonicDatabase.SCHEMA_VERSION).isEqualTo(1)
-        assertThat(Migrations.ALL).isEmpty()
-        assertThat(OmnisonicDatabase.migrationsForSteps()).isEmpty()
+    fun `the current baseline is v2 with exactly one additive migration step`() {
+        assertThat(OmnisonicDatabase.SCHEMA_VERSION).isEqualTo(2)
+        assertThat(Migrations.ALL.map { it.startVersion to it.endVersion }).containsExactly(1 to 2)
+        assertThat(OmnisonicDatabase.migrationsForSteps()).hasLength(1)
     }
 
     @Test
@@ -58,10 +56,37 @@ class MigrationHarnessTest {
             seedV1(v1)
         }
 
-        helper.runMigrationsAndValidate(name, 1, true, *Migrations.ALL.toTypedArray()).use { db ->
+        helper.runMigrationsAndValidate(name, 2, true, *Migrations.ALL.toTypedArray()).use { db ->
             assertRenamedColumns(db)
             assertPlayEventsDailyView(db)
             assertQueueState(db)
+            assertOfflineReadModelUpgrade(db)
+        }
+    }
+
+    @Test
+    fun `v2 baseline creates through the harness and accepts the new read model`() {
+        val name = "migration-harness-v2.db"
+        appContext.deleteDatabase(name)
+
+        helper.createDatabase(name, 2).use { db ->
+            db.execSQL("INSERT INTO providers (id, name, api, isEnabled, displayOrder, useSecondary, username, createdAt, updatedAt) VALUES (42, 'fixture', 'subsonic', 1, 0, 0, 'alice', 1000, 2000)")
+            db.execSQL(
+                """
+                INSERT INTO offline_media (
+                    id, providerId, mediaType, sourceKey, offlinePath, sizeBytes, title,
+                    downloadedAt, tempCache, externalId
+                ) VALUES (21, 42, 'SONG', 'stream:42:song-1:auto:auto', 'OfflineMedias/a/hash.flac', 4096, 'Track One', 1000, 1, 'song-1')
+                """.trimIndent(),
+            )
+        }
+
+        helper.runMigrationsAndValidate(name, 2, true, *Migrations.ALL.toTypedArray()).use { db ->
+            db.query("SELECT tempCache, externalId FROM offline_media WHERE id = 21").use { cursor ->
+                assertThat(cursor.moveToFirst()).isTrue()
+                assertThat(cursor.getInt(0)).isEqualTo(1)
+                assertThat(cursor.getString(1)).isEqualTo("song-1")
+            }
         }
     }
 
@@ -84,6 +109,15 @@ class MigrationHarnessTest {
             assertThat(song.windowStartMs).isEqualTo(1_000)
             assertThat(song.windowEndMs).isEqualTo(2_000)
             assertThat(song.lastSeenSyncId).isEqualTo(3)
+            val offline = runBlocking { db.offlineFileDao().selectBySourceKey("stream:42:song-1:auto:auto") }
+            assertThat(offline).isNotNull()
+            assertThat(offline!!.offlinePath).isEqualTo("OfflineMedias/a/hash.flac")
+            assertThat(offline.tempCache).isFalse()
+            assertThat(offline.externalId).isEqualTo("song-1")
+            val queue = runBlocking { db.downloadDao().selectById(31) }
+            assertThat(queue).isNotNull()
+            assertThat(queue!!.status).isEqualTo("PENDING")
+            assertThat(queue.tempCache).isTrue()
         } finally {
             db.close()
         }
@@ -215,6 +249,84 @@ class MigrationHarnessTest {
             ) VALUES (19, 42, 'SONG', 'song-1', 'resume_point', '{"resumeMs":42000}', 0, 0, NULL, 1000)
             """.trimIndent(),
         )
+        db.execSQL(
+            """
+            INSERT INTO offline_media (
+                id, providerId, mediaType, sourceKey, offlinePath, sizeBytes, title,
+                imagePath, bitrateKbps, autoRule, downloadedAt, syncedAt
+            ) VALUES (
+                21, 42, 'SONG', 'stream:42:song-1:auto:auto', 'OfflineMedias/a/hash.flac',
+                4096, 'Track One', NULL, NULL, NULL, 1000, NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO offline_media (
+                id, providerId, mediaType, sourceKey, offlinePath, sizeBytes, downloadedAt
+            ) VALUES (
+                22, 42, 'SONG', 'stream:42:disc:one:128:mp3', 'OfflineMedias/b/other.mp3',
+                2048, 2000
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO offline_media (
+                id, providerId, mediaType, sourceKey, offlinePath, sizeBytes, downloadedAt
+            ) VALUES (
+                23, 42, 'SONG', 'legacy-key', 'OfflineMedias/c/legacy.bin', 512, 3000
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO download_queue (
+                id, mediaKey, providerId, status, progressPercent, errorCount,
+                tempCache, createdAt, updatedAt
+            ) VALUES (31, 'stream:42:song-1:auto:auto', 42, 'PENDING', 40, 2, 1, 1000, 2000)
+            """.trimIndent(),
+        )
+    }
+
+    private fun assertOfflineReadModelUpgrade(db: SupportSQLiteDatabase) {
+        db.query("SELECT sourceKey, offlinePath, sizeBytes, title, downloadedAt, tempCache, externalId FROM offline_media WHERE id = 21").use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getString(0)).isEqualTo("stream:42:song-1:auto:auto")
+            assertThat(cursor.getString(1)).isEqualTo("OfflineMedias/a/hash.flac")
+            assertThat(cursor.getLong(2)).isEqualTo(4_096)
+            assertThat(cursor.getString(3)).isEqualTo("Track One")
+            assertThat(cursor.getLong(4)).isEqualTo(1_000)
+            assertThat(cursor.getInt(5)).isEqualTo(0)
+            assertThat(cursor.getString(6)).isEqualTo("song-1")
+        }
+        db.query(
+            "SELECT sourceKey, offlinePath, sizeBytes, externalId, tempCache FROM offline_media WHERE id = 22",
+        ).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getString(0)).isEqualTo("stream:42:disc:one:128:mp3")
+            assertThat(cursor.getString(1)).isEqualTo("OfflineMedias/b/other.mp3")
+            assertThat(cursor.getLong(2)).isEqualTo(2_048)
+            assertThat(cursor.getString(3)).isEqualTo("disc:one")
+            assertThat(cursor.getInt(4)).isEqualTo(0)
+        }
+        db.query(
+            "SELECT sourceKey, offlinePath, sizeBytes, externalId, tempCache FROM offline_media WHERE id = 23",
+        ).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getString(0)).isEqualTo("legacy-key")
+            assertThat(cursor.getString(1)).isEqualTo("OfflineMedias/c/legacy.bin")
+            assertThat(cursor.getLong(2)).isEqualTo(512)
+            assertThat(cursor.isNull(3)).isTrue()
+            assertThat(cursor.getInt(4)).isEqualTo(0)
+        }
+        db.query("SELECT status, progressPercent, errorCount, tempCache FROM download_queue WHERE id = 31").use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getString(0)).isEqualTo("PENDING")
+            assertThat(cursor.getInt(1)).isEqualTo(40)
+            assertThat(cursor.getInt(2)).isEqualTo(2)
+            assertThat(cursor.getInt(3)).isEqualTo(1)
+        }
     }
 
     private fun assertRenamedColumns(db: SupportSQLiteDatabase) {

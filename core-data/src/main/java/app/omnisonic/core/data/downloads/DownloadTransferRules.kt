@@ -18,6 +18,8 @@ enum class DownloadTransferFailure {
     SHORT_BODY,
     EMPTY_BODY,
     WRITE_FAILED,
+    EXPORT_FAILED,
+    WORKER_FAILED,
 }
 
 fun DownloadTransferFailure.description(): String = when (this) {
@@ -31,6 +33,8 @@ fun DownloadTransferFailure.description(): String = when (this) {
     DownloadTransferFailure.SHORT_BODY -> "transfer failed: short body"
     DownloadTransferFailure.EMPTY_BODY -> "transfer failed: empty body"
     DownloadTransferFailure.WRITE_FAILED -> "transfer failed: write"
+    DownloadTransferFailure.EXPORT_FAILED -> "transfer failed: export"
+    DownloadTransferFailure.WORKER_FAILED -> "transfer failed: worker"
 }
 
 /** Uncounted deferral: the row returns to the gate state without an error increment. */
@@ -50,6 +54,7 @@ enum class DownloadTransferPark {
     QUEUE_KEY_INVALID,
     PATH_UNPLANNABLE,
     FINAL_PATH_CONFLICT,
+    EXPORT_UNAVAILABLE,
 }
 
 fun DownloadTransferPark.description(): String = when (this) {
@@ -59,6 +64,7 @@ fun DownloadTransferPark.description(): String = when (this) {
     DownloadTransferPark.QUEUE_KEY_INVALID -> "download parked: invalid queue key"
     DownloadTransferPark.PATH_UNPLANNABLE -> "download parked: path unavailable"
     DownloadTransferPark.FINAL_PATH_CONFLICT -> "download parked: file conflict"
+    DownloadTransferPark.EXPORT_UNAVAILABLE -> "download parked: export unavailable"
 }
 
 /** Parsed `Content-Range: bytes <start>-<end>/<total|*>` header. */

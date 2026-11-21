@@ -1,6 +1,7 @@
 package app.omnisonic.core.data.downloads
 
 import app.omnisonic.core.data.db.DownloadKeys
+import app.omnisonic.core.data.db.entity.DownloadItemEntity
 import app.omnisonic.core.data.db.entity.DownloadStatus
 import app.omnisonic.core.model.log.OmnisonicLogger
 import java.io.File
@@ -49,6 +50,9 @@ sealed interface DownloadTransferResult {
 
     /** Another command (pause/cancel/failure/newer lease) already settled the row. */
     data object LeaseLost : DownloadTransferResult
+
+    /** The staged bytes were published as a public document and the queue row is settled. */
+    data class Exported(val documentUri: String, val sizeBytes: Long) : DownloadTransferResult
 }
 
 /**
@@ -60,14 +64,19 @@ sealed interface DownloadTransferResult {
  * throttled; pause/cancel cancel the call and settle through the task-1
  * conditional writes without counting an error.
  *
- * The engine owns bytes only. Publishing `offline_media`, the foreground
- * service and triggers belong to task 4/5; success here deletes the queue row
- * after an atomic finalize, which task 5 will replace with its publication
- * transaction.
+ * The engine owns bytes and completion publication. After the complete-size
+ * check and non-replacing rename it publishes `offline_media` and deletes the
+ * queue row in one transaction (Phase 7 task 5a); the sidecar's verification
+ * state survives the rename until that commit so a crash leaves an adoptable
+ * orphan, never an unverified published file. An export row never reaches the
+ * app-private final path: its complete `.part` (or an already-published offline
+ * file) is handed to [DownloadExportPublisher], which publishes a public
+ * document and only then settles the row (Phase 7 task 6).
  */
 class DownloadTransferEngine(
     private val repository: DownloadQueueRepository,
     private val coordinator: DownloadWorkerCoordinator,
+    private val publisher: OfflineMediaRepository,
     private val storage: OfflineStorage,
     private val media: DownloadMediaSource,
     private val auth: DownloadAuthReporting,
@@ -75,6 +84,7 @@ class DownloadTransferEngine(
     private val journal: DownloadTransferJournal = DownloadTransferJournal(),
     private val clock: () -> Long = System::currentTimeMillis,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val exporter: DownloadExportPublisher? = null,
 ) {
 
     private val finalizeGuard = Mutex()
@@ -92,6 +102,21 @@ class DownloadTransferEngine(
         val prepared = prepareStorage(0L)
         if (prepared is OfflineStorageState.Blocked) {
             return@withContext settleBlock(lease, prepared.toTransferBlock())
+        }
+
+        if (item.exportTarget != null) {
+            val exportPublisher = exporter
+                ?: return@withContext settlePark(lease, DownloadTransferPark.EXPORT_UNAVAILABLE)
+            exportPublisher.localExportSource(item)?.let { local ->
+                return@withContext settleExport(
+                    lease = lease,
+                    item = item,
+                    extension = local.extension,
+                    staged = null,
+                    source = local.file,
+                    publisher = exportPublisher,
+                )
+            }
         }
 
         val endpoints = when (
@@ -141,6 +166,10 @@ class DownloadTransferEngine(
         val finalFile = resolveStoredPath(plan.relativePath)
             ?: return@withContext settleBlock(lease, DownloadTransferBlock.STORAGE_UNAVAILABLE)
 
+        if (finalFile.isFile && item.exportTarget == null) {
+            resolveExistingFinal(lease, item, plan, partFile, finalFile)?.let { return@withContext it }
+        }
+
         var state = journal.read(partFile)
         if (state != null && state.identityHash != plan.hash) {
             discard(partFile)
@@ -185,7 +214,7 @@ class DownloadTransferEngine(
 
         val completeTotal = state?.totalBytes
         if (offset > 0L && completeTotal != null && offset == completeTotal) {
-            return@withContext finalize(lease, plan, partFile, finalFile, state)
+            return@withContext finalize(lease, item, plan, partFile, finalFile, state)
         }
 
         var endpointIndex = 0
@@ -202,6 +231,7 @@ class DownloadTransferEngine(
                     offset = offset,
                     state = state,
                     identityHash = plan.hash,
+                    mediaKey = item.mediaKey,
                     lease = lease,
                     interruption = interruption,
                     throttle = throttle,
@@ -211,7 +241,7 @@ class DownloadTransferEngine(
                     interruption.completedOrNull()?.let { signal ->
                         return@withContext settleInterruption(lease, signal, partFile)
                     }
-                    return@withContext finalize(lease, plan, partFile, finalFile, attempt.state)
+                    return@withContext finalize(lease, item, plan, partFile, finalFile, attempt.state)
                 }
                 is AttemptResult.RestartRequired -> {
                     if (restarts <= 0) {
@@ -248,6 +278,7 @@ class DownloadTransferEngine(
         offset: Long,
         state: DownloadTransferState?,
         identityHash: String,
+        mediaKey: String,
         lease: DownloadLease,
         interruption: CompletableDeferred<DownloadInterruption?>,
         throttle: DownloadProgressThrottle,
@@ -265,6 +296,7 @@ class DownloadTransferEngine(
                 offset = offset,
                 state = state,
                 identityHash = identityHash,
+                mediaKey = mediaKey,
                 lease = lease,
                 throttle = throttle,
                 cancellation = cancellation,
@@ -281,6 +313,7 @@ class DownloadTransferEngine(
         offset: Long,
         state: DownloadTransferState?,
         identityHash: String,
+        mediaKey: String,
         lease: DownloadLease,
         throttle: DownloadProgressThrottle,
         cancellation: TransferCancellation,
@@ -387,13 +420,14 @@ class DownloadTransferEngine(
             val strongEtag = DownloadTransferRules.strongEtag(handled.header(ETAG))
             val lastModified = DownloadTransferRules.headerDate(handled.header(LAST_MODIFIED))
             val nextState = if (code == HTTP_OK) {
-                DownloadTransferState(identityHash, strongEtag, lastModified, total)
+                DownloadTransferState(identityHash, strongEtag, lastModified, total, mediaKey)
             } else {
                 DownloadTransferState(
                     identityHash = identityHash,
                     strongEtag = strongEtag ?: state?.strongEtag,
                     lastModified = lastModified ?: state?.lastModified,
                     totalBytes = total ?: knownTotal,
+                    mediaKey = mediaKey,
                 )
             }
             var written = 0L
@@ -504,11 +538,24 @@ class DownloadTransferEngine(
 
     private suspend fun finalize(
         lease: DownloadLease,
+        item: DownloadItemEntity,
         plan: OfflinePathPlan,
         partFile: File,
         finalFile: File,
         state: DownloadTransferState?,
     ): DownloadTransferResult {
+        if (item.exportTarget != null) {
+            val exportPublisher = exporter
+                ?: return settlePark(lease, DownloadTransferPark.EXPORT_UNAVAILABLE)
+            return settleExport(
+                lease = lease,
+                item = item,
+                extension = plan.extension,
+                staged = partFile,
+                source = partFile,
+                publisher = exportPublisher,
+            )
+        }
         val mutex = finalizeGuard.withLock { finalizeLocks.getOrPut(plan.relativePath) { Mutex() } }
         return mutex.withLock {
             if (!partFile.isFile) return@withLock DownloadTransferResult.LeaseLost
@@ -522,7 +569,7 @@ class DownloadTransferEngine(
                 return@withLock settleRetry(lease, DownloadTransferFailure.SHORT_BODY)
             }
             if (finalFile.exists()) {
-                return@withLock settlePark(lease, DownloadTransferPark.FINAL_PATH_CONFLICT)
+                resolveExistingFinal(lease, item, plan, partFile, finalFile)?.let { return@withLock it }
             }
             val moved = try {
                 moveWithoutReplace(partFile, finalFile)
@@ -539,10 +586,104 @@ class DownloadTransferEngine(
                     settleRetry(lease, DownloadTransferFailure.WRITE_FAILED)
                 }
             }
-            journal.delete(partFile)
-            if (!coordinator.complete(lease)) return@withLock settleLeaseLost(lease)
-            logger.info(TAG, "download row ${lease.rowId} finalized ${plan.relativePath}")
-            DownloadTransferResult.Completed(plan.relativePath, size)
+            val settlement = coordinator.completeWith(lease) { _ ->
+                publisher.publishAndSettleActive(item, offlinePublicationRow(item, plan.relativePath, size, clock()))
+            }
+            when (settlement) {
+                CompletionSettlement.Applied -> {
+                    journal.delete(partFile)
+                    logger.info(TAG, "download row ${lease.rowId} finalized ${plan.relativePath}")
+                    DownloadTransferResult.Completed(plan.relativePath, size)
+                }
+                CompletionSettlement.Failed -> settlePark(lease, DownloadTransferPark.FINAL_PATH_CONFLICT)
+                else -> settleLeaseLost(lease)
+            }
+        }
+    }
+
+    /**
+     * A final path that already exists is never blindly overwritten or parked:
+     * an already-published file settles the row idempotently, a crash orphan
+     * with a matching sidecar (variant hash plus persisted expected length) is
+     * adopted, and anything unverifiable is quarantined/deleted so the transfer
+     * retries safely. Null means the path is now free and the part continues.
+     */
+    private suspend fun resolveExistingFinal(
+        lease: DownloadLease,
+        item: DownloadItemEntity,
+        plan: OfflinePathPlan,
+        partFile: File,
+        finalFile: File,
+    ): DownloadTransferResult? {
+        val size = finalFile.length()
+        val published = publisher.selectByOfflinePath(plan.relativePath)
+        if (published != null) {
+            if (published.sourceKey != item.mediaKey) {
+                return settlePark(lease, DownloadTransferPark.FINAL_PATH_CONFLICT)
+            }
+            return if (coordinator.complete(lease)) {
+                discard(partFile)
+                logger.info(TAG, "download row ${lease.rowId} settled published ${plan.relativePath}")
+                DownloadTransferResult.Completed(plan.relativePath, size)
+            } else {
+                settleLeaseLost(lease)
+            }
+        }
+        val state = journal.read(partFile)
+        val verified = state != null &&
+            state.identityHash == plan.hash &&
+            state.totalBytes == size &&
+            state.mediaKey == item.mediaKey &&
+            size > 0L
+        if (!verified) {
+            finalFile.delete()
+            return null
+        }
+        val settlement = coordinator.completeWith(lease) { _ ->
+            publisher.publishAndSettleActive(item, offlinePublicationRow(item, plan.relativePath, size, clock()))
+        }
+        return when (settlement) {
+            CompletionSettlement.Applied -> {
+                discard(partFile)
+                logger.info(TAG, "download row ${lease.rowId} adopted finalized ${plan.relativePath}")
+                DownloadTransferResult.Completed(plan.relativePath, size)
+            }
+            CompletionSettlement.Failed -> settlePark(lease, DownloadTransferPark.FINAL_PATH_CONFLICT)
+            else -> settleLeaseLost(lease)
+        }
+    }
+
+    private suspend fun settleExport(
+        lease: DownloadLease,
+        item: DownloadItemEntity,
+        extension: String,
+        staged: File?,
+        source: File,
+        publisher: DownloadExportPublisher,
+    ): DownloadTransferResult {
+        val outcome = try {
+            publisher.publish(
+                coordinator = coordinator,
+                lease = lease,
+                item = item,
+                extension = extension,
+                staged = staged,
+                source = source,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            DownloadExportOutcome.Retry
+        }
+        return when (outcome) {
+            is DownloadExportOutcome.Published ->
+                DownloadTransferResult.Exported(outcome.documentUri, outcome.sizeBytes)
+            DownloadExportOutcome.Retry -> settleRetry(lease, DownloadTransferFailure.EXPORT_FAILED)
+            DownloadExportOutcome.Unavailable ->
+                settleBlock(lease, DownloadTransferBlock.STORAGE_UNAVAILABLE)
+            DownloadExportOutcome.RowSettledElsewhere,
+            DownloadExportOutcome.LeaseLost,
+            -> settleLeaseLost(lease)
         }
     }
 

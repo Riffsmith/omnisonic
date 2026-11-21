@@ -179,7 +179,7 @@ class DownloadEnqueuerTest : DatabaseTestBase() {
                 title = "replacement",
                 imagePath = "/other",
                 tempCache = false,
-                exportTarget = null,
+                exportTarget = "MEDIASTORE_DOWNLOADS",
                 autoRuleId = null,
             )
 

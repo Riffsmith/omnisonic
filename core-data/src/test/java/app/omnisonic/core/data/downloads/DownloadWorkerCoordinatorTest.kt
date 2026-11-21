@@ -111,6 +111,42 @@ class DownloadWorkerCoordinatorTest : DatabaseTestBase() {
     }
 
     @Test
+    fun `completeWith applies a transactional settlement and unregisters the lease`() = runDbTest {
+        val seeded = seed(providerId = 1, mediaKey = "k1")
+        val coordinator = coordinator()
+        val lease = coordinator.claimNext(ProfileScope.Unrestricted)!!
+        val repository = OfflineMediaRepository(db)
+
+        val settlement = coordinator.completeWith(lease) { _ ->
+            repository.publishAndSettleActive(seeded, offlinePublicationRow(seeded, "OfflineMedias/a/hash.flac", 128, now))
+        }
+
+        assertThat(settlement).isEqualTo(CompletionSettlement.Applied)
+        assertThat(row(seeded.id)).isNull()
+        assertThat(offlineFileDao.selectBySourceKey(seeded.mediaKey)).isNotNull()
+        assertThat(coordinator.activeLeaseCount()).isEqualTo(0)
+        assertThat(coordinator.completeWith(lease) { PublishSettle.APPLIED }).isEqualTo(CompletionSettlement.LeaseStale)
+    }
+
+    @Test
+    fun `completeWith keeps the lease when the row was already settled or publication failed`() = runDbTest {
+        val seeded = seed(providerId = 1, mediaKey = "k1")
+        val coordinator = coordinator()
+        val lease = coordinator.claimNext(ProfileScope.Unrestricted)!!
+        coordinator.pauseOne(seeded.id)
+
+        assertThat(coordinator.completeWith(lease) { PublishSettle.ROW_NOT_ACTIVE })
+            .isEqualTo(CompletionSettlement.RowAlreadySettled)
+        assertThat(coordinator.activeLeaseCount()).isEqualTo(1)
+        assertThat(row(seeded.id)!!.status).isEqualTo(DownloadStatus.USER_PAUSED.name)
+
+        assertThat(coordinator.completeWith(lease) { PublishSettle.FAILED }).isEqualTo(CompletionSettlement.Failed)
+        assertThat(coordinator.activeLeaseCount()).isEqualTo(1)
+        coordinator.release(lease)
+        assertThat(coordinator.activeLeaseCount()).isEqualTo(0)
+    }
+
+    @Test
     fun `the worker cap bounds claims and invalid counts sanitize to one`() = runDbTest {
         repeat(3) { seed(providerId = 1, mediaKey = "k$it", createdAt = 1_000L + it) }
         val coordinator = coordinator(workerCount = 2)

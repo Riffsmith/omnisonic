@@ -13,10 +13,11 @@ Confidence:
 - [VERIFIED] `CoverImageFetcher` resolves the provider URL at fetch time and pins the delegate network fetcher's `diskCacheKey` to `CoverImageKey.cacheKey`, so two salted URLs for one cover produce one memory/disk entry (`CoverImageLoaderTest.salted urls for one cover share a single cache entry`).
 - [VERIFIED] `ResolvedStream.expiresAtMs == null` never expires; a non-null value becomes stale 60 seconds before the deadline.
 - [VERIFIED] `StreamTransport` selects the upstream path: provider HTTP, direct URI, or a registered custom `DataSource.Factory`; the cache key is unchanged.
+- [VERIFIED] An offline `DIRECT_URI` stream carries the downloaded row's `sourceKey` as `cacheKey` but is routed through the direct factory, so it neither reads nor writes the streaming `SimpleCache` (`offline-resolution.md`).
 
 Date: 2026-11-07
 
-Links: `../protocol/subsonic-auth.md`
+Links: `../protocol/subsonic-auth.md`, `offline-resolution.md` (D-45)
 
 ---
 

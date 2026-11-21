@@ -2,12 +2,18 @@ package app.omnisonic.feature.downloads.service
 
 import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.downloads.DownloadActiveProgress
+import app.omnisonic.core.data.downloads.DownloadCompletionRecovery
+import app.omnisonic.core.data.downloads.DownloadExportPublisher
 import app.omnisonic.core.data.downloads.DownloadLease
+import app.omnisonic.core.data.downloads.DownloadQueueCancellation
 import app.omnisonic.core.data.downloads.DownloadQueueRepository
 import app.omnisonic.core.data.downloads.DownloadQueueSettingsStore
+import app.omnisonic.core.data.downloads.DownloadTransferFailure
 import app.omnisonic.core.data.downloads.DownloadTransferResult
+import app.omnisonic.core.data.downloads.description
 import app.omnisonic.core.data.downloads.DownloadWorkStart
 import app.omnisonic.core.data.downloads.DownloadWorkerCoordinator
+import app.omnisonic.core.data.downloads.OfflineFileSweep
 import app.omnisonic.core.data.downloads.OfflineRootWorkGate
 import app.omnisonic.core.data.downloads.OfflineStorage
 import app.omnisonic.core.data.network.NetworkMonitor
@@ -45,6 +51,9 @@ class ForegroundDownloadRuntime(
     private val repository: DownloadQueueRepository,
     private val settings: DownloadQueueSettingsStore,
     private val storage: OfflineStorage,
+    private val completionRecovery: DownloadCompletionRecovery,
+    private val exportPublisher: DownloadExportPublisher,
+    private val offlineSweep: OfflineFileSweep,
     private val network: NetworkMonitor,
     private val runGate: ProviderRunGate,
     private val locks: DownloadTransferLocks,
@@ -55,7 +64,7 @@ class ForegroundDownloadRuntime(
     private val logger: OmnisonicLogger,
     private val clock: () -> Long = System::currentTimeMillis,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : DownloadServiceRuntime, OfflineRootWorkGate {
+) : DownloadServiceRuntime, OfflineRootWorkGate, DownloadQueueCancellation {
 
     private class Session(val job: Job)
 
@@ -66,6 +75,7 @@ class ForegroundDownloadRuntime(
     /** External triggers only: worker-settle wakes never clear a blocked gate. */
     private val externalTriggers = MutableStateFlow(0L)
     private val recoveryMutex = Mutex()
+    private val claimAdmissionMutex = Mutex()
     private val coordinatorMutex = Mutex()
     private val claimsAllowed = AtomicBoolean(true)
 
@@ -127,6 +137,9 @@ class ForegroundDownloadRuntime(
         ensureSession()
     }
 
+    /** Manual offline delete cancels its equivalent row through the one process-wide coordinator. */
+    override suspend fun cancel(rowId: Long): Boolean = coordinator().cancel(rowId)
+
     override fun serviceStopping() {
         onIdle = null
         cancelSession()
@@ -139,8 +152,9 @@ class ForegroundDownloadRuntime(
     }
 
     override suspend fun pauseForRootChange() {
-        claimsAllowed.set(false)
+        claimAdmissionMutex.withLock { claimsAllowed.set(false) }
         wake.trySend(Unit)
+        recoveryMutex.withLock { }
         coordinatorRef?.activeLeases?.first { it == 0 }
     }
 
@@ -191,12 +205,23 @@ class ForegroundDownloadRuntime(
         ).also { coordinatorRef = it }
     }
 
-    private suspend fun ensureRecovered(coordinator: DownloadWorkerCoordinator) =
+    private suspend fun ensureRecovered(coordinator: DownloadWorkerCoordinator) {
+        if (!recovered) storage.recoverInterruptedRootChange(this)
         recoveryMutex.withLock {
             if (recovered) return@withLock
+            // First recovery precedes every claim in this runtime, so a live lease
+            // can only be a cancelled session still draining. Wait for it rather
+            // than skip recovery and mark the process recovered.
+            coordinator.activeLeases.first { it == 0 }
             coordinator.recoverOnStartup()
+            // Export sessions settle/clean before app-private orphan adoption,
+            // so an export row can never be published as offline media.
+            exportPublisher.recoverSessions()
+            completionRecovery.recoverOrphanedFinalFiles()
+            offlineSweep.sweep()
             recovered = true
         }
+    }
 
     private suspend fun runSession() {
         val coordinator = coordinator()
@@ -269,7 +294,10 @@ class ForegroundDownloadRuntime(
 
             var claimed = false
             while (coordinator.activeLeaseCount() < coordinator.workerCount) {
-                val lease = coordinator.claimNext(ProfileScope.Unrestricted) ?: break
+                val lease = claimAdmissionMutex.withLock {
+                    if (!claimsAllowed.get()) return@withLock null
+                    coordinator.claimNext(ProfileScope.Unrestricted)
+                } ?: break
                 claimed = true
                 launchWorker(lease, coordinator, handler)
             }
@@ -302,7 +330,8 @@ class ForegroundDownloadRuntime(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                logger.warn(TAG, "download worker failed; releasing its claim uncounted", failure)
+                logger.warn(TAG, "download worker failed; applying its retry backoff", failure)
+                coordinator.recordFailure(lease, DownloadTransferFailure.WORKER_FAILED.description())
             } finally {
                 runCatching { lock?.release() }
                 coordinator.release(lease)

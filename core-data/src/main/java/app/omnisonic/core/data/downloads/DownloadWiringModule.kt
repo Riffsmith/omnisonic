@@ -4,13 +4,17 @@ import android.content.Context
 import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.network.ProviderStatusTracker
 import app.omnisonic.core.data.providers.ProviderClientRegistry
+import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.provider.api.ProviderRegistry
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.io.File
 import javax.inject.Singleton
+
+private const val EXPORT_SESSION_DIRECTORY = "ExportSessions"
 
 /**
  * The global download settings and root journal must survive process death,
@@ -58,4 +62,73 @@ object DownloadWiringModule {
     @Singleton
     fun downloadQueueRepository(database: OmnisonicDatabase): DownloadQueueRepository =
         DownloadQueueRepository(database.downloadDao())
+
+    @Provides
+    @Singleton
+    fun offlineMediaRepository(database: OmnisonicDatabase): OfflineMediaRepository =
+        OfflineMediaRepository(database)
+
+    @Provides
+    @Singleton
+    fun offlinePlaybackSource(
+        database: OmnisonicDatabase,
+        storage: OfflineStorage,
+    ): OfflinePlaybackSource = OfflinePlaybackSource(database.offlineFileDao(), storage)
+
+    @Provides
+    @Singleton
+    fun downloadCompletionRecovery(
+        database: OmnisonicDatabase,
+        storage: OfflineStorage,
+        publisher: OfflineMediaRepository,
+        logger: OmnisonicLogger,
+    ): DownloadCompletionRecovery = DownloadCompletionRecovery(database, storage, publisher, logger)
+
+    @Provides
+    @Singleton
+    fun offlineFileSweep(
+        database: OmnisonicDatabase,
+        storage: OfflineStorage,
+        logger: OmnisonicLogger,
+    ): OfflineFileSweep = OfflineFileSweep(database, storage, logger)
+
+    /** The public-document adapter; the only type that touches `MediaStore.Downloads`. */
+    @Provides
+    @Singleton
+    fun exportDocumentStore(
+        @ApplicationContext context: Context,
+        logger: OmnisonicLogger,
+    ): ExportDocumentStore = MediaStoreExportDocumentStore(context.contentResolver, logger)
+
+    /** Export state lives in app-internal storage so a root change never moves the ledger. */
+    @Provides
+    @Singleton
+    fun exportSessionJournal(@ApplicationContext context: Context): ExportSessionJournal =
+        ExportSessionJournal(File(context.filesDir, EXPORT_SESSION_DIRECTORY))
+
+    @Provides
+    @Singleton
+    fun downloadExportPublisher(
+        database: OmnisonicDatabase,
+        storage: OfflineStorage,
+        store: ExportDocumentStore,
+        sessions: ExportSessionJournal,
+        logger: OmnisonicLogger,
+    ): DownloadExportPublisher = DownloadExportPublisher(
+        queues = DownloadQueueRepository(database.downloadDao()),
+        offline = OfflineMediaRepository(database),
+        storage = storage,
+        store = store,
+        sessions = sessions,
+        logger = logger,
+    )
+
+    @Provides
+    @Singleton
+    fun offlineMediaDeletion(
+        database: OmnisonicDatabase,
+        storage: OfflineStorage,
+        cancellation: DownloadQueueCancellation,
+        logger: OmnisonicLogger,
+    ): OfflineMediaDeletion = OfflineMediaDeletion(database, storage, logger, cancellation)
 }

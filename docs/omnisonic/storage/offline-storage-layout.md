@@ -8,7 +8,7 @@ Confidence: settings bounds/defaults, layout determinism, extension rules, conta
 
 Date: 2026-11-20
 
-Links: `storage/download-queue-lifecycle.md`, `storage/download-transfer.md`, `storage/schema-v2.md`, `providers/provider-connections.md`, `.agents/plans/phase-7-tasks.md`, D-40 in `../decisions.md`.
+Links: `storage/download-queue-lifecycle.md`, `storage/download-transfer.md`, `storage/download-completion.md`, `storage/offline-file-integrity.md`, `storage/schema-v2.md`, `providers/provider-connections.md`, `.agents/plans/phase-7-tasks.md`, D-40 in `../decisions.md`.
 
 ---
 
@@ -55,7 +55,7 @@ OfflineMedias/<first hash char>/<sha-256 hex>.part
 
 - The hash covers the provider id, the NFC-normalized provider path and the explicit bitrate/format variant, separated by NULs. The same path on two providers, two bitrates or two formats therefore cannot share a file. [VERIFIED]
 - The extension is chosen by the explicit transcode format first (with `mpeg→mp3`, `mp4/alac→m4a`, `vorbis→ogg`, `pcm/wave→wav` aliases); passthrough or unknown formats fall back to the source path extension, then to `bin`. Only a known audio extension survives; query/fragment text and non-audio suffixes do not. [VERIFIED]
-- The `.part` deliberately has no extension: the final extension may only be known from the response in task 3, while resumable bytes must keep one stable name. It is the deterministic sibling of the final file and is variant-qualified through the same hash. [VERIFIED]
+- The `.part` deliberately has no extension: the final extension may only be known from the response in task 3, while resumable bytes must keep one stable name. It is the deterministic sibling of the final file and is variant-qualified through the same hash. Its `<hash>.part.state` verification sidecar survives the final rename until publication commits (task 5a, `storage/download-completion.md`). [VERIFIED]
 - `.nomedia` is created inside `OfflineMedias/`, hiding the whole managed tree from media scanning. [VERIFIED]
 - Unicode paths are NFC-normalized, so canonically equivalent spellings share one file; very long provider paths still produce short file names; colon-containing ids are hashed, never used literally. [VERIFIED]
 - A hash collision is refused rather than overwritten: callers pass the assigned `relativePath → identityKey` map, and a different identity at an assigned path returns `Collision`. [VERIFIED]
@@ -95,7 +95,7 @@ Task 4's `OfflineRootWorkGate` must stop new claims and drain active transfers b
 
 ## Deliberately out of scope
 
-HTTP transfer and `.part` writes, the foreground service/notification, startup network triggers, MediaStore export, automatic rules, downloads UI/settings surface, and any schema migration are later tasks. `download_queue`/`offline_media` are untouched; `Migrations.ALL` remains empty. [VERIFIED]
+HTTP transfer and `.part` writes, the foreground service/notification, startup network triggers, MediaStore export, automatic rules and the downloads UI/settings surface are later tasks. Task 5a then added the additive `offline_media` v1→v2 migration and the crash-safe publication protocol (`storage/download-completion.md`): the `<hash>.part.state` sidecar is retained through the final rename until the publication commit, and a finalized-but-unpublished file is adopted only with its persisted expected length or quarantined/deleted. `download_queue` is unchanged. [VERIFIED]
 
 ## Evidence
 

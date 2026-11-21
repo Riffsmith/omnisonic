@@ -1,5 +1,6 @@
 package app.omnisonic.core.data.db.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -10,6 +11,7 @@ import androidx.room.PrimaryKey
         Index(value = ["sourceKey"], unique = true),
         Index(value = ["offlinePath"], unique = true),
         Index(value = ["providerId"]),
+        Index(value = ["providerId", "externalId"]),
     ],
 )
 data class OfflineFileEntity(
@@ -25,4 +27,8 @@ data class OfflineFileEntity(
     val autoRule: String? = null,
     val downloadedAt: Long? = null,
     val syncedAt: Long? = null,
+    /** Rolling offline-media intent published from the queue row; false = permanent. */
+    @ColumnInfo(defaultValue = "0") val tempCache: Boolean = false,
+    /** Provider external id recovered from the stream key; NULL for pre-lookup or unparseable rows. */
+    val externalId: String? = null,
 )

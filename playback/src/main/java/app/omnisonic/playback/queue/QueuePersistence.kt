@@ -17,9 +17,9 @@ interface QueueSnapshotStore {
 
 /**
  * Maps the authoritative [QueueState] to snapshot rows and back. The queue
- * snapshot carries the resume position of the current entry ([QueueState.positionMs]);
- * the song-level resume point (`songs.resumeMs`) remains the fallback used
- * by stream resolution when no queue snapshot exists.
+ * snapshot carries the resume position of the current entry
+ * ([QueueState.positionMs]) and is the only restore source: stream resolution
+ * never reads the song-level `songs.resumeMs` column (D-18).
  */
 @Singleton
 class QueuePersistence @Inject constructor(

@@ -32,6 +32,37 @@ data class DownloadLease(
 /** Why an active transfer must stop before it finishes: pause preserves `.part`, cancel deletes it. */
 enum class DownloadInterruption { PAUSE, CANCEL }
 
+/**
+ * Outcome of one enqueue under the mutation lock. A known media key is never
+ * rewritten; a different destination on that key needs the explicit
+ * conversion/new-export command instead of a silent overwrite or a lost request.
+ */
+sealed interface EnqueueAttempt {
+
+    data object Inserted : EnqueueAttempt
+
+    /** Same media key, same destination: the strict whole-row no-op. */
+    data object Duplicate : EnqueueAttempt
+
+    data class DuplicateOtherDestination(val existingExportTarget: String?) : EnqueueAttempt
+}
+
+/** How a worker's completion settlement ended (Phase 7 task 5a publication protocol). */
+sealed interface CompletionSettlement {
+
+    /** The publication transaction committed and the lease is unregistered. */
+    data object Applied : CompletionSettlement
+
+    /** A newer lease owns the row; this worker must not touch anything. */
+    data object LeaseStale : CompletionSettlement
+
+    /** Pause/cancel settled the row first; the orphan/adoption flow owns the finalized file. */
+    data object RowAlreadySettled : CompletionSettlement
+
+    /** The publication transaction failed; the row is still `ACTIVE` and must not spin. */
+    data object Failed : CompletionSettlement
+}
+
 /** One active transfer as the foreground notification sees it (`-1` is unknown length). */
 data class DownloadActiveProgress(
     val rowId: Long,
@@ -103,13 +134,37 @@ class DownloadWorkerCoordinator(
      * (`PENDING`, or `PAUSED` while the global gate is set) and checks the gate
      * under the same lock as the insert.
      */
-    suspend fun enqueue(item: DownloadItemEntity): Boolean {
-        val inserted = mutex.withLock {
+    suspend fun enqueue(item: DownloadItemEntity): Boolean = enqueueChecked(item) == EnqueueAttempt.Inserted
+
+    suspend fun enqueueChecked(item: DownloadItemEntity): EnqueueAttempt {
+        val attempt = mutex.withLock {
+            val existing = repository.selectByMediaKey(item.mediaKey)
+            if (existing != null) {
+                return@withLock if (existing.exportTarget == item.exportTarget) {
+                    EnqueueAttempt.Duplicate
+                } else {
+                    EnqueueAttempt.DuplicateOtherDestination(existing.exportTarget)
+                }
+            }
             val paused = settings.isGloballyPaused()
-            repository.insertIfAbsent(item.copy(status = DownloadLifecycleRules.enqueueStatus(paused).name))
+            if (repository.insertIfAbsent(item.copy(status = DownloadLifecycleRules.enqueueStatus(paused).name))) {
+                EnqueueAttempt.Inserted
+            } else {
+                EnqueueAttempt.Duplicate
+            }
         }
-        if (inserted) workStart.requestStart()
-        return inserted
+        if (attempt == EnqueueAttempt.Inserted) workStart.requestStart()
+        return attempt
+    }
+
+    /** Explicit destination change for a row no worker owns; never part of enqueue idempotence. */
+    suspend fun convertDestination(rowId: Long, exportTarget: String?): Boolean {
+        val converted = mutex.withLock {
+            if (leasesByRow.containsKey(rowId)) return@withLock false
+            repository.convertDestination(rowId, exportTarget)
+        }
+        if (converted) workStart.requestStart()
+        return converted
     }
 
     /**
@@ -177,16 +232,33 @@ class DownloadWorkerCoordinator(
     }
 
     /** Successful settlement: the queue row is deleted, never kept as a state. */
-    suspend fun complete(lease: DownloadLease): Boolean = mutex.withLock {
-        if (!isCurrent(lease)) return@withLock false
-        val deleted = repository.deleteIfActive(lease.rowId)
-        if (deleted) {
-            interruptions.remove(lease.rowId)?.complete(null)
-            leasesByRow.remove(lease.rowId)
-            progressByRow.remove(lease.rowId)
-            publishLeaseState()
+    suspend fun complete(lease: DownloadLease): Boolean = completeWith(lease) { rowId ->
+        if (repository.deleteIfActive(rowId)) PublishSettle.APPLIED else PublishSettle.ROW_NOT_ACTIVE
+    } == CompletionSettlement.Applied
+
+    /**
+     * Lease-fenced completion with a caller-supplied settlement. The engine's
+     * task-5a settlement publishes `offline_media` and deletes the queue row in
+     * one transaction; only [PublishSettle.APPLIED] unregisters the lease, so a
+     * paused/cancelled or failed settlement leaves the file and sidecar for the
+     * orphan/adoption flow instead of pretending success.
+     */
+    suspend fun completeWith(
+        lease: DownloadLease,
+        settle: suspend (rowId: Long) -> PublishSettle,
+    ): CompletionSettlement = mutex.withLock {
+        if (!isCurrent(lease)) return@withLock CompletionSettlement.LeaseStale
+        when (settle(lease.rowId)) {
+            PublishSettle.APPLIED -> {
+                interruptions.remove(lease.rowId)?.complete(null)
+                leasesByRow.remove(lease.rowId)
+                progressByRow.remove(lease.rowId)
+                publishLeaseState()
+                CompletionSettlement.Applied
+            }
+            PublishSettle.ROW_NOT_ACTIVE -> CompletionSettlement.RowAlreadySettled
+            PublishSettle.FAILED -> CompletionSettlement.Failed
         }
-        deleted
     }
 
     /**

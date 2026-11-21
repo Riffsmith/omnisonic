@@ -39,4 +39,11 @@ sealed interface DownloadEnqueueResult {
 
     /** Nothing was written; the run gate blocked the provider ([status] != OK). */
     data class BlockedByStatus(val status: ProviderStatus) : DownloadEnqueueResult
+
+    /**
+     * Nothing was written: this stream key is already queued for another
+     * destination. The caller must issue an explicit conversion/new-export
+     * command instead of silently overwriting or losing the request.
+     */
+    data class NeedsDestinationChange(val existingExportTarget: String?) : DownloadEnqueueResult
 }

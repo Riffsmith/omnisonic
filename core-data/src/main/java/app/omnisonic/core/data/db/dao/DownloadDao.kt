@@ -164,6 +164,19 @@ interface DownloadDao {
     @Query("DELETE FROM download_queue WHERE id = :id AND status = 'ACTIVE'")
     suspend fun deleteIfActive(id: Long): Int
 
+    /**
+     * Destination conversion is an explicit command, never a duplicate-enqueue
+     * side effect: only work that no worker owns may change destination, and the
+     * scheduling anchor is untouched.
+     */
+    @Query(
+        """
+        UPDATE download_queue SET exportTarget = :exportTarget
+        WHERE id = :id AND status IN ('PENDING', 'PAUSED', 'USER_PAUSED', 'FAILED')
+        """,
+    )
+    suspend fun convertDestinationIfSettled(id: Long, exportTarget: String?): Int
+
     @Query("DELETE FROM download_queue")
     suspend fun deleteAll()
 }

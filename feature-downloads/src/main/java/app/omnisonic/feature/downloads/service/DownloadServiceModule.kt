@@ -1,8 +1,12 @@
 package app.omnisonic.feature.downloads.service
 
+import app.omnisonic.core.data.downloads.DownloadCompletionRecovery
+import app.omnisonic.core.data.downloads.DownloadExportPublisher
+import app.omnisonic.core.data.downloads.DownloadQueueCancellation
 import app.omnisonic.core.data.downloads.DownloadQueueRepository
 import app.omnisonic.core.data.downloads.DownloadQueueSettingsStore
 import app.omnisonic.core.data.downloads.DownloadWorkStart
+import app.omnisonic.core.data.downloads.OfflineFileSweep
 import app.omnisonic.core.data.downloads.OfflineRootWorkGate
 import app.omnisonic.core.data.downloads.OfflineStorage
 import app.omnisonic.core.data.network.NetworkMonitor
@@ -28,6 +32,11 @@ abstract class DownloadServiceBindings {
     @Binds
     @Singleton
     abstract fun offlineRootWorkGate(impl: ForegroundDownloadRuntime): OfflineRootWorkGate
+
+    /** Manual offline deletes cancel an equivalent active queue row through the same coordinator. */
+    @Binds
+    @Singleton
+    abstract fun downloadQueueCancellation(impl: ForegroundDownloadRuntime): DownloadQueueCancellation
 
     @Binds
     @Singleton
@@ -72,6 +81,9 @@ object DownloadServiceProviders {
         repository: DownloadQueueRepository,
         settings: DownloadQueueSettingsStore,
         storage: OfflineStorage,
+        completionRecovery: DownloadCompletionRecovery,
+        exportPublisher: DownloadExportPublisher,
+        offlineSweep: OfflineFileSweep,
         network: NetworkMonitor,
         runGate: ProviderRunGate,
         locks: DownloadTransferLocks,
@@ -84,6 +96,9 @@ object DownloadServiceProviders {
         repository = repository,
         settings = settings,
         storage = storage,
+        completionRecovery = completionRecovery,
+        exportPublisher = exportPublisher,
+        offlineSweep = offlineSweep,
         network = network,
         runGate = runGate,
         locks = locks,

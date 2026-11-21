@@ -8,6 +8,8 @@ import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
 import app.omnisonic.core.data.db.entity.DownloadStatus
 import app.omnisonic.core.data.downloads.DownloadAuthReporting
+import app.omnisonic.core.data.downloads.DownloadCompletionRecovery
+import app.omnisonic.core.data.downloads.DownloadExportPublisher
 import app.omnisonic.core.data.downloads.DownloadLease
 import app.omnisonic.core.data.downloads.DownloadMediaEndpoint
 import app.omnisonic.core.data.downloads.DownloadMediaResolution
@@ -15,6 +17,15 @@ import app.omnisonic.core.data.downloads.DownloadMediaSource
 import app.omnisonic.core.data.downloads.DownloadQueueRepository
 import app.omnisonic.core.data.downloads.DownloadQueueSettingsStore
 import app.omnisonic.core.data.downloads.DownloadTransferResult
+import app.omnisonic.core.data.downloads.ExportCopyOutcome
+import app.omnisonic.core.data.downloads.ExportDocumentPresence
+import app.omnisonic.core.data.downloads.ExportDocumentRef
+import app.omnisonic.core.data.downloads.ExportDocumentRequest
+import app.omnisonic.core.data.downloads.PendingExportDocument
+import app.omnisonic.core.data.downloads.ExportDocumentStore
+import app.omnisonic.core.data.downloads.ExportSessionJournal
+import app.omnisonic.core.data.downloads.OfflineFileSweep
+import app.omnisonic.core.data.downloads.OfflineMediaRepository
 import app.omnisonic.core.data.downloads.OfflinePathRules
 import app.omnisonic.core.data.downloads.OfflineRoot
 import app.omnisonic.core.data.downloads.OfflineRootSource
@@ -124,12 +135,22 @@ class DownloadTransferIntegrationTest {
         }
         val realFactory = EngineDownloadTransferHandlerFactory(
             repository = repository,
+            publisher = OfflineMediaRepository(db),
             storage = storage,
             media = media,
             auth = object : DownloadAuthReporting {
                 override suspend fun authRejected(providerId: Long) = Unit
                 override suspend fun authSucceeded(providerId: Long) = Unit
             },
+            exporter = DownloadExportPublisher(
+                queues = repository,
+                offline = OfflineMediaRepository(db),
+                storage = storage,
+                store = NoExportDocuments,
+                sessions = ExportSessionJournal(File(temp.root, "export-sessions")),
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
+                ioDispatcher = StandardTestDispatcher(testScheduler),
+            ),
             logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
         )
         val running = AtomicInteger()
@@ -150,6 +171,28 @@ class DownloadTransferIntegrationTest {
             repository = repository,
             settings = settings,
             storage = storage,
+            completionRecovery = DownloadCompletionRecovery(
+                db = db,
+                storage = storage,
+                publisher = OfflineMediaRepository(db),
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
+                ioDispatcher = StandardTestDispatcher(testScheduler),
+            ),
+            exportPublisher = DownloadExportPublisher(
+                queues = repository,
+                offline = OfflineMediaRepository(db),
+                storage = storage,
+                store = NoExportDocuments,
+                sessions = ExportSessionJournal(File(temp.root, "export-sessions")),
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
+                ioDispatcher = StandardTestDispatcher(testScheduler),
+            ),
+            offlineSweep = OfflineFileSweep(
+                db = db,
+                storage = storage,
+                logger = OmnisonicLogger(LogSink { _, _, _, _ -> }),
+                ioDispatcher = StandardTestDispatcher(testScheduler),
+            ),
             network = NetworkMonitor { NetworkState(connected = true, wifi = true) },
             runGate = ProviderRunGate { ProviderStatus.OK },
             locks = NoLocks,
@@ -204,5 +247,20 @@ class DownloadTransferIntegrationTest {
     private object NoConnectivity : DownloadConnectivityObserver {
         override fun start(onChange: () -> Unit) = Unit
         override fun stop() = Unit
+    }
+
+    private object NoExportDocuments : ExportDocumentStore {
+        override suspend fun insertPending(request: ExportDocumentRequest): ExportDocumentRef? = null
+
+        override suspend fun writeTruncating(ref: ExportDocumentRef, source: File): ExportCopyOutcome =
+            ExportCopyOutcome.WriteFailed
+
+        override suspend fun clearPending(ref: ExportDocumentRef): Boolean = false
+
+        override suspend fun delete(ref: ExportDocumentRef): Boolean = false
+
+        override suspend fun presence(ref: ExportDocumentRef): ExportDocumentPresence = ExportDocumentPresence.MISSING
+
+        override suspend fun pendingMatches(mediaKey: String, title: String?): List<PendingExportDocument> = emptyList()
     }
 }

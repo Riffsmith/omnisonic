@@ -85,6 +85,22 @@ class DownloadTransferJournalTest {
     }
 
     @Test
+    fun `the queue media key round-trips and a corrupt key is refused`() {
+        val part = part()
+        val key = "stream:1:disc:one:128:mp3"
+        val state = DownloadTransferState(identityHash = identityHash, totalBytes = 4, mediaKey = key)
+
+        assertThat(journal.write(part, state)).isTrue()
+        assertThat(journal.read(part)).isEqualTo(state)
+
+        journal.write(part, DownloadTransferState(identityHash, totalBytes = 4))
+        assertThat(journal.read(part)!!.mediaKey).isNull()
+
+        journal.stateFile(part).writeText("v=1\nidentity=$identityHash\ntotal=4\nkey=bad\u0001key\n")
+        assertThat(journal.read(part)).isNull()
+    }
+
+    @Test
     fun `deleting the part state leaves the part untouched`() {
         val part = part()
         journal.write(part, DownloadTransferState(identityHash, totalBytes = 4))

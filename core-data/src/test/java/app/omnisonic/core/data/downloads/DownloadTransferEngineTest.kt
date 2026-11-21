@@ -8,6 +8,7 @@ import app.omnisonic.core.data.db.DownloadKeys
 import app.omnisonic.core.data.db.ProfileScope
 import app.omnisonic.core.data.db.entity.DownloadItemEntity
 import app.omnisonic.core.data.db.entity.DownloadStatus
+import app.omnisonic.core.data.db.entity.OfflineFileEntity
 import app.omnisonic.core.data.silentTestLogger
 import app.omnisonic.provider.api.ProviderRunGate
 import app.omnisonic.provider.api.ProviderStatus
@@ -86,14 +87,20 @@ class DownloadTransferEngineTest : DatabaseTestBase() {
     private class Rig(
         val repository: DownloadQueueRepository,
         val coordinator: DownloadWorkerCoordinator,
+        val publisher: OfflineMediaRepository,
         val storage: OfflineStorage,
         val auth: RecordingAuth,
         val root: File,
     ) {
-        fun engine(media: DownloadMediaSource, clock: () -> Long): DownloadTransferEngine =
+        fun engine(
+            media: DownloadMediaSource,
+            clock: () -> Long,
+            publisher: OfflineMediaRepository = this.publisher,
+        ): DownloadTransferEngine =
             DownloadTransferEngine(
                 repository = repository,
                 coordinator = coordinator,
+                publisher = publisher,
                 storage = storage,
                 media = media,
                 auth = auth,
@@ -138,7 +145,7 @@ class DownloadTransferEngineTest : DatabaseTestBase() {
             workerCount = workerCount,
             nowMs = { now },
         )
-        return Rig(repository, coordinator, storage, RecordingAuth(), root)
+        return Rig(repository, coordinator, OfflineMediaRepository(db), storage, RecordingAuth(), root)
     }
 
     private suspend fun seedRow(bitrate: Int? = null, format: String? = null): DownloadItemEntity =
@@ -1050,24 +1057,237 @@ class DownloadTransferEngineTest : DatabaseTestBase() {
     }
 
     @Test
-    fun `an existing final file is never overwritten`(): Unit = runDbTest {
+    fun `an unverifiable final orphan is replaced by the verified part`(): Unit = runDbTest {
         useServer { server ->
             val rig = rig()
             val payload = body(200)
-            val existing = "already-here".toByteArray()
             val plan = rig.plan()
             rig.file(plan.relativePath).apply {
                 parentFile?.mkdirs()
-                writeBytes(existing)
+                writeBytes("already-here".toByteArray())
             }
             seedPart(rig, plan, payload, totalBytes = payload.size.toLong())
             val seeded = seedRow()
 
             val result = transfer(rig, rig.claim(), media(url(server)))
 
+            assertThat(result).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, payload.size.toLong()))
+            assertThat(server.requestCount).isEqualTo(0)
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
+            assertThat(row(seeded.id)).isNull()
+            assertThat(offlineFileDao.selectBySourceKey(seeded.mediaKey)!!.sizeBytes).isEqualTo(payload.size.toLong())
+        }
+    }
+
+    @Test
+    fun `a crash orphan with a verified sidecar is adopted without a request`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body(256)
+            val plan = rig.plan()
+            rig.file(plan.relativePath).apply {
+                parentFile?.mkdirs()
+                writeBytes(payload)
+            }
+            val part = rig.file(plan.relativePartPath)
+            DownloadTransferJournal().write(
+                part,
+                DownloadTransferState(
+                    identityHash = plan.hash,
+                    totalBytes = payload.size.toLong(),
+                    mediaKey = DownloadKeys.mediaKey(1, "song-1", null, null),
+                ),
+            )
+            val seeded = seedRow()
+
+            val result = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(result).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, payload.size.toLong()))
+            assertThat(server.requestCount).isEqualTo(0)
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
+            assertThat(row(seeded.id)).isNull()
+            val offline = offlineFileDao.selectBySourceKey(seeded.mediaKey)
+            assertThat(offline).isNotNull()
+            assertThat(offline!!.offlinePath).isEqualTo(plan.relativePath)
+            assertThat(offline.externalId).isEqualTo("song-1")
+            assertThat(DownloadTransferJournal().stateFile(part).exists()).isFalse()
+        }
+    }
+
+    @Test
+    fun `a crash orphan keyed to another media request is retransferred not adopted`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val orphanBytes = body(256, salt = 9)
+            val freshBytes = body(256, salt = 3)
+            val plan = rig.plan()
+            rig.file(plan.relativePath).apply {
+                parentFile?.mkdirs()
+                writeBytes(orphanBytes)
+            }
+            DownloadTransferJournal().write(
+                rig.file(plan.relativePartPath),
+                DownloadTransferState(
+                    identityHash = plan.hash,
+                    totalBytes = orphanBytes.size.toLong(),
+                    mediaKey = DownloadKeys.mediaKey(1, "another-song", null, null),
+                ),
+            )
+            val seeded = seedRow()
+            server.enqueue(MockResponse().setBody(Buffer().write(freshBytes)).setHeader("ETag", "\"fresh\""))
+
+            val result = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(result).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, freshBytes.size.toLong()))
+            assertThat(server.requestCount).isEqualTo(1)
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(freshBytes)
+            assertThat(row(seeded.id)).isNull()
+            assertThat(offlineFileDao.selectBySourceKey(seeded.mediaKey)!!.sizeBytes).isEqualTo(freshBytes.size.toLong())
+        }
+    }
+
+    @Test
+    fun `a published path owned by another stream key cannot settle the active row`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body(128)
+            val plan = rig.plan()
+            val otherKey = DownloadKeys.mediaKey(1, "another-song", null, null)
+            rig.file(plan.relativePath).apply {
+                parentFile?.mkdirs()
+                writeBytes(payload)
+            }
+            offlineFileDao.upsert(
+                OfflineFileEntity(
+                    providerId = 1,
+                    mediaType = "SONG",
+                    sourceKey = otherKey,
+                    offlinePath = plan.relativePath,
+                    sizeBytes = payload.size.toLong(),
+                    externalId = "another-song",
+                ),
+            )
+            val seeded = seedRow()
+
+            val result = transfer(rig, rig.claim(), media(url(server)))
+
             assertThat(result).isEqualTo(DownloadTransferResult.Parked(DownloadTransferPark.FINAL_PATH_CONFLICT))
-            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(existing)
+            assertThat(server.requestCount).isEqualTo(0)
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
             assertThat(row(seeded.id)!!.status).isEqualTo(DownloadStatus.FAILED.name)
+            assertThat(offlineFileDao.selectBySourceKey(otherKey)).isNotNull()
+            assertThat(offlineFileDao.selectBySourceKey(seeded.mediaKey)).isNull()
+        }
+    }
+
+    @Test
+    fun `a published final file settles a re-enqueued row without re-downloading`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body(128)
+            val plan = rig.plan()
+            val mediaKey = DownloadKeys.mediaKey(1, "song-1", null, null)
+            rig.file(plan.relativePath).apply {
+                parentFile?.mkdirs()
+                writeBytes(payload)
+            }
+            offlineFileDao.upsert(
+                OfflineFileEntity(
+                    providerId = 1,
+                    mediaType = "SONG",
+                    sourceKey = mediaKey,
+                    offlinePath = plan.relativePath,
+                    sizeBytes = payload.size.toLong(),
+                    tempCache = true,
+                    externalId = "song-1",
+                ),
+            )
+            val seeded = seedRow()
+
+            val result = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(result).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, payload.size.toLong()))
+            assertThat(server.requestCount).isEqualTo(0)
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
+            assertThat(row(seeded.id)).isNull()
+            assertThat(offlineFileDao.count()).isEqualTo(1)
+            assertThat(offlineFileDao.selectBySourceKey(mediaKey)!!.tempCache).isTrue()
+        }
+    }
+
+    @Test
+    fun `publication persists rolling intent and lookup metadata after a fresh download`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body()
+            server.enqueue(MockResponse().setBody(Buffer().write(payload)).setHeader("ETag", "\"v1\""))
+            val seeded = seedDownloadItem(
+                providerId = 1,
+                mediaKey = DownloadKeys.mediaKey(1, "song-1", 192, "mp3"),
+            )
+            downloadDao.upsert(seeded.copy(tempCache = true, autoRuleId = 9, transcodeBitrateKbps = 192))
+            val plan = rig.plan(bitrate = 192, format = "mp3")
+
+            val result = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(result).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, payload.size.toLong()))
+            assertThat(row(seeded.id)).isNull()
+            val offline = offlineFileDao.selectBySourceKey(seeded.mediaKey)
+            assertThat(offline).isNotNull()
+            assertThat(offline!!.tempCache).isTrue()
+            assertThat(offline.autoRule).isEqualTo("9")
+            assertThat(offline.bitrateKbps).isEqualTo(192)
+            assertThat(offline.externalId).isEqualTo("song-1")
+            assertThat(offline.sizeBytes).isEqualTo(payload.size.toLong())
+            assertThat(offline.downloadedAt).isEqualTo(now)
+        }
+    }
+
+    @Test
+    fun `a failed publication write parks fail closed and keeps the file and sidecar`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body()
+            server.enqueue(MockResponse().setBody(Buffer().write(payload)).setHeader("ETag", "\"v1\""))
+            val seeded = seedRow()
+            val plan = rig.plan()
+            val failing = OfflineMediaRepository(db) { throw android.database.sqlite.SQLiteException("disk I/O") }
+
+            val result = rig.engine(media(url(server)), { now }, failing).transfer(rig.claim())
+
+            assertThat(result).isEqualTo(DownloadTransferResult.Parked(DownloadTransferPark.FINAL_PATH_CONFLICT))
+            val stored = row(seeded.id)!!
+            assertThat(stored.status).isEqualTo(DownloadStatus.FAILED.name)
+            assertThat(stored.errorCount).isEqualTo(0)
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
+            assertThat(DownloadTransferJournal().stateFile(rig.file(plan.relativePartPath)).exists()).isTrue()
+            assertThat(offlineFileDao.count()).isEqualTo(0)
+            assertThat(rig.coordinator.activeLeaseCount()).isEqualTo(0)
+        }
+    }
+
+    @Test
+    fun `a replacement variant publishes without an offline gap`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val low = body(300, salt = 2)
+            val high = body(500, salt = 3)
+            server.enqueue(MockResponse().setBody(Buffer().write(low)))
+            server.enqueue(MockResponse().setBody(Buffer().write(high)))
+            val lowRow = seedRow(bitrate = 128)
+            val lowPlan = rig.plan(bitrate = 128)
+            assertThat(transfer(rig, rig.claim(), media(url(server)))).isInstanceOf(DownloadTransferResult.Completed::class.java)
+
+            val highRow = seedRow(bitrate = 320)
+            val highPlan = rig.plan(bitrate = 320)
+            assertThat(transfer(rig, rig.claim(), media(url(server)))).isInstanceOf(DownloadTransferResult.Completed::class.java)
+
+            assertThat(rig.file(lowPlan.relativePath).readBytes()).isEqualTo(low)
+            assertThat(rig.file(highPlan.relativePath).readBytes()).isEqualTo(high)
+            val variants = offlineFileDao.selectByProviderAndExternal(1, "song-1", ProfileScope.Unrestricted)
+            assertThat(variants.map { it.offlinePath }).containsExactly(lowPlan.relativePath, highPlan.relativePath)
+            assertThat(offlineFileDao.selectBySourceKey(lowRow.mediaKey)!!.sizeBytes).isEqualTo(low.size.toLong())
+            assertThat(offlineFileDao.selectBySourceKey(highRow.mediaKey)!!.sizeBytes).isEqualTo(high.size.toLong())
         }
     }
 

@@ -50,6 +50,32 @@ class DownloadServiceManifestTest {
     }
 
     @Test
+    fun `the merged manifest grants no broad storage permission and has no legacy storage flag`() {
+        val forbidden = listOf(
+            "android.permission.WRITE_EXTERNAL_STORAGE",
+            "android.permission.MANAGE_EXTERNAL_STORAGE",
+            "android.permission.ACCESS_MEDIA_LOCATION",
+        )
+        for (variant in listOf("debug", "release")) {
+            val document = mergedManifest(variant)
+            assertThat(permissionElements(document)).containsNoneIn(forbidden)
+            // The only storage read is the pre-existing local-library one, bounded below 33.
+            for (element in permissionElementsWithAttributes(document, "android.permission.READ_EXTERNAL_STORAGE")) {
+                assertThat(element.getAttributeNS(androidNs, "maxSdkVersion")).isEqualTo("32")
+            }
+            val applications = document.getElementsByTagName("application")
+            for (index in 0 until applications.length) {
+                val application = applications.item(index) as Element
+                assertThat(application.hasAttributeNS(androidNs, "requestLegacyExternalStorage")).isFalse()
+            }
+            val usesSdk = document.getElementsByTagName("uses-sdk")
+            assertThat(usesSdk.length).isAtLeast(1)
+            assertThat((usesSdk.item(0) as Element).getAttributeNS(androidNs, "minSdkVersion"))
+                .isEqualTo("29")
+        }
+    }
+
+    @Test
     fun `the merged package exposes the service as non exported dataSync`() {
         val app = RuntimeEnvironment.getApplication()
         val info = app.packageManager.getServiceInfo(
@@ -157,10 +183,15 @@ class DownloadServiceManifestTest {
         return null
     }
 
-    private fun permissionElements(document: Document): List<String> {
-        val permissions = document.getElementsByTagName("uses-permission")
-        return (0 until permissions.length).map { index ->
-            (permissions.item(index) as Element).getAttributeNS(androidNs, "name")
+    private fun permissionElements(document: Document): List<String> =
+        permissionElementsWithAttributes(document, null).map { element ->
+            element.getAttributeNS(androidNs, "name")
         }
+
+    private fun permissionElementsWithAttributes(document: Document, name: String?): List<Element> {
+        val permissions = document.getElementsByTagName("uses-permission")
+        return (0 until permissions.length)
+            .map { index -> permissions.item(index) as Element }
+            .filter { element -> name == null || element.getAttributeNS(androidNs, "name") == name }
     }
 }

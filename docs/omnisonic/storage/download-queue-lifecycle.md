@@ -8,13 +8,13 @@ Confidence: the state rules, retry arithmetic, conditional writes, lease fencing
 
 Date: 2026-11-20
 
-Links: `storage/schema-v2.md`, `storage/download-transfer.md`, `providers/provider-connections.md`, `.agents/plans/phase-7-tasks.md`, D-39 in `../decisions.md`.
+Links: `storage/schema-v2.md`, `storage/download-transfer.md`, `storage/download-completion.md`, `providers/provider-connections.md`, `.agents/plans/phase-7-tasks.md`, D-39 in `../decisions.md`.
 
 ---
 
 ## States
 
-`DownloadStatus` persists by name and has exactly five values; there is no completed state. Queue success and explicit cancel delete the row, so a finished download is represented by its future `offline_media` row (Phase 7 task 5), not by a queue status. [VERIFIED]
+`DownloadStatus` persists by name and has exactly five values; there is no completed state. Queue success and explicit cancel delete the row, so a finished download is represented by its `offline_media` row, not by a queue status. Since task 5a, ordinary success publishes that offline row and deletes the queue row in one lease-fenced Room transaction — see `storage/download-completion.md`. [VERIFIED]
 
 | State | Meaning | Claimable |
 |---|---|---|

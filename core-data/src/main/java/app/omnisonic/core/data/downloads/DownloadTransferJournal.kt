@@ -12,13 +12,17 @@ import java.nio.file.StandardCopyOption
  * the SHA-256 of the variant identity, so a sidecar can never be adopted by
  * another provider, path or bitrate/format variant. [strongEtag] and
  * [lastModified] are response validators used for `If-Range`; the total is the
- * entity length used for short-body detection and bounded progress.
+ * entity length used for short-body detection and bounded progress. [mediaKey]
+ * is the owning queue row's stream identity: the sidecar survives the final
+ * rename until publication commits, so crash recovery can adopt a verified
+ * orphan without any provider/network lookup (Phase 7 task 5a).
  */
 data class DownloadTransferState(
     val identityHash: String,
     val strongEtag: String? = null,
     val lastModified: String? = null,
     val totalBytes: Long? = null,
+    val mediaKey: String? = null,
 ) {
     fun ifRangeValidator(): String? = strongEtag ?: lastModified
 }
@@ -94,6 +98,7 @@ class DownloadTransferJournal {
         state.strongEtag?.let { if (DownloadTransferRules.strongEtag(it) == null) return false }
         state.lastModified?.let { if (DownloadTransferRules.headerDate(it) == null) return false }
         state.totalBytes?.let { if (it < 0L) return false }
+        state.mediaKey?.let { if (!mediaKeyPattern.matches(it)) return false }
         return true
     }
 
@@ -103,6 +108,7 @@ class DownloadTransferJournal {
         append("etag=").append(state.strongEtag.orEmpty()).append('\n')
         append("last=").append(state.lastModified.orEmpty()).append('\n')
         append("total=").append(state.totalBytes?.toString().orEmpty()).append('\n')
+        state.mediaKey?.let { append("key=").append(it).append('\n') }
     }
 
     private fun decode(text: String): DownloadTransferState? {
@@ -127,16 +133,22 @@ class DownloadTransferJournal {
         val total = fields["total"]?.takeIf { it.isNotEmpty() }?.let { raw ->
             raw.toLongOrNull()?.takeIf { it >= 0L } ?: return null
         }
+        val mediaKey = fields["key"]?.takeIf { it.isNotEmpty() }?.let { raw ->
+            if (!mediaKeyPattern.matches(raw)) return null
+            raw
+        }
         return DownloadTransferState(
             identityHash = identity,
             strongEtag = etag,
             lastModified = lastModified,
             totalBytes = total,
+            mediaKey = mediaKey,
         )
     }
 
     private companion object {
         const val MAX_STATE_BYTES = 4096L
         val identityHashPattern = Regex("[0-9a-f]{64}")
+        val mediaKeyPattern = Regex("[^\\x00-\\x1F\\x7F]{1,512}")
     }
 }

@@ -46,9 +46,10 @@ object DownloadKeys {
 
     /**
      * Owning provider parsed from a persisted media key; null when the key
-     * does not carry a reliable provider segment. Used by the v1->v2 backfill:
-     * rows that cannot be attributed this way are deleted by the migration
-     * (documented there) — provider ids are never guessed or invented.
+     * does not carry a reliable provider segment. Provider ids are never
+     * guessed or invented. The v1 -> v2 offline read-model migration uses
+     * [parseMediaKey] for its tolerant `externalId` backfill instead: an
+     * unparseable key keeps a NULL lookup column and the row is left intact.
      */
     fun providerIdFromMediaKey(mediaKey: String): Long? =
         mediaKey
