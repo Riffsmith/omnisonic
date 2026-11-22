@@ -83,15 +83,45 @@ resolver must not read song state: that is the property that keeps start
 positions honest, and the reason `resume-and-bookmarks.md` puts any future
 resume decision behind a policy seam rather than a raw column read.
 
-[VERIFIED] `ResolvedStream.cacheKey` stays the contract default
-(`StreamKey(providerId, externalId)` — see `stream-cache-identity.md`);
-transcode variants do not exist until Phase 8.
+[VERIFIED] `ResolvedStream.cacheKey` stays variant-qualified:
+`StreamKey(providerId, externalId, bitrateKbps, format, serverTranscoded)` —
+`stream:<providerId>:<externalId>:<bitrate|auto>:<format|auto>[:tx]`
+(see `stream-cache-identity.md`). Since Phase 8 TODO 6 (D-61) planned
+`ServerTranscode` streams resolve through the same key shape with their explicit
+plan values, so a Wi-Fi and a cellular plan of the same song never alias. The
+D-62 audit added the `:tx` marker from the provider's actual resolution: a
+server-default `ServerTranscode(null, null)` no longer shares the raw
+`auto:auto` cache entry with direct play, and a transcode session stays
+distinct from a plain capped fallback with the same parameters.
 
 [VERIFIED] `OfflineFirstStreamResolver` never alters the online result: a
 non-radio entry is offered its readable stored file first (`file://`,
 `DIRECT_URI`, `requiresNetwork = false`, start 0), radio entries go straight to
 the provider, and an offline miss or lookup failure delegates unchanged
-(resolver tests; `offline-resolution.md`).
+(resolver tests; `offline-resolution.md`). Since Phase 8 TODO 6 (D-61) its
+`online` delegate is `PlannedProviderStreamResolver`, which plans the current
+network slot through the unchanged `TranscodeSlotResolver` + pure planner and
+sends `ServerTranscode` plans through `MediaProvider.resolveTranscodeStream`;
+`DirectPlay`/`Refused` land on the plain `streamUrl`, and a failed transcode
+request falls back to the plain stream with a fixed-token log (D-58).
+Downloaded files still win first, so a mid-track re-request never restarts
+direct-URI playback.
+
+[VERIFIED, TODO 6 / D-61] `StreamResolver` gained a 2-arg
+`resolve(entry, startPositionMs)` (default delegates to the 1-arg and copies the
+position) so a re-request carries the current position; a resolver that bakes a
+positive `timeOffsetSeconds` into the request returns `startPositionMs = 0` and
+`QueuePlayerImpl` keeps a position base so ticks/seeks stay song-relative.
+`TrackChangeCause.REPLAN` + `QueuePlayer.replanCurrentStream()` /
+`PlaybackController.replanCurrentStream()` re-request the current entry in
+place — queue index and position preserved, same-entry REPLAN does not re-arm
+the scrobble point or close/reopen the history span, while a REPLAN that
+bounced to another entry re-arms it (D-62) — driven by
+`StreamProfileWatcher` when the effective plan for the same playing entry
+changes (network change via `NetworkStateObserver`, or a transcode-settings
+edit). `StreamProfileWatcherTest`, `QueuePlayerImplTest` replan cases and
+`PlannedProviderStreamResolverTest` pin the behavior; the audible mid-track
+transition on a device stays `[UNKNOWN]`.
 
 ## Replay-gain source
 

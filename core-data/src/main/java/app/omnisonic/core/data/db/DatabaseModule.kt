@@ -5,7 +5,9 @@ import android.net.ConnectivityManager
 import app.omnisonic.core.data.db.dao.OutboxDao
 import app.omnisonic.core.data.json.OmnisonicJson
 import app.omnisonic.core.data.network.ConnectivityManagerNetworkMonitor
+import app.omnisonic.core.data.network.ConnectivityManagerNetworkStateObserver
 import app.omnisonic.core.data.network.NetworkMonitor
+import app.omnisonic.core.data.network.NetworkStateObserver
 import app.omnisonic.core.data.providers.DefaultTraitsSource
 import app.omnisonic.core.data.providers.ProviderTraitsSource
 import app.omnisonic.core.data.security.AesGcmCredentialCodec
@@ -52,4 +54,15 @@ object DatabaseModule {
             context.getSystemService(ConnectivityManager::class.java)
                 ?: error("ConnectivityManager unavailable"),
         )
+
+    @Provides
+    @Singleton
+    fun networkStateObserver(
+        @ApplicationContext context: Context,
+        monitor: NetworkMonitor,
+    ): NetworkStateObserver = ConnectivityManagerNetworkStateObserver(
+        context.getSystemService(ConnectivityManager::class.java)
+            ?: error("ConnectivityManager unavailable"),
+        monitor,
+    )
 }

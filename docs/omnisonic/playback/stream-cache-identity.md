@@ -15,7 +15,7 @@ Confidence:
 - [VERIFIED] `StreamTransport` selects the upstream path: provider HTTP, direct URI, or a registered custom `DataSource.Factory`; the cache key is unchanged.
 - [VERIFIED] An offline `DIRECT_URI` stream carries the downloaded row's `sourceKey` as `cacheKey` but is routed through the direct factory, so it neither reads nor writes the streaming `SimpleCache` (`offline-resolution.md`).
 
-Date: 2026-11-07
+Date: 2026-11-22 (Phase 8 server-transcode marker added by D-62)
 
 Links: `../protocol/subsonic-auth.md`, `offline-resolution.md` (D-45)
 
@@ -26,12 +26,12 @@ Links: `../protocol/subsonic-auth.md`, `offline-resolution.md` (D-45)
 `StreamKey` formats as:
 
 ```text
-stream:<providerId>:<externalId>:<maxBitRateKbps-or-auto>:<format-or-auto>
+stream:<providerId>:<externalId>:<maxBitRateKbps-or-auto>:<format-or-auto>[:tx]
 ```
 
 [VERIFIED] Two `ResolvedStream` values built from the same queue entry but different salted URLs have the same `cacheKey`.
 
-[INFERRED] A resolver that offers transcoded variants must pass the selected bitrate and format through `StreamKey`; the default `ResolvedStream.cacheKey` only guarantees identity for one variant per entry.
+[VERIFIED, Phase 8 / D-62] A resolver that offers transcoded variants passes the selected bitrate and format through `StreamKey`, and also sets `serverTranscoded` from the provider's `TranscodeStreamResolution` whenever the URL addresses a server-transcode session. That appends the `:tx` segment, so a server-default `ServerTranscode(null, null)` (mandatory mode) cannot alias the raw `auto:auto` entry used by direct play, and an explicit-parameter transcode session (`stream:…:320:auto:tx`) cannot alias a plain capped fallback with the same parameters (`stream:…:320:auto`). The marker is a representation discriminator, not a variant: bitrate and format still decide which variant the plan asked for. `[VERIFIED JVM]` `PlannedProviderStreamResolverTest` pins the distinct keys; media3 `CacheDataSource` is the consumer, so the marker never enters a row, a download media key or `offline_media.sourceKey` (D-57's offline rule is unchanged).
 
 ## Cache operations
 

@@ -14,6 +14,18 @@ class TranscodeSettingsTest {
         assertThat(settings.downloadBitrateKbps).isNull()
         assertThat(settings.mandatory).isFalse()
         assertThat(settings.preferredFormat).isNull()
+        assertThat(settings.vpnAsCellular).isTrue()
+        assertThat(settings.meteredAsCellular).isTrue()
+    }
+
+    @Test
+    fun `network classification toggles default to as-cellular and flip independently`() {
+        val optedOut = TranscodeSettings(vpnAsCellular = false, meteredAsCellular = false)
+
+        assertThat(optedOut.vpnAsCellular).isFalse()
+        assertThat(optedOut.meteredAsCellular).isFalse()
+        assertThat(TranscodeSettings(vpnAsCellular = false).meteredAsCellular).isTrue()
+        assertThat(TranscodeSettings(meteredAsCellular = false).vpnAsCellular).isTrue()
     }
 
     @Test

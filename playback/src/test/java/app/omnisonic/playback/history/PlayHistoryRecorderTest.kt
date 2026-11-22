@@ -353,4 +353,27 @@ class PlayHistoryRecorderTest {
         assertThat(h.sink.plays).containsExactly("song-1", "song-2").inOrder()
         assertThat(h.sink.calls).hasSize(2)
     }
+
+    @Test
+    fun `a same-entry REPLAN re-request keeps the open span and counts one play`() = runTest {
+        val h = harness()
+        val e = entry()
+        val withEntry = QueueState(entries = listOf(e), playIndex = 0, positionMs = 40_000)
+
+        h.bus.emit(PlaybackEvent.Started(e, 0))
+        h.bus.emit(PlaybackEvent.Position(e, 40_000, isPlaying = true))
+        h.bus.emit(PlaybackEvent.TrackChanged(e, e, TrackChangeCause.REPLAN, withEntry))
+        runCurrent()
+
+        assertThat(h.sink.skips).isEmpty()
+        assertThat(h.sink.resumes).isEmpty()
+        assertThat(h.sink.plays).isEmpty()
+
+        h.bus.emit(PlaybackEvent.Position(e, 195_000, isPlaying = true))
+        h.bus.emit(PlaybackEvent.ScrobblePoint(e, 195_000))
+        runCurrent()
+
+        assertThat(h.sink.plays).containsExactly("song-1")
+        assertThat(h.sink.calls).containsExactly("play:song-1:$NOW:$DURATION")
+    }
 }

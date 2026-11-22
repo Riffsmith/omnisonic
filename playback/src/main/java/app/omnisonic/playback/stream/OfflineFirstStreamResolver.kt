@@ -4,7 +4,6 @@ import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.stream.ResolvedStream
 import app.omnisonic.playback.api.stream.StreamResolver
 import app.omnisonic.playback.api.stream.StreamTransport
-import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 
 /** One readable offline file offered by the core-data playback read seam. */
@@ -24,24 +23,29 @@ fun interface OfflineStreamLookup {
  * Offline-first [StreamResolver] (Phase 7 task 5c): a readable stored file is
  * preferred over the provider, then the provider URL, then null. The offline
  * source is a direct `file://` URI with no implicit start offset, so the queue
- * snapshot remains the only owner of resume positions. Radio entries always
- * stay live. An offline lookup failure falls back to the provider instead of
- * failing playback.
+ * snapshot remains the only owner of resume positions; a stored file still
+ * reports a requested [startPositionMs] back, because the file holds the whole
+ * song and the player seeks inside it. Radio entries always stay live. An
+ * offline lookup failure falls back to the provider instead of failing
+ * playback.
  */
-class OfflineFirstStreamResolver @Inject constructor(
-    private val online: ProviderStreamResolver,
+class OfflineFirstStreamResolver(
+    private val online: StreamResolver,
     private val offline: OfflineStreamLookup,
     private val desiredVariants: DesiredStreamVariants,
 ) : StreamResolver {
 
-    override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? {
+    override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? =
+        resolve(entry, 0L)
+
+    override suspend fun resolve(entry: PlaybackQueueEntry, startPositionMs: Long): ResolvedStream? {
         if (!entry.isRadioStation) {
             val chosen = choose(offlineCandidates(entry), desiredKey(entry))
             if (chosen != null) {
                 return ResolvedStream(
                     entry = entry,
                     uri = chosen.uri,
-                    startPositionMs = 0L,
+                    startPositionMs = startPositionMs.coerceAtLeast(0L),
                     requiresNetwork = false,
                     isRadio = false,
                     cacheKey = chosen.sourceKey,
@@ -49,7 +53,7 @@ class OfflineFirstStreamResolver @Inject constructor(
                 )
             }
         }
-        return online.resolve(entry)
+        return online.resolve(entry, startPositionMs)
     }
 
     /**

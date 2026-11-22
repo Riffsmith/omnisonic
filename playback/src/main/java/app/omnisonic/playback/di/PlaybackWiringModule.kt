@@ -4,10 +4,14 @@ import android.content.Context
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
+import app.omnisonic.core.data.db.OmnisonicDatabase
 import app.omnisonic.core.data.downloads.OfflinePlaybackSource
 import app.omnisonic.core.data.history.HistoryPreferencesStore
+import app.omnisonic.core.data.network.NetworkStateObserver
 import app.omnisonic.core.data.providers.ProviderClientRegistry
+import app.omnisonic.core.data.providers.ProviderTraitsSource
 import app.omnisonic.core.data.repository.SongRepository
+import app.omnisonic.core.data.transcode.TranscodeSettingsStore
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.playback.api.controller.PlaybackController
 import app.omnisonic.playback.api.equalizer.PeqConfig
@@ -55,10 +59,14 @@ import app.omnisonic.playback.stream.MediaProviderLookup
 import app.omnisonic.playback.stream.OfflineFirstStreamResolver
 import app.omnisonic.playback.stream.OfflineStreamCandidate
 import app.omnisonic.playback.stream.OfflineStreamLookup
+import app.omnisonic.playback.stream.PlannedProviderStreamResolver
 import app.omnisonic.playback.stream.PlannedStreamVariants
-import app.omnisonic.playback.stream.ProviderStreamResolver
+import app.omnisonic.playback.stream.ProviderTraitsLookup
 import app.omnisonic.playback.stream.SongReplayGainSource
 import app.omnisonic.playback.stream.SongRowLookup
+import app.omnisonic.playback.stream.StreamPlanSource
+import app.omnisonic.playback.stream.StreamProfileWatcher
+import app.omnisonic.provider.api.ProviderTraits
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -155,6 +163,16 @@ object PlaybackWiringModule {
 
     @Provides
     @Singleton
+    fun providerTraitsLookup(
+        database: OmnisonicDatabase,
+        traits: ProviderTraitsSource,
+    ): ProviderTraitsLookup = ProviderTraitsLookup { providerId ->
+        val api = database.providerDao().selectById(providerId)?.api
+        if (api == null) ProviderTraits() else traits.traitsFor(api)
+    }
+
+    @Provides
+    @Singleton
     fun songRowLookup(songs: SongRepository): SongRowLookup =
         SongRowLookup { providerId, externalId ->
             songs.selectByProviderAndExternal(providerId, externalId)
@@ -176,6 +194,14 @@ object PlaybackWiringModule {
     @Provides
     @Singleton
     fun desiredStreamVariants(variants: PlannedStreamVariants): DesiredStreamVariants = variants
+
+    @Provides
+    @Singleton
+    fun offlineFirstStreamResolver(
+        online: PlannedProviderStreamResolver,
+        offline: OfflineStreamLookup,
+        desired: DesiredStreamVariants,
+    ): OfflineFirstStreamResolver = OfflineFirstStreamResolver(online, offline, desired)
 
     @Provides
     @Singleton
@@ -212,6 +238,9 @@ object PlaybackWiringModule {
         queueSources: QueueSources,
         historySink: PlayHistorySink,
         historyPreferences: HistoryPreferencesStore,
+        transcodeSettings: TranscodeSettingsStore,
+        networkObserver: NetworkStateObserver,
+        planSource: StreamPlanSource,
         logger: OmnisonicLogger,
     ): PlaybackStack {
         val bus = PlaybackEventBusImpl()
@@ -244,6 +273,13 @@ object PlaybackWiringModule {
         )
         playerProxy.bind(player)
         port.bind(controller)
+        StreamProfileWatcher(
+            settings = transcodeSettings,
+            networkStates = networkObserver,
+            plans = planSource,
+            queue = queue,
+            isPlaying = { controller.playerState.value.isPlaying },
+        ).start(scope)
         return PlaybackStack(controller, player.exposedPlayer())
     }
 

@@ -21,6 +21,7 @@ Links: `../decisions.md` D-53/D-54; `../playback/transcode-planner.md`; `../play
 - `stream.view?id=<id>` always carries the auth parameters plus protocol line (`u/t/s` or `p` or `apiKey`, `v`, `c`, `f=json`).
 - `maxBitRate=<kbps>` and `format=<token>` are added when non-null — the planner's explicit values land here (and on `download.view`, unchanged, for the existing download path).
 - `timeOffset=<seconds>` is added only when the probe advertised the `transcodeOffset` OpenSubsonic extension and the requested offset is positive. Zero/negative offsets are omitted. [VERIFIED JVM]
+- Since Phase 8 TODO 6 (D-61) the same seam serves online playback: `PlannedProviderStreamResolver` calls `resolveTranscodeStream` with the planned slot's `maxBitRateKbps`/`format`, and a mid-track re-request (`TrackChangeCause.REPLAN`) passes the current song-relative position as `timeOffsetSeconds`. When the server bakes that offset into the stream, the resolver returns `startPositionMs = 0` and `QueuePlayerImpl` adds its position base, so player ticks/seeks stay song-relative. The re-request URL differs only by the offset parameter; signed URLs/credentials still never enter rows, logs or UI (D-58). [VERIFIED JVM] Request shapes; live-server offset behavior `[UNKNOWN]`.
 
 ## Probe-gated decision flow
 

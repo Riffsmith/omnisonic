@@ -91,6 +91,7 @@ import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncStepRoute
 import app.omnisonic.feature.settings.sync.LibrarySyncStepViewModel
 import app.omnisonic.feature.settings.sync.PendingSyncViewModel
+import app.omnisonic.feature.settings.transcode.TranscodeSettingsViewModel
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.ui.label
@@ -148,6 +149,7 @@ fun OmnisonicApp(
                 },
                 libraryDownloadViewModelProvider = { hiltViewModel() },
                 downloadSettingsViewModelProvider = { hiltViewModel() },
+                transcodeSettingsViewModelProvider = { hiltViewModel() },
                 onRouteChanged = viewModel::logNavigation,
                 onUserAction = viewModel::logUserAction,
                 openDownloadsRequest = openDownloadsRequest,
@@ -189,6 +191,7 @@ fun OmnisonicShell(
     downloadsViewModelProvider: @Composable () -> DownloadsViewModel = { hiltViewModel() },
     libraryDownloadViewModelProvider: @Composable () -> LibraryDownloadActionsViewModel? = { null },
     downloadSettingsViewModelProvider: @Composable () -> DownloadSettingsViewModel? = { null },
+    transcodeSettingsViewModelProvider: @Composable () -> TranscodeSettingsViewModel? = { null },
     onRouteChanged: (String) -> Unit = {},
     onUserAction: (String) -> Unit = {},
     openDownloadsRequest: Boolean = false,
@@ -443,6 +446,7 @@ fun OmnisonicShell(
                         downloadsViewModelProvider = downloadsViewModelProvider,
                         libraryDownloadViewModelProvider = libraryDownloadViewModelProvider,
                         downloadSettingsViewModelProvider = downloadSettingsViewModelProvider,
+                        transcodeSettingsViewModelProvider = transcodeSettingsViewModelProvider,
                         onOpenDownloads = { controller.navigateTo(ShellRoutes.DOWNLOADS) },
                         onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                         onTabTapped = onTabTapped,
@@ -485,6 +489,7 @@ fun OmnisonicShell(
                     downloadsViewModelProvider = downloadsViewModelProvider,
                     libraryDownloadViewModelProvider = libraryDownloadViewModelProvider,
                     downloadSettingsViewModelProvider = downloadSettingsViewModelProvider,
+                    transcodeSettingsViewModelProvider = transcodeSettingsViewModelProvider,
                     onOpenDownloads = { controller.navigateTo(ShellRoutes.DOWNLOADS) },
                     onOpenSetup = { controller.navigateTo(ShellRoutes.PROVIDER_SETUP) },
                     onTabTapped = onTabTapped,
@@ -547,6 +552,7 @@ private fun ShellContentArea(
     downloadsViewModelProvider: @Composable () -> DownloadsViewModel,
     libraryDownloadViewModelProvider: @Composable () -> LibraryDownloadActionsViewModel?,
     downloadSettingsViewModelProvider: @Composable () -> DownloadSettingsViewModel?,
+    transcodeSettingsViewModelProvider: @Composable () -> TranscodeSettingsViewModel? = { null },
     onOpenDownloads: () -> Unit,
     onOpenSetup: () -> Unit,
     onTabTapped: (MainTab) -> Unit,
@@ -587,6 +593,7 @@ private fun ShellContentArea(
             settingsViewModel = settingsViewModel,
             historySettingsViewModel = historySettingsViewModel,
             downloadSettingsViewModel = downloadSettingsViewModelProvider(),
+            transcodeSettingsViewModel = transcodeSettingsViewModelProvider(),
             syncManagerViewModel = syncManagerViewModel,
             pendingSyncViewModel = pendingSyncViewModel,
             searchViewModel = searchViewModel,

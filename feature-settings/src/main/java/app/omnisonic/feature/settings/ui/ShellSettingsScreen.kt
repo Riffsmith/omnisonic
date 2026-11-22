@@ -42,6 +42,8 @@ import app.omnisonic.feature.settings.sync.LibrarySyncManagerSection
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.feature.settings.sync.PendingSyncSection
 import app.omnisonic.feature.settings.sync.PendingSyncViewModel
+import app.omnisonic.feature.settings.transcode.TranscodeSettingsSection
+import app.omnisonic.feature.settings.transcode.TranscodeSettingsViewModel
 import app.omnisonic.style.NavigationLayout
 import app.omnisonic.style.OmnisonicTheme
 
@@ -60,6 +62,7 @@ fun ShellSettingsScreen(
     pendingSyncViewModel: PendingSyncViewModel,
     viewModel: ShellSettingsViewModel = hiltViewModel(),
     historySettingsViewModel: HistorySettingsViewModel,
+    transcodeSettingsViewModel: TranscodeSettingsViewModel? = null,
     onShareLogs: () -> Unit = {},
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
@@ -80,6 +83,7 @@ fun ShellSettingsScreen(
         historySettingsViewModel = historySettingsViewModel,
         onOpenDownloads = onOpenDownloads,
         downloadSettingsViewModel = downloadSettingsViewModel,
+        transcodeSettingsViewModel = transcodeSettingsViewModel,
         onShareLogs = onShareLogs,
         onSetNetworkLogging = viewModel::setNetworkLogging,
     )
@@ -98,6 +102,7 @@ private fun ShellSettingsContent(
     historySettingsViewModel: HistorySettingsViewModel,
     onOpenDownloads: () -> Unit,
     downloadSettingsViewModel: DownloadSettingsViewModel?,
+    transcodeSettingsViewModel: TranscodeSettingsViewModel?,
     onShareLogs: () -> Unit,
     onSetNetworkLogging: (Boolean) -> Unit,
 ) {
@@ -163,6 +168,7 @@ private fun ShellSettingsContent(
         HistorySettingsSection(viewModel = historySettingsViewModel)
         SectionHeader(stringResource(R.string.settings_group_playback))
         NotificationSettingsRow()
+        transcodeSettingsViewModel?.let { TranscodeSettingsSection(viewModel = it) }
         SectionHeader(stringResource(R.string.settings_group_about))
         Row(
             modifier = Modifier.fillMaxWidth(),

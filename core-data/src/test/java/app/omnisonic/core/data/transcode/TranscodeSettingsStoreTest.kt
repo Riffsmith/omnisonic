@@ -62,6 +62,8 @@ class TranscodeSettingsStoreTest {
             downloadBitrateKbps = 192,
             mandatory = true,
             preferredFormat = "opus",
+            vpnAsCellular = false,
+            meteredAsCellular = false,
         )
 
         store.setSettings(TranscodeRendererId.Local, expected)
@@ -90,7 +92,40 @@ class TranscodeSettingsStoreTest {
         assertThat(prefs[DOWNLOAD_BITRATE]).isNull()
         assertThat(prefs[PREFERRED_FORMAT]).isNull()
         assertThat(prefs[MANDATORY]).isTrue()
+        assertThat(prefs[VPN_AS_CELLULAR]).isTrue()
+        assertThat(prefs[METERED_AS_CELLULAR]).isTrue()
         assertThat(store.current()).isEqualTo(TranscodeSettings(mandatory = true))
+    }
+
+    @Test
+    fun `vpn and metered classification toggles round-trip per renderer`() = runTest {
+        val store = newStore()
+        val otherRenderer = TranscodeRendererId("test-renderer")
+
+        store.setSettings(
+            TranscodeRendererId.Local,
+            TranscodeSettings(vpnAsCellular = false, meteredAsCellular = false),
+        )
+        store.setSettings(otherRenderer, TranscodeSettings(meteredAsCellular = false))
+
+        assertThat(store.current())
+            .isEqualTo(TranscodeSettings(vpnAsCellular = false, meteredAsCellular = false))
+        assertThat(store.current(otherRenderer)).isEqualTo(TranscodeSettings(meteredAsCellular = false))
+    }
+
+    @Test
+    fun `absent classification toggles decode to the confirmed as-cellular defaults`() = runTest {
+        val dataStore = newDataStore(File(tempDir, "legacy.preferences_pb"))
+        dataStore.edit { prefs ->
+            prefs[WIFI_BITRATE] = 320
+            prefs[MANDATORY] = true
+        }
+        val prefs = dataStore.data.first()
+        assertThat(prefs[VPN_AS_CELLULAR]).isNull()
+        assertThat(prefs[METERED_AS_CELLULAR]).isNull()
+
+        assertThat(TranscodeSettingsStore(dataStore).current())
+            .isEqualTo(TranscodeSettings(wifiBitrateKbps = 320, mandatory = true))
     }
 
     @Test
@@ -224,6 +259,8 @@ class TranscodeSettingsStoreTest {
         val CELLULAR_BITRATE = intPreferencesKey("transcode.local.cellular_bitrate_kbps")
         val DOWNLOAD_BITRATE = intPreferencesKey("transcode.local.download_bitrate_kbps")
         val MANDATORY = booleanPreferencesKey("transcode.local.mandatory")
+        val VPN_AS_CELLULAR = booleanPreferencesKey("transcode.local.vpn_as_cellular")
+        val METERED_AS_CELLULAR = booleanPreferencesKey("transcode.local.metered_as_cellular")
         val PREFERRED_FORMAT = stringPreferencesKey("transcode.local.preferred_format")
     }
 }

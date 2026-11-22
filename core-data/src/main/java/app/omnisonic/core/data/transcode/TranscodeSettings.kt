@@ -6,6 +6,10 @@ data class TranscodeSettings(
     val downloadBitrateKbps: Int? = null,
     val mandatory: Boolean = false,
     val preferredFormat: String? = null,
+    /** D-60: a VPN transport takes the cellular slot unless the user opts out. */
+    val vpnAsCellular: Boolean = true,
+    /** D-60: a metered network takes the cellular slot unless the user opts out. */
+    val meteredAsCellular: Boolean = true,
 ) {
     init {
         TranscodeSettingsValidation.requireValidBitrate(wifiBitrateKbps)

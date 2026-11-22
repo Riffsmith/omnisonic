@@ -58,9 +58,15 @@ class TranscodePlannerTest {
         private val rendererCommon = RendererCapabilities(setOf("mp3", "aac", "flac", "opus"))
         private val rendererFlacOnly = RendererCapabilities(setOf("flac"))
         private val rendererNone = RendererCapabilities(emptySet())
+        private val rendererCommon48k = RendererCapabilities(setOf("mp3", "aac", "flac", "opus"), maxSampleRateHz = 48000)
+        private val rendererUnknown48k = RendererCapabilities(null, maxSampleRateHz = 48000)
+        private val rendererNone48k = RendererCapabilities(emptySet(), maxSampleRateHz = 48000)
 
         private val srcMp3 = TranscodeSource(format = "mp3", bitrateKbps = 320, sampleRateHz = 44100)
         private val srcFlac = TranscodeSource(format = "flac", bitrateKbps = 1000, sampleRateHz = 96000)
+        private val srcFlac44 = TranscodeSource(format = "flac", bitrateKbps = 1000, sampleRateHz = 44100)
+        private val srcFlac48 = TranscodeSource(format = "flac", bitrateKbps = 1000, sampleRateHz = 48000)
+        private val srcHiRes192 = TranscodeSource(format = "flac", bitrateKbps = 2000, sampleRateHz = 192000)
         private val srcDsd = TranscodeSource(format = "dsd", bitrateKbps = 2822, sampleRateHz = 2822400)
         private val srcUnknown = TranscodeSource(format = null)
         private val srcFlacNoMeta = TranscodeSource(format = "flac")
@@ -356,6 +362,91 @@ class TranscodePlannerTest {
                     renderer = rendererUnknown,
                 ),
                 TranscodeDecision.Refused(TranscodeRefusalReason.PROVIDER_CANNOT_TRANSCODE),
+            ),
+            case(
+                "sample rate below the device limit direct-plays",
+                input(source = srcFlac44, renderer = rendererCommon48k),
+                TranscodeDecision.DirectPlay,
+            ),
+            case(
+                "sample rate at the device limit direct-plays",
+                input(source = srcFlac48, renderer = rendererCommon48k),
+                TranscodeDecision.DirectPlay,
+            ),
+            case(
+                "sample rate above the device limit forces a server transcode",
+                input(source = srcFlac, renderer = rendererCommon48k),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = null, format = null),
+            ),
+            case(
+                "a very high sample rate above the limit forces a server transcode",
+                input(source = srcHiRes192, renderer = rendererCommon48k),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = null, format = null),
+            ),
+            case(
+                "above-limit source combines with the explicit slot bitrate",
+                input(source = srcFlac, renderer = rendererCommon48k, settings = settingsWifi320),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = 320, format = null),
+            ),
+            case(
+                "above-limit source combines with the format preference",
+                input(source = srcFlac, renderer = rendererCommon48k, settings = settingsFormatOpus),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = null, format = "opus"),
+            ),
+            case(
+                "above-limit source combines with bitrate and format",
+                input(source = srcFlac, renderer = rendererCommon48k, settings = settingsMandatoryFormat),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = 192, format = "mp3"),
+            ),
+            case(
+                "mandatory above the limit still plans a server-default transcode",
+                input(source = srcFlac, renderer = rendererCommon48k, settings = settingsMandatory),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = null, format = null),
+            ),
+            case(
+                "above-limit source with provider lacking transcode refuses with renderer reason",
+                input(source = srcFlac, renderer = rendererCommon48k, traits = traitsNoTranscode),
+                TranscodeDecision.Refused(TranscodeRefusalReason.RENDERER_CANNOT_PLAY_SOURCE),
+            ),
+            case(
+                "above-limit source with explicit bitrate and provider lacking transcode refuses",
+                input(
+                    source = srcFlac,
+                    renderer = rendererCommon48k,
+                    settings = settingsWifi320,
+                    traits = traitsNoTranscode,
+                ),
+                TranscodeDecision.Refused(TranscodeRefusalReason.RENDERER_CANNOT_PLAY_SOURCE),
+            ),
+            case(
+                "missing device limit cannot prove a sample-rate exceedance",
+                input(source = srcFlac, renderer = rendererCommon),
+                TranscodeDecision.DirectPlay,
+            ),
+            case(
+                "missing source sample rate cannot prove a mismatch against a device limit",
+                input(source = srcFlacNoMeta, renderer = rendererCommon48k),
+                TranscodeDecision.DirectPlay,
+            ),
+            case(
+                "device limit applies even with unknown renderer formats",
+                input(source = srcFlac, renderer = rendererUnknown48k),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = null, format = null),
+            ),
+            case(
+                "device limit applies on the download slot",
+                input(source = srcFlac, renderer = rendererCommon48k, kind = TranscodeRequestKind.DOWNLOAD),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = null, format = null),
+            ),
+            case(
+                "empty capability set with at-limit sample rate still needs transcode",
+                input(source = srcFlac48, renderer = rendererNone48k),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = null, format = null),
+            ),
+            case(
+                "empty capability set with below-limit sample rate still needs transcode",
+                input(source = srcFlac44, renderer = rendererNone48k),
+                TranscodeDecision.ServerTranscode(maxBitRateKbps = null, format = null),
             ),
         )
 

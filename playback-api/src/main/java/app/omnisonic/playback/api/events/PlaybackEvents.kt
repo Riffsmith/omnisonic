@@ -5,7 +5,12 @@ import app.omnisonic.playback.api.queue.QueueState
 import kotlinx.coroutines.flow.SharedFlow
 
 enum class PauseReason { USER, FOCUS }
-enum class TrackChangeCause { SOURCE_START, AUTO_ADVANCE, USER_NEXT, USER_PREV, JUMP, REPEAT_ONE, QUEUE_EDIT, RESTORE }
+enum class TrackChangeCause {
+    SOURCE_START, AUTO_ADVANCE, USER_NEXT, USER_PREV, JUMP, REPEAT_ONE, QUEUE_EDIT, RESTORE,
+
+    /** D-61: same entry re-requested at its current position after a profile change; not a new playback. */
+    REPLAN,
+}
 enum class EndCause { NATURAL, SKIPPED, REPLACED, STOPPED }
 
 sealed interface PlaybackEvent {

@@ -81,7 +81,7 @@ them (unknown api → Subsonic defaults).
 |---|---|---|---|
 | `hasLibrarySync` | true | true | `SubsonicLibrarySyncer.runSync` (skips with a typed outcome, writes no sync-state row) |
 | `supportsDownload` | true | false | `DownloadEnqueuer` (`SkippedDownloadUnsupported`, nothing written) |
-| `supportsServerTranscode` | true | false | Reserved for the transcode planner (phase 8 seam) |
+| `supportsServerTranscode` | true | false | Pure transcode planner (`Refused(PROVIDER_CANNOT_TRANSCODE)` when a transcode is needed); since TODO 6 (D-61) also the `ProviderTraitsLookup` wired in `PlaybackWiringModule`, which resolves traits from the provider row's api (`providerDao().selectById(id)?.api`) at resolve time |
 | `reportsUserData` | true | false | Outbox enqueue writes NOTHING and returns `SkippedNoUserDataReporting` |
 
 [VERIFIED] Every gate degrades politely: a typed result, no exception, no partial
@@ -101,8 +101,12 @@ sites without a tracker).
 resolve to `OK` — the gate owns network facts, not row lookup.
 
 [VERIFIED] `NetworkMonitor` is the only consumer of `ConnectivityManager`
-(`NET_CAPABILITY_INTERNET`, `TRANSPORT_WIFI`); it is an injected seam with a
-Robolectric-shadowable implementation.
+(`NET_CAPABILITY_INTERNET`, `TRANSPORT_WIFI`, plus `NET_CAPABILITY_NOT_METERED`
+and `TRANSPORT_VPN` since Phase 8 TODO 5); it is an injected seam with a
+Robolectric-shadowable implementation. `NetworkState` gained additive
+`metered`/`vpn` flags (default false); run-gate consumers keep reading only
+`connected`/`wifi`, so gate behavior is unchanged — a VPN-only network still
+reads as not-Wi-Fi. The new flags feed only the D-60 transcode slot policy.
 
 [VERIFIED] Consumers: sync skips before any read or write (no sync-state row);
 `OutboxDrainer.drain(providerId)` returns `DrainReport(blockedBy = status)` and

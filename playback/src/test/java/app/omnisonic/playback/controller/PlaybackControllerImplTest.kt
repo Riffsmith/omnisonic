@@ -726,4 +726,53 @@ class PlaybackControllerImplTest {
         assertThat(points.single().entry.queueItemId).isEqualTo(1L)
         assertThat(points.single().positionMs).isEqualTo(200_000L)
     }
+
+    @Test
+    fun `a mid-track replan re-requests the stream but does not re-arm the scrobble point`() = runTest {
+        val f = newFixture()
+        f.controller.play(listOf(entry(1, durationMs = 200_000)))
+        runCurrent()
+        f.player.playerListener?.isPlayingChanged(true)
+        f.player.positionMs = 191_000
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertThat(f.events.filterIsInstance<PlaybackEvent.ScrobblePoint>()).hasSize(1)
+
+        f.controller.replanCurrentStream()
+        runCurrent()
+
+        assertThat(f.player.played).hasSize(2)
+        assertThat(f.player.played.last().queueItemId).isEqualTo(1L)
+        assertThat(f.events.filterIsInstance<PlaybackEvent.TrackChanged>().last().cause)
+            .isEqualTo(TrackChangeCause.REPLAN)
+
+        f.player.positionMs = 199_000
+        advanceTimeBy(2_000)
+        runCurrent()
+
+        assertThat(f.events.filterIsInstance<PlaybackEvent.ScrobblePoint>()).hasSize(1)
+    }
+
+    @Test
+    fun `a REPLAN that bounced to another entry re-arms the scrobble point`() = runTest {
+        val f = newFixture()
+        val first = entry(1, durationMs = 200_000)
+        val second = entry(2, durationMs = 200_000)
+        f.controller.play(listOf(first, second))
+        runCurrent()
+        f.player.playerListener?.isPlayingChanged(true)
+        f.player.positionMs = 191_000
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertThat(f.events.filterIsInstance<PlaybackEvent.ScrobblePoint>()).hasSize(1)
+
+        // A failed replan of entry 1 advances to entry 2 under the REPLAN cause.
+        f.bus.emit(PlaybackEvent.TrackChanged(first, second, TrackChangeCause.REPLAN, f.queue.state.value))
+        f.bus.emit(PlaybackEvent.Position(second, 195_000, isPlaying = true))
+        runCurrent()
+
+        val points = f.events.filterIsInstance<PlaybackEvent.ScrobblePoint>()
+        assertThat(points).hasSize(2)
+        assertThat(points.last().entry.queueItemId).isEqualTo(2L)
+    }
 }

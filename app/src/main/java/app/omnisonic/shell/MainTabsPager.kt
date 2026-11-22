@@ -21,6 +21,7 @@ import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.feature.settings.sync.PendingSyncViewModel
+import app.omnisonic.feature.settings.transcode.TranscodeSettingsViewModel
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
 import app.omnisonic.feature.settings.ui.label
 import app.omnisonic.log.LogExport
@@ -47,6 +48,7 @@ internal fun MainTabsPager(
     settingsViewModel: ShellSettingsViewModel,
     historySettingsViewModel: HistorySettingsViewModel,
     downloadSettingsViewModel: DownloadSettingsViewModel?,
+    transcodeSettingsViewModel: TranscodeSettingsViewModel? = null,
     syncManagerViewModel: LibrarySyncManagerViewModel,
     pendingSyncViewModel: PendingSyncViewModel,
     searchViewModel: SearchViewModel,
@@ -105,6 +107,7 @@ internal fun MainTabsPager(
                 viewModel = settingsViewModel,
                 historySettingsViewModel = historySettingsViewModel,
                 downloadSettingsViewModel = downloadSettingsViewModel,
+                transcodeSettingsViewModel = transcodeSettingsViewModel,
                 onShareLogs = { LogExport.shareIntent(context)?.let(context::startActivity) },
             )
         }

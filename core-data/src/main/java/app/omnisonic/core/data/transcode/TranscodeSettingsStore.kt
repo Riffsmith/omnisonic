@@ -39,6 +39,8 @@ class TranscodeSettingsStore(
             prefs.setNullable(keys.cellularBitrate, settings.cellularBitrateKbps)
             prefs.setNullable(keys.downloadBitrate, settings.downloadBitrateKbps)
             prefs[keys.mandatory] = settings.mandatory
+            prefs[keys.vpnAsCellular] = settings.vpnAsCellular
+            prefs[keys.meteredAsCellular] = settings.meteredAsCellular
             prefs.setNullable(keys.preferredFormat, settings.preferredFormat)
         }
     }
@@ -50,6 +52,8 @@ class TranscodeSettingsStore(
             cellularBitrateKbps = TranscodeSettingsValidation.persistedBitrate(this[keys.cellularBitrate]),
             downloadBitrateKbps = TranscodeSettingsValidation.persistedBitrate(this[keys.downloadBitrate]),
             mandatory = this[keys.mandatory] ?: false,
+            vpnAsCellular = this[keys.vpnAsCellular] ?: true,
+            meteredAsCellular = this[keys.meteredAsCellular] ?: true,
             preferredFormat = TranscodeSettingsValidation.persistedFormat(this[keys.preferredFormat]),
         )
     }
@@ -65,6 +69,8 @@ class TranscodeSettingsStore(
         val cellularBitrate = intPreferencesKey("$prefix.cellular_bitrate_kbps")
         val downloadBitrate = intPreferencesKey("$prefix.download_bitrate_kbps")
         val mandatory = booleanPreferencesKey("$prefix.mandatory")
+        val vpnAsCellular = booleanPreferencesKey("$prefix.vpn_as_cellular")
+        val meteredAsCellular = booleanPreferencesKey("$prefix.metered_as_cellular")
         val preferredFormat = stringPreferencesKey("$prefix.preferred_format")
     }
 

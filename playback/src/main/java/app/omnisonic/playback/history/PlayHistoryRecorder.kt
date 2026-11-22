@@ -4,6 +4,7 @@ import app.omnisonic.core.model.log.ConsoleLogSink
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.playback.api.events.PlaybackEvent
 import app.omnisonic.playback.api.events.PlaybackEventBus
+import app.omnisonic.playback.api.events.TrackChangeCause
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -87,7 +88,7 @@ class PlayHistoryRecorder(
             is PlaybackEvent.ScrobblePoint -> onThresholdHint(event.entry, event.positionMs)
             is PlaybackEvent.Finished -> onFinished(event.entry, event.playedAtMs)
             is PlaybackEvent.Skipped -> onSkipped(event.entry, event.playedAtMs)
-            is PlaybackEvent.TrackChanged -> onTrackChanged(event.previous, event.current)
+            is PlaybackEvent.TrackChanged -> onTrackChanged(event.previous, event.current, event.cause)
         }
     }
 
@@ -146,7 +147,19 @@ class PlayHistoryRecorder(
         open = null
     }
 
-    private suspend fun onTrackChanged(previous: PlaybackQueueEntry?, current: PlaybackQueueEntry?) {
+    private suspend fun onTrackChanged(
+        previous: PlaybackQueueEntry?,
+        current: PlaybackQueueEntry?,
+        cause: TrackChangeCause,
+    ) {
+        // A REPLAN re-request of the same entry is the same playback: closing
+        // and reopening the span here would let one play count twice (D-61).
+        if (cause == TrackChangeCause.REPLAN &&
+            previous != null && current != null &&
+            previous.queueItemId == current.queueItemId
+        ) {
+            return
+        }
         val closing = open
         if (closing != null && previous != null && closing.entry.queueItemId == previous.queueItemId) {
             saveResumeIfEarly(closing.entry, closing.positionMs)

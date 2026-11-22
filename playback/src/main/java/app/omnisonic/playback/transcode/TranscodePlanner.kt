@@ -18,12 +18,13 @@ data class TranscodeSource(
 )
 
 /**
- * Renderer/device capability input. `supportedFormats == null` means the
- * capability is unknown, so no mismatch can be proven. The device sample-rate
- * limit is a separate later policy and is deliberately not read here.
+ * Renderer/device capability input. A null field means the capability is
+ * unknown, so no mismatch can be proven. `maxSampleRateHz` is the device
+ * sample-rate limit (D-59): a source above it cannot be played as-is.
  */
 data class RendererCapabilities(
     val supportedFormats: Set<String>?,
+    val maxSampleRateHz: Int? = null,
 )
 
 data class TranscodePlanInput(
@@ -86,9 +87,20 @@ object TranscodePlanner {
     }
 
     private fun rendererCanPlay(source: TranscodeSource, renderer: RendererCapabilities): Boolean {
-        val supported = renderer.supportedFormats ?: return true
-        val format = source.format?.let(::normalizeFormat) ?: return supported.isNotEmpty()
-        return format in supported.mapTo(mutableSetOf(), ::normalizeFormat)
+        val formatPlayable = when {
+            renderer.supportedFormats == null -> true
+            source.format == null -> renderer.supportedFormats.isNotEmpty()
+            else -> normalizeFormat(source.format) in
+                renderer.supportedFormats.mapTo(mutableSetOf(), ::normalizeFormat)
+        }
+        return formatPlayable && sampleRateWithinLimit(source, renderer)
+    }
+
+    /** At or below the reported limit the source plays as-is; only strictly above it needs a downsample (D-59). */
+    private fun sampleRateWithinLimit(source: TranscodeSource, renderer: RendererCapabilities): Boolean {
+        val limit = renderer.maxSampleRateHz ?: return true
+        val rate = source.sampleRateHz ?: return true
+        return rate <= limit
     }
 
     private fun normalizeFormat(value: String): String = value.trim().lowercase()

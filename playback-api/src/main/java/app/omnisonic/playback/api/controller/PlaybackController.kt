@@ -39,6 +39,12 @@ interface PlaybackController : QueueCommandPort {
 
     fun seekTo(positionMs: Long)
 
+    /**
+     * D-61: re-requests the current stream at its current position after the
+     * effective stream profile changed mid-track. See [QueuePlayer.replanCurrentStream].
+     */
+    fun replanCurrentStream()
+
     fun setPlaybackSpeed(scale: Float)
     fun setPlaybackPitch(pitch: Float)
 

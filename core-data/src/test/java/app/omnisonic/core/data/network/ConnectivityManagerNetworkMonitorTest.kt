@@ -40,7 +40,22 @@ class ConnectivityManagerNetworkMonitorTest {
             addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
         }
 
-        assertThat(monitor().current()).isEqualTo(NetworkState(connected = true, wifi = true))
+        assertThat(monitor().current()).isEqualTo(
+            NetworkState(connected = true, wifi = true, metered = true, vpn = false),
+        )
+    }
+
+    @Test
+    fun unmeteredWifiReadsAsConnectedWifiAndNotMetered() {
+        installCapabilities {
+            addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+        }
+
+        assertThat(monitor().current()).isEqualTo(
+            NetworkState(connected = true, wifi = true, metered = false, vpn = false),
+        )
     }
 
     @Test
@@ -50,7 +65,22 @@ class ConnectivityManagerNetworkMonitorTest {
             addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
         }
 
-        assertThat(monitor().current()).isEqualTo(NetworkState(connected = true, wifi = false))
+        assertThat(monitor().current()).isEqualTo(
+            NetworkState(connected = true, wifi = false, metered = true, vpn = false),
+        )
+    }
+
+    @Test
+    fun unmeteredCellularReadsAsNotMetered() {
+        installCapabilities {
+            addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+        }
+
+        assertThat(monitor().current()).isEqualTo(
+            NetworkState(connected = true, wifi = false, metered = false, vpn = false),
+        )
     }
 
     @Test
@@ -60,7 +90,22 @@ class ConnectivityManagerNetworkMonitorTest {
             addTransportType(NetworkCapabilities.TRANSPORT_VPN)
         }
 
-        assertThat(monitor().current()).isEqualTo(NetworkState(connected = true, wifi = false))
+        assertThat(monitor().current()).isEqualTo(
+            NetworkState(connected = true, wifi = false, metered = true, vpn = true),
+        )
+    }
+
+    @Test
+    fun unmeteredVpnStillReadsAsVpnNonWifi() {
+        installCapabilities {
+            addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            addTransportType(NetworkCapabilities.TRANSPORT_VPN)
+        }
+
+        assertThat(monitor().current()).isEqualTo(
+            NetworkState(connected = true, wifi = false, metered = false, vpn = true),
+        )
     }
 
     @Test
@@ -69,7 +114,9 @@ class ConnectivityManagerNetworkMonitorTest {
             addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
         }
 
-        assertThat(monitor().current()).isEqualTo(NetworkState(connected = false, wifi = true))
+        assertThat(monitor().current()).isEqualTo(
+            NetworkState(connected = false, wifi = true, metered = true, vpn = false),
+        )
     }
 
     @Test

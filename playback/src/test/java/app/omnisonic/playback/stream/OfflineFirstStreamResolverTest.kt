@@ -189,4 +189,73 @@ class OfflineFirstStreamResolverTest {
         assertThat(stream.uri).isEqualTo(file.uri)
         assertThat(stream.cacheKey).isEqualTo(file.sourceKey)
     }
+
+    @Test
+    fun `an offline hit carries the requested start position for the player to seek`() = runTest {
+        val file = candidate(id = 1)
+
+        val stream = resolver(listOf(file)).resolve(entry(), 30_000L)!!
+
+        assertThat(stream.uri).isEqualTo(file.uri)
+        assertThat(stream.routedDirect).isTrue()
+        assertThat(stream.requiresNetwork).isFalse()
+        assertThat(stream.startPositionMs).isEqualTo(30_000L)
+        assertThat(stream.cacheKey).isEqualTo(file.sourceKey)
+    }
+
+    @Test
+    fun `an online miss forwards the requested start position to the online resolver`() = runTest {
+        val online = RecordingResolver()
+        val resolver = OfflineFirstStreamResolver(online, { _, _ -> emptyList() }, { AUTO_KEY })
+
+        val stream = resolver.resolve(entry(), 45_000L)!!
+
+        assertThat(online.calls).hasSize(1)
+        assertThat(online.calls.single().second).isEqualTo(45_000L)
+        assertThat(stream.uri).isEqualTo("http://host/stream?id=song-1")
+        assertThat(stream.startPositionMs).isEqualTo(45_000L)
+        assertThat(stream.requiresNetwork).isTrue()
+    }
+
+    @Test
+    fun `radio forwards the requested position online even with a stored file`() = runTest {
+        val online = RecordingResolver()
+        val resolver = OfflineFirstStreamResolver(online, { _, _ -> listOf(candidate(id = 1)) }, { AUTO_KEY })
+
+        val stream = resolver.resolve(entry(isRadioStation = true), 7_000L)!!
+
+        assertThat(online.calls.single().second).isEqualTo(7_000L)
+        assertThat(stream.isRadio).isTrue()
+        assertThat(stream.requiresNetwork).isTrue()
+    }
+
+    @Test
+    fun `a negative requested position is coerced to zero everywhere`() = runTest {
+        val online = RecordingResolver()
+        val withFile = OfflineFirstStreamResolver(online, { _, _ -> listOf(candidate(id = 1)) }, { AUTO_KEY })
+        val withoutFile = OfflineFirstStreamResolver(online, { _, _ -> emptyList() }, { AUTO_KEY })
+
+        assertThat(withFile.resolve(entry(), -5L)!!.startPositionMs).isEqualTo(0L)
+        assertThat(withoutFile.resolve(entry(), -5L)!!.startPositionMs).isEqualTo(0L)
+    }
+}
+
+private class RecordingResolver : app.omnisonic.playback.api.stream.StreamResolver {
+    val calls = mutableListOf<Pair<PlaybackQueueEntry, Long>>()
+
+    override suspend fun resolve(entry: PlaybackQueueEntry) =
+        resolve(entry, 0L)
+
+    override suspend fun resolve(
+        entry: PlaybackQueueEntry,
+        startPositionMs: Long,
+    ): app.omnisonic.playback.api.stream.ResolvedStream? {
+        calls += entry to startPositionMs
+        return app.omnisonic.playback.api.stream.ResolvedStream(
+            entry = entry,
+            uri = "http://host/stream?id=song-1",
+            startPositionMs = startPositionMs.coerceAtLeast(0L),
+            isRadio = entry.isRadioStation,
+        )
+    }
 }

@@ -16,6 +16,7 @@ import app.omnisonic.playback.api.stream.StreamResolver
 import androidx.media3.common.Player
 import app.omnisonic.playback.api.equalizer.PeqConfig
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -93,6 +94,63 @@ private class FakeStreamResolver(
         return ResolvedStream(
             entry = entry,
             uri = "stream://qa/${entry.queueItemId}",
+            requiresNetwork = false,
+        )
+    }
+}
+
+/** Bakes the requested position into the request: the returned timeline starts at 0. */
+private class OffsetBakingResolver : StreamResolver {
+    val requestedPositions = mutableListOf<Long>()
+
+    override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? = resolve(entry, 0L)
+
+    override suspend fun resolve(entry: PlaybackQueueEntry, startPositionMs: Long): ResolvedStream? {
+        requestedPositions += startPositionMs
+        return ResolvedStream(
+            entry = entry,
+            uri = "stream://qa/${entry.queueItemId}",
+            startPositionMs = 0L,
+            requiresNetwork = false,
+        )
+    }
+}
+
+/** A downloaded-file stream: direct URI, never restarted by a replan. */
+private class DirectStreamResolver : StreamResolver {
+    override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? = ResolvedStream(
+        entry = entry,
+        uri = "file:///data/offline/${entry.queueItemId}.mp3",
+        requiresNetwork = false,
+    )
+}
+
+/** Fails any positioned re-request (startPositionMs > 0), succeeds at 0. */
+private class ReplanFailsResolver : StreamResolver {
+    override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? = ResolvedStream(
+        entry = entry,
+        uri = "stream://qa/${entry.queueItemId}",
+        requiresNetwork = false,
+    )
+
+    override suspend fun resolve(entry: PlaybackQueueEntry, startPositionMs: Long): ResolvedStream? =
+        if (startPositionMs > 0L) null else resolve(entry)
+}
+
+/** Blocks inside resolve while [gate] is incomplete, to stage start races. */
+private class GatedResolver : StreamResolver {
+    val requestedPositions = mutableListOf<Long>()
+    var gate: CompletableDeferred<Unit>? = null
+
+    override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? = resolve(entry, 0L)
+
+    override suspend fun resolve(entry: PlaybackQueueEntry, startPositionMs: Long): ResolvedStream? {
+        requestedPositions += startPositionMs
+        gate?.await()
+        return ResolvedStream(
+            entry = entry,
+            uri = "stream://qa/${entry.queueItemId}",
+            startPositionMs = startPositionMs,
             requiresNetwork = false,
         )
     }
@@ -1197,5 +1255,132 @@ class QueuePlayerImplTest {
         f.queue.replayCurrent()
 
         assertThat(f.playerFake.played.map { it.entry.queueItemId }).containsExactly(1L, 2L, 2L).inOrder()
+    }
+
+    @Test
+    fun `replanCurrentStream re-requests the same entry at the current position without a skip`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1, 200_000), entry(2, 200_000)))
+        f.queue.onPositionTick(42_000)
+
+        f.queue.replanCurrentStream()
+
+        assertThat(f.playerFake.played).hasSize(2)
+        assertThat(f.playerFake.played.last().entry.queueItemId).isEqualTo(1L)
+        assertThat(f.playerFake.played.last().stream.startPositionMs).isEqualTo(42_000L)
+        val changes = f.bus.emitted.trackChanges()
+        assertThat(changes.last().cause).isEqualTo(TrackChangeCause.REPLAN)
+        assertThat(changes.last().previous?.queueItemId).isEqualTo(1L)
+        assertThat(changes.last().current?.queueItemId).isEqualTo(1L)
+        assertThat(f.bus.emitted.skips()).isEmpty()
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(1L)
+        assertThat(f.queue.state.value.positionMs).isEqualTo(42_000L)
+    }
+
+    @Test
+    fun `a resolver that bakes the offset into the request keeps positions song-relative`() {
+        val resolver = OffsetBakingResolver()
+        val f = newFixture(resolver)
+        f.queue.setQueue(listOf(entry(1, 200_000)))
+        f.queue.onPositionTick(42_000)
+
+        f.queue.replanCurrentStream()
+
+        assertThat(resolver.requestedPositions).containsExactly(0L, 42_000L).inOrder()
+        assertThat(f.playerFake.played.last().stream.startPositionMs).isEqualTo(0L)
+
+        f.queue.onPositionTick(8_000)
+        assertThat(f.queue.state.value.positionMs).isEqualTo(50_000L)
+
+        f.queue.seekTo(60_000)
+        assertThat(f.playerFake.seeks.last()).isEqualTo(18_000L)
+        assertThat(f.queue.state.value.positionMs).isEqualTo(60_000L)
+    }
+
+    @Test
+    fun `replanCurrentStream is a no-op for a direct offline stream`() {
+        val f = newFixture(DirectStreamResolver())
+        f.queue.setQueue(listOf(entry(1, 200_000)))
+        f.queue.onPositionTick(42_000)
+
+        f.queue.replanCurrentStream()
+
+        assertThat(f.playerFake.played).hasSize(1)
+        assertThat(f.bus.emitted.trackChanges().single().cause).isEqualTo(TrackChangeCause.SOURCE_START)
+    }
+
+    @Test
+    fun `replanCurrentStream is a no-op while idle`() {
+        val f = newFixture()
+        f.queue.restore(QueueState(entries = listOf(entry(1, 200_000)), positionMs = 42_000))
+
+        f.queue.replanCurrentStream()
+
+        assertThat(f.playerFake.played).isEmpty()
+        assertThat(f.bus.emitted.trackChanges().filter { it.cause == TrackChangeCause.REPLAN }).isEmpty()
+    }
+
+    @Test
+    fun `replanCurrentStream is a no-op for a radio station`() {
+        val f = newFixture()
+        val radio = PlaybackQueueEntry(
+            providerId = 1,
+            externalId = "ext-9",
+            queueItemId = 9,
+            title = "Radio",
+            isRadioStation = true,
+        )
+        f.queue.setQueue(listOf(radio))
+        f.queue.onPositionTick(42_000)
+
+        f.queue.replanCurrentStream()
+
+        assertThat(f.playerFake.played).hasSize(1)
+    }
+
+    @Test
+    fun `replanCurrentStream is a no-op after release`() {
+        val f = newFixture()
+        f.queue.setQueue(listOf(entry(1)))
+
+        f.queue.release()
+        f.queue.replanCurrentStream()
+
+        assertThat(f.playerFake.played).hasSize(1)
+    }
+
+    @Test
+    fun `a superseded replan leaves the armed position for its successor`() {
+        val resolver = GatedResolver()
+        val f = newFixture(resolver)
+        f.queue.setQueue(listOf(entry(1, 200_000)))
+        assertThat(f.playerFake.played).hasSize(1)
+
+        resolver.gate = CompletableDeferred()
+        f.queue.onPositionTick(10_000)
+        f.queue.replanCurrentStream()
+        f.queue.onPositionTick(20_000)
+        f.queue.replanCurrentStream()
+        resolver.gate!!.complete(Unit)
+
+        assertThat(resolver.requestedPositions).containsExactly(0L, 10_000L, 20_000L).inOrder()
+        assertThat(f.playerFake.played).hasSize(2)
+        assertThat(f.playerFake.played.last().stream.startPositionMs).isEqualTo(20_000L)
+        assertThat(f.bus.emitted.trackChanges().filter { it.cause == TrackChangeCause.REPLAN }).hasSize(1)
+    }
+
+    @Test
+    fun `a replan whose re-request fails bounces to the next entry like any start failure`() {
+        val f = newFixture(ReplanFailsResolver())
+        f.queue.setQueue(listOf(entry(1, 200_000), entry(2, 200_000)))
+        assertThat(f.playerFake.played.single().entry.queueItemId).isEqualTo(1L)
+        f.queue.onPositionTick(30_000)
+
+        f.queue.replanCurrentStream()
+
+        assertThat(f.playerFake.played.map { it.entry.queueItemId }).containsExactly(1L, 2L).inOrder()
+        assertThat(f.playerFake.played.last().stream.startPositionMs).isEqualTo(0L)
+        assertThat(f.queue.state.value.currentEntry?.queueItemId).isEqualTo(2L)
+        assertThat(f.bus.emitted.trackChanges().last().cause).isEqualTo(TrackChangeCause.REPLAN)
     }
 }

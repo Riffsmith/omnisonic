@@ -5,6 +5,7 @@ import app.omnisonic.playback.api.controller.PlayerCoreState
 import app.omnisonic.playback.api.events.PauseReason
 import app.omnisonic.playback.api.events.PlaybackEvent
 import app.omnisonic.playback.api.events.PlaybackEventBus
+import app.omnisonic.playback.api.events.TrackChangeCause
 import app.omnisonic.playback.api.player.OmniPlayer
 import app.omnisonic.playback.api.player.OmniPlayerListener
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
@@ -150,8 +151,18 @@ class PlaybackControllerImpl(
             events.events.collect { event ->
                 when (event) {
                     is PlaybackEvent.Started -> scrobblePoints.onPlaybackStarted()
-                    is PlaybackEvent.TrackChanged ->
-                        if (event.current != null) scrobblePoints.onPlaybackStarted()
+                    is PlaybackEvent.TrackChanged -> {
+                        // A REPLAN re-request of the same entry is the same
+                        // playback; re-arming here would allow a second point.
+                        // A REPLAN that bounced to another entry is a new
+                        // playback and must re-arm.
+                        val current = event.current
+                        val sameEntryReplan = event.cause == TrackChangeCause.REPLAN &&
+                            event.previous?.queueItemId == current?.queueItemId
+                        if (current != null && !sameEntryReplan) {
+                            scrobblePoints.onPlaybackStarted()
+                        }
+                    }
                     is PlaybackEvent.Position ->
                         scrobblePoints.onPosition(event.entry, event.positionMs, event.isPlaying)
                     is PlaybackEvent.Finished ->
@@ -215,6 +226,12 @@ class PlaybackControllerImpl(
         this.positionMs = target
         events.emit(PlaybackEvent.Position(queue.state.value.currentEntry, target, enginePlaying))
         publishState()
+    }
+
+    override fun replanCurrentStream() {
+        if (released) return
+        logger.info(TAG, "replan current stream")
+        queue.replanCurrentStream()
     }
 
     override fun setPlaybackSpeed(scale: Float) {

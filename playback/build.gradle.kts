@@ -49,6 +49,10 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.datastore.preferences)
+    // core-data keeps room as `implementation`; referencing OmnisonicDatabase
+    // (the provider-traits lookup reads the provider row's api) needs the
+    // supertype on this module's own classpath.
+    implementation(libs.room.runtime)
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.platform.launcher)

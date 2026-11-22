@@ -65,6 +65,8 @@ internal class FakePlaybackController : PlaybackController {
         seeks += positionMs
     }
 
+    override fun replanCurrentStream() = Unit
+
     override fun setPlaybackSpeed(scale: Float) = Unit
     override fun setPlaybackPitch(pitch: Float) = Unit
     override fun applyAction(action: NotificationAction) = Unit

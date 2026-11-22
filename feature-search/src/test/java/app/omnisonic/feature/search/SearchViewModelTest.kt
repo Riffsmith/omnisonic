@@ -74,6 +74,7 @@ class SearchViewModelTest {
         override fun resume() = Unit
         override fun stop() = Unit
         override fun seekTo(positionMs: Long) = Unit
+        override fun replanCurrentStream() = Unit
         override fun setPlaybackSpeed(scale: Float) = Unit
         override fun setPlaybackPitch(pitch: Float) = Unit
         override fun applyAction(action: NotificationAction) = Unit

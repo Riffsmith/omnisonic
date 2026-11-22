@@ -1,14 +1,14 @@
 # Transcode settings — `transcode-settings.md`
 
-Purpose: define the persisted per-renderer transcode preferences introduced in Phase 8 task 1, their validation boundaries, and the evidence limit of this settings-only task.
+Purpose: define the persisted per-renderer transcode preferences introduced in Phase 8 task 1, their validation boundaries, the network-classification toggles added in TODO 5, and the evidence limit of the model/policy-only tasks.
 
-How derived: user-confirmed D-51 and the transcoded-download continuity decision D-52, the Phase 8 dependency plan, and direct inspection of the Omnisonic model, DataStore store, and named JVM tests.
+How derived: user-confirmed D-51 and the transcoded-download continuity decision D-52, the user-confirmed metered/VPN semantics D-60 (TODO 5, 2026-11-22), the Phase 8 dependency plan, and direct inspection of the Omnisonic model, DataStore store, and named JVM tests.
 
-Confidence: model, persistence, validation, and renderer isolation are [VERIFIED JVM]. No planner, request, network-classification, device, live-server, or UI behavior is claimed.
+Confidence: model, persistence, validation, renderer isolation, and the D-60 toggle defaults/decode are [VERIFIED JVM]. No planner, request, device, live-server, or UI behavior is claimed.
 
-Date: 2026-11-22
+Date: 2026-11-22 (D-60 toggles added 2026-11-22, TODO 5)
 
-Links: `decisions.md` D-51/D-52; `offline-resolution.md`; `../storage/download-acceptance.md`; `.agents/plans/phase-8-tasks.md`.
+Links: `decisions.md` D-51/D-52/D-60; `offline-resolution.md`; `transcode-planner.md` §Network slot resolution; `../providers/provider-connections.md`; `../storage/download-acceptance.md`; `.agents/plans/phase-8-tasks.md`.
 
 ---
 
@@ -22,13 +22,15 @@ Links: `decisions.md` D-51/D-52; `offline-resolution.md`; `../storage/download-a
 
 ## Persistence and invalid data
 
-[VERIFIED] `TranscodeSettingsStore` persists each renderer's five values in the `omnisonic_transcode` preferences DataStore under keys namespaced by `transcode.<renderer-id>`. A whole settings object is written in one DataStore edit. Explicit bitrates and formats use integer/string preferences; off bitrates and absent format preference remove their keys. Mandatory is always stored as a boolean. `settingsFor` exposes a flow and `current` awaits its first persisted emission. File, injected-DataStore, and in-memory factories follow the established settings-store seam.
+[VERIFIED] `TranscodeSettingsStore` persists each renderer's values in the `omnisonic_transcode` preferences DataStore under keys namespaced by `transcode.<renderer-id>` (same store, same per-renderer namespacing, same atomic whole-object edit — TODO 5 adds keys additively, no store reshape or migration). Explicit bitrates and formats use integer/string preferences; off bitrates and absent format preference remove their keys. Mandatory and the two D-60 classification toggles are always stored as booleans. `settingsFor` exposes a flow and `current` awaits its first persisted emission. File, injected-DataStore, and in-memory factories follow the established settings-store seam.
+
+[VERIFIED, TODO 5 / D-60] `TranscodeSettings` also carries `vpnAsCellular` and `meteredAsCellular`, both defaulting to `true` — the user-confirmed semantics that a VPN transport and a metered network take the cellular slot — persisted per renderer as `transcode.<renderer-id>.vpn_as_cellular` / `.metered_as_cellular`. Persisted data written before these keys existed decodes them to `true` (the confirmed defaults), and each toggle round-trips independently per renderer without touching other renderers. TODO 6 (D-61) ships the settings rows: `TranscodeSettingsSection` in the shell settings' playback group renders both toggles as Switch rows (button twin + accessibility description per the Phase 5 pattern), driven by `TranscodeSettingsViewModel`, which rewrites the whole renderer object atomically through a mutex so rapid toggles lose no update; the playback `StreamProfileWatcher` reads the same store, so a toggle changes the effective profile mid-track without any coupling to the UI.
 
 [VERIFIED] Constructor writes reject non-positive bitrates and invalid format/renderer tokens. When persisted data bypasses the model, a zero/negative bitrate decodes independently to off and an invalid format decodes independently to no preference; other valid fields, including mandatory, survive. DataStore read failures are not converted into fresh defaults. No Room entity, migration, schema export, request parameter, or credential-bearing value is involved.
 
 ## Scope boundaries
 
-[VERIFIED] Task 1 changes only the settings model/store, its Hilt provider, tests, and records. It does not implement pure planning, server decision/stream endpoints, network-aware resolution, device sample-rate policy, data-saver UI, transcoded HTTP downloads, Cast, on-device ffmpeg, or an embedded web server.
+[VERIFIED] Task 1 + TODO 5 change only the settings model/store (including the additive D-60 toggles), the `NetworkState` snapshot fields, the pure slot resolver, the `PlannedStreamVariants` slot selection, their Hilt wiring, tests, and records. They do not implement server decision/stream endpoints, device sample-rate policy (D-59 planner rule is separate), data-saver UI, transcoded HTTP downloads, Cast, on-device ffmpeg, or an embedded web server. TODO 6 (D-61) adds only the two D-60 toggle rows in settings (no data-saver UI — data saver is deferred to a dedicated post-Phase-12 phase per D-61).
 
 [VERIFIED] Phase 7 variant identity remains unchanged: optional bitrate/format continue through rule and queue rows, media keys, variant-qualified offline paths, and `offline_media.sourceKey`. Offline-first resolution and public MediaStore export ownership are untouched.
 
@@ -42,4 +44,6 @@ Links: `decisions.md` D-51/D-52; `offline-resolution.md`; `../storage/download-a
 
 [VERIFIED JVM 2026-11-22 — audit D-57] The follow-up serial gate `/tmp/opencode/phase-8-audit-fix-gate.log` exited 0; `/tmp/opencode/phase-8-audit-fix-xml-totals.txt` records `:core-data` **808/0/0/0** per variant, with model 6 and store 9. It covers reserved `auto` rejection, independent valid/invalid decode and deterministic suspended concurrent updates through the mutex-serialized in-memory DataStore.
 
-[UNKNOWN] No device or live server was exercised. Actual transcoding, network classification, renderer behavior beyond persistence isolation, transcoded response lengths/validators, playback seeking, and UI remain with their later tasks and evidence gates.
+[VERIFIED JVM 2026-11-22 — TODO 5 / D-60] The serial gate `/tmp/opencode/phase-8-task-5-gate.log` exited 0; `/tmp/opencode/phase-8-task-5-xml-totals.txt` records `:core-data` **814/0/0/0** per variant, with model 7 and store 11 — covering the toggle defaults, per-renderer toggle round-trips, and absent-key decode to the confirmed as-cellular defaults, plus the three new `ConnectivityManagerNetworkMonitorTest` metered/VPN cases.
+
+[UNKNOWN] No device or live server was exercised. Actual transcoding, device-reported network/capability values, renderer behavior beyond persistence isolation, transcoded response lengths/validators, playback seeking, and UI remain with their later tasks and evidence gates.

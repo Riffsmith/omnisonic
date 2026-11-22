@@ -10,6 +10,7 @@ import app.omnisonic.playback.api.queue.QueueState
 import app.omnisonic.playback.api.queue.RepeatMode
 import app.omnisonic.playback.api.queue.ShuffleOrders
 import app.omnisonic.playback.api.queue.ShuffleState
+import app.omnisonic.playback.api.stream.ResolvedStream
 import app.omnisonic.playback.api.stream.StreamResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -75,6 +76,20 @@ class QueuePlayerImpl(
     private var startJob: Job? = null
     private var prepareJob: Job? = null
     private var released = false
+
+    /** The stream the current entry was last started with; null when unknown. */
+    private var currentStream: ResolvedStream? = null
+
+    /** Stream resolved for the expected next entry; adopted on auto-advance. */
+    private var preparedStream: ResolvedStream? = null
+
+    /**
+     * Song-position origin of the current stream's timeline (D-61): 0 for a
+     * normal start, the armed position when the resolver baked it into the
+     * request and returned `startPositionMs = 0`. Engine ticks are added to it
+     * so [lastPositionMs] always stays a song position.
+     */
+    private var positionBaseMs = 0L
 
     override fun setQueue(
         entries: List<PlaybackQueueEntry>,
@@ -318,10 +333,24 @@ class QueuePlayerImpl(
         startCurrent(TrackChangeCause.SOURCE_START, null)
     }
 
+    override fun replanCurrentStream() {
+        if (released) return
+        val current = currentEntry() ?: return
+        if (!playing) return
+        if (current.isRadioStation) return
+        val stream = currentStream ?: return
+        // A direct-URI stream (downloaded file, local content) is never
+        // restarted: offline playback is authoritative (D-45).
+        if (stream.routedDirect) return
+        pendingPositionMs = lastPositionMs.coerceAtLeast(0L)
+        pendingPositionId = current.queueItemId
+        startCurrent(TrackChangeCause.REPLAN, current)
+    }
+
     override fun seekTo(positionMs: Long) {
         if (released) return
         val target = positionMs.coerceAtLeast(0L)
-        player.seekTo(target)
+        player.seekTo((target - positionBaseMs).coerceAtLeast(0L))
         lastPositionMs = target
         if (playing) {
             pendingPositionMs = 0L
@@ -420,6 +449,7 @@ class QueuePlayerImpl(
         lastPositionMs = restoredPosition
         pendingPositionMs = restoredPosition
         pendingPositionId = if (restoredPosition > 0L) currentEntry()?.queueItemId else null
+        positionBaseMs = 0L
         refreshState()
         schedulePrepareFollowing()
         bus.emit(PlaybackEvent.TrackChanged(null, currentEntry(), TrackChangeCause.RESTORE, _state.value))
@@ -451,6 +481,9 @@ class QueuePlayerImpl(
         previous?.let { bus.emit(PlaybackEvent.Finished(it, it.durationMs ?: lastPositionMs)) }
         playIndex = expectedPos
         playing = true
+        currentStream = preparedStream?.takeIf { it.entry.queueItemId == entry.queueItemId }
+        preparedStream = null
+        positionBaseMs = 0L
         refreshState()
         bus.emit(PlaybackEvent.TrackChanged(previous, expected, TrackChangeCause.AUTO_ADVANCE, _state.value))
         schedulePrepareFollowing()
@@ -458,7 +491,7 @@ class QueuePlayerImpl(
 
     override fun onPositionTick(positionMs: Long) {
         if (positionMs < 0) return
-        lastPositionMs = positionMs
+        lastPositionMs = positionBaseMs + positionMs
         val snapshot = snapshotPositionMs()
         if (abs(snapshot - _state.value.positionMs) >= POSITION_SNAPSHOT_GRANULARITY_MS) refreshState()
     }
@@ -485,21 +518,30 @@ class QueuePlayerImpl(
         startJob?.cancel()
         prepareJob?.cancel()
         startJob = engineScope.launch {
-            val resolved = streamResolver.resolve(target)
+            // Read before resolve: the 2-arg seam needs the armed position to
+            // bake it into the request. Cleared only after the generation
+            // check, so a superseded start leaves it for its successor.
+            val restorePosition = pendingPositionMs
+                .takeIf { pendingPositionId == target.queueItemId }
+                ?: 0L
+            val resolved = streamResolver.resolve(target, restorePosition)
             if (gen != startGeneration) return@launch
+            pendingPositionMs = 0L
+            pendingPositionId = null
             if (resolved == null) {
+                positionBaseMs = 0L
                 startFailureBounce(gen, previous, cause)
                 return@launch
             }
             startFailures = 0
-            val restorePosition = pendingPositionMs
-                .takeIf { pendingPositionId == target.queueItemId }
-                ?: 0L
-            pendingPositionMs = 0L
-            pendingPositionId = null
-            val stream = if (restorePosition > 0L) resolved.copy(startPositionMs = restorePosition) else resolved
-            lastPositionMs = stream.startPositionMs
-            player.play(stream, target)
+            // A resolver that baked the armed position into the request (a
+            // server transcode offset, D-61) returns startPositionMs = 0; the
+            // difference is the timeline origin of the returned stream.
+            positionBaseMs = (restorePosition - resolved.startPositionMs).coerceAtLeast(0L)
+            currentStream = resolved
+            preparedStream = null
+            lastPositionMs = positionBaseMs + resolved.startPositionMs
+            player.play(resolved, target)
             refreshState()
             bus.emit(PlaybackEvent.TrackChanged(previous, target, cause, _state.value))
             schedulePrepareFollowing()
@@ -557,6 +599,9 @@ class QueuePlayerImpl(
         startGeneration++
         startJob?.cancel()
         prepareJob?.cancel()
+        currentStream = null
+        preparedStream = null
+        positionBaseMs = 0L
         player.stop()
     }
 
@@ -580,6 +625,7 @@ class QueuePlayerImpl(
                 null
             }
             if (gen != startGeneration) return@launch
+            preparedStream = resolved
             player.prepareNext(resolved)
         }
     }

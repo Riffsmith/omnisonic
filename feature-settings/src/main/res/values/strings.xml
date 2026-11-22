@@ -81,6 +81,10 @@
     </plurals>
     <string name="settings_group_playback">Playback</string>
     <string name="settings_notification_settings">Notification settings</string>
+    <string name="settings_transcode_vpn_as_cellular">Treat VPN as cellular</string>
+    <string name="settings_transcode_vpn_as_cellular_summary">Stream with the cellular bitrate while connected through a VPN</string>
+    <string name="settings_transcode_metered_as_cellular">Treat metered networks as cellular</string>
+    <string name="settings_transcode_metered_as_cellular_summary">Stream with the cellular bitrate on metered connections, including metered Wi-Fi</string>
     <string name="settings_group_about">About</string>
     <string name="settings_version">Version</string>
     <string name="settings_share_logs">Share logs</string>

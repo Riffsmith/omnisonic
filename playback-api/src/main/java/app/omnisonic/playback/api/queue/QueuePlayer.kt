@@ -48,6 +48,16 @@ interface QueuePlayer {
      */
     fun replayCurrent()
 
+    /**
+     * D-61: re-requests the current entry's stream at its current position
+     * after the effective stream profile changed mid-track (network change or
+     * transcode-settings edit). The queue position and the entry are untouched.
+     * A no-op when released, idle, not playing, radio, or when the current
+     * stream is a direct URI (downloaded file / local content), so offline
+     * playback is never restarted.
+     */
+    fun replanCurrentStream()
+
     /** Seeks inside the current entry and records the new resume point. */
     fun seekTo(positionMs: Long)
 
