@@ -109,6 +109,15 @@ total=<expected bytes or empty>
 - A pause or cancel that lands in the sub-millisecond window between rename and settlement leaves a complete file without a matching queue row; the file is never overwritten and the task-5a orphan/adoption flow owns it (paused row → adopt, cancelled row → quarantine/delete). [VERIFIED]
 - Power-loss durability of the rename itself (directory metadata) is [UNKNOWN] without a device trace.
 
+## Transcoded downloads (Phase 8 task 3b, D-52/D-55)
+
+- A queue row whose media key carries explicit transcode intent (bitrate and/or format non-null) is a planned server-transcode download; `auto:auto` is raw. `DownloadTranscodeRules` owns that classification and the wire bitrate.
+- The wire request keeps an explicit bitrate; a format-only variant requests `maxBitRate=192`. The default is applied only at request time in `DownloadTransferEngine`: the media key, offline path hash and `offline_media.sourceKey` keep the original variant identity end to end. Raw downloads send no transcode parameters. [VERIFIED JVM]
+- Restart-only continuity (D-52): a transcoded representation may be chunked with no trustworthy total length or validator, so a transcoded row never sends `Range`/`If-Range`. A previous attempt's `.part`+sidecar is discarded before the attempt, and a transport failure discards the part immediately instead of carrying resume state into the next endpoint. Raw-download resume (sidecar-validated 206 append, one clean restart) is unchanged. [VERIFIED JVM]
+- A chunked transcoded response with no `Content-Length` streams to EOF with indeterminate progress (`-1`) and finalizes on bytes-on-disk > 0, exactly like the existing unknown-length path. Pause preserves the part with indeterminate progress; the retry restarts from byte zero. [VERIFIED JVM]
+- Export rows follow the same restart rule but still publish only through the pending MediaStore document: no offline row or private final file is created, and the signed URL stays out of display names and row errors. [VERIFIED JVM]
+- Live-server transcoded lengths/validators and any future safe resume contract remain [UNKNOWN] without a live trace.
+
 ## Deliberately out of scope
 
 Foreground service, notifications, network/connectivity triggers, wake locks, MediaStore export, automatic rules, downloads UI and offline playback. Task 4 supplies the service/worker loop and gates; task 5a owns `offline_media` publication and crash-orphan recovery (`storage/download-completion.md`); task 5b owns the missing-file sweep and deletion; task 5c owns offline resolution.

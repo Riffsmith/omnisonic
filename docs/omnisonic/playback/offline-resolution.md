@@ -11,7 +11,7 @@ How derived: code reading of `core-data/downloads/OfflinePlaybackSource.kt`,
 `playback/stream/OfflineFirstStreamResolver.kt`, `ProviderStreamResolver.kt`,
 `OmniPlayerImpl.dataSourceFactoryFor`, `PlaybackCacheManager` and
 `QueuePlayerImpl.schedulePrepareFollowing`, plus the tests
-`OfflinePlaybackSourceTest` (7), `OfflineFirstStreamResolverTest` (9), the
+`OfflinePlaybackSourceTest` (7), `OfflineFirstStreamResolverTest` (12), the
 offline cases in `OmniPlayerImplTest` (2) and `QueuePlayerImplTest` (3).
 Evidence categories: own-source reading, in-repository test runs.
 
@@ -53,11 +53,19 @@ Confidence:
   transport behaviour are untested here; the source-level contract is that an
   unavailable root or file can only produce a fallback, never an error.
 
-Date: 2026-11-20
+Date: 2026-11-22
 
 Links: `stream-resolution.md`, `stream-cache-identity.md`,
 `../storage/download-completion.md`, `../storage/offline-storage-layout.md`,
-`../decisions.md` (D-45)
+`../decisions.md` (D-45, D-56)
+
+## Desired variant selection (Phase 8 task 3b, D-56)
+
+- `OfflineFirstStreamResolver` takes a `DesiredStreamVariants` seam returning the desired `mediaKey` source key for an entry, or null for no exact preference. The exact match still wins; null keeps the deterministic newest-readable fallback. A selector failure degrades to null (never an error), mirroring the lookup-failure path. [VERIFIED JVM]
+- Production `PlannedStreamVariants` reads the local renderer's `TranscodeSettings` and plans with `TranscodePlanner` for both stream slots over unknown source/renderer metadata. Only when Wi-Fi and cellular plan the same outcome is a variant desired; differing slots yield null instead of applying one network's settings to the other. Network-aware slot selection replaces this rule in TODO 5. Provider traits are the permissive default because a stored variant stays selectable even when the provider could not transcode it today. [VERIFIED JVM]
+- All-off settings desire `auto:auto`, preserving the Phase 7 behavior. D-57 corrects the original mandatory-only mapping: `ServerTranscode(null, null)` has no explicit variant identity and returns null instead of aliasing the raw `auto:auto` key. No existing row is reidentified. The download slot never influences stream variant selection. [VERIFIED JVM]
+- A desired key is an offline preference, not a bypass of offline-first fallback. Even mandatory settings keep the deterministic newest-readable fallback when the exact variant is absent; mandatory server-transcode refusal remains an online planner decision, not permission to discard or ignore a readable offline file. [VERIFIED JVM]
+- The selector is bound through `PlaybackWiringModule.desiredStreamVariants`; the player and offline-first ordering are otherwise unchanged, and radio entries still never consult the offline source.
 
 ---
 
@@ -65,23 +73,14 @@ Links: `stream-resolution.md`, `stream-cache-identity.md`,
 
 ```text
 non-radio entry
-  ├─ exact variant: stream:<providerId>:<externalId>:auto:auto
+  ├─ desired key supplied by DesiredStreamVariants, or null
+  ├─ exact sourceKey match when the desired key is non-null
   ├─ else newest readable row by downloadedAt, tie-break highest id
   ├─ else provider resolution (online)
   └─ else null → the queue skips
 ```
 
-[VERIFIED] The exact variant is `StreamKey(providerId, externalId).cacheKey`.
-Until Phase 8 supplies the desired transcode bitrate/format, the desired key is
-always the `auto:auto` key, which is what the download pipeline stores for a
-default download. That means an explicitly transcoded download is not selected
-by preference today; it is reachable only through the deterministic fallback.
-The fallback exists so a downloaded file is never ignored merely because its
-variant differs, and it is ordered by `downloadedAt` (nulls first) then row id,
-so two rows with equal timestamps still choose the same one on every resolve.
-
-[INFERRED] When Phase 8 makes variant selection explicit, only the `desired`
-key changes; the fallback and the rest of the pipeline stay as they are.
+[VERIFIED] All-off production settings supply `stream:<providerId>:<externalId>:auto:auto`, the Phase 7 `StreamKey(providerId, externalId).cacheKey`. Explicit bitrate/format plans supply their variant-qualified key. Differing network slots, selector failure, refusal, or a server-default `ServerTranscode(null, null)` supply no exact key. The fallback exists so a downloaded file is never ignored merely because its variant differs, and it is ordered by `downloadedAt` (nulls first) then row id, so two rows with equal timestamps still choose the same one on every resolve. The reserved `auto` format token is rejected by settings, so an explicit preference cannot alias the no-format sentinel (D-57).
 
 ## Offered files
 
@@ -152,3 +151,7 @@ device remain device-gated.
 warnings, none in the new code). No schema change. Banned-name scan clean; the
 new public names do not appear in `reference/extracted/theme/theme_keys.json`
 or `reference/docs/THEMING.md` §4.
+
+## Phase 8 audit evidence (2026-11-22, D-57)
+
+[VERIFIED JVM] `/tmp/opencode/phase-8-audit-fix-gate.log` exited 0. `/tmp/opencode/phase-8-audit-fix-xml-totals.txt` records `:playback` **375/0/0/0** per variant, including `PlannedStreamVariantsTest` 7 and `OfflineFirstStreamResolverTest` 12. `mandatory alone does not alias the raw auto variant` proves the corrected server-default/no-exact-preference behavior; all-off exact matching and newest-readable fallback cases remain green. No row or schema migration was introduced.

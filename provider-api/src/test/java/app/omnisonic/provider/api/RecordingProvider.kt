@@ -1,6 +1,6 @@
 package app.omnisonic.provider.api
 
-class RecordingProvider : MediaProvider {
+open class RecordingProvider : MediaProvider {
     val submittedPlays = mutableListOf<SubmittedPlay>()
     val favorites = mutableListOf<Triple<ProviderMediaType, String, Boolean>>()
     val userRatings = mutableListOf<Triple<ProviderMediaType, String, Int>>()

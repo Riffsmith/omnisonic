@@ -65,6 +65,7 @@ object ProviderWiringModule {
                         }
                     },
                     onAuthSucceeded = statusTracker::clearAuthFailed,
+                    logger = logger,
                 ),
                 LocalMediaProviderFactory(context.contentResolver),
             ),

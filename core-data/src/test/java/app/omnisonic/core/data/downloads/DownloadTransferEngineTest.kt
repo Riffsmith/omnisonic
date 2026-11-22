@@ -450,7 +450,8 @@ class DownloadTransferEngineTest : DatabaseTestBase() {
             )
             assertThat(row(secondRow.id)!!.errorCount).isEqualTo(1)
             assertThat(rig.file(secondPlan.relativePath).exists()).isFalse()
-            assertThat(server.takeRequest().getHeader("Range")).isEqualTo("bytes=100-")
+            // D-52: a transcoded row never resumes; both attempts start at byte zero.
+            assertThat(server.takeRequest().getHeader("Range")).isNull()
             assertThat(server.takeRequest().getHeader("Range")).isNull()
         }
     }
@@ -1427,6 +1428,176 @@ class DownloadTransferEngineTest : DatabaseTestBase() {
             assertThat(rig.file(plan.relativePartPath).isDirectory).isTrue()
             assertThat(DownloadTransferJournal().stateFile(rig.file(plan.relativePartPath)).exists()).isFalse()
             assertThat(rig.file(plan.relativePath).exists()).isFalse()
+        }
+    }
+
+    @Test
+    fun `a format-only transcode defaults to 192 on the wire without changing identity`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body()
+            server.enqueue(MockResponse().setBody(Buffer().write(payload)).setHeader("ETag", "\"v1\""))
+            seedRow(format = "mp3")
+            val plan = rig.plan(format = "mp3")
+            var seen: DownloadMediaRequest? = null
+            val source = DownloadMediaSource { request ->
+                seen = request
+                DownloadMediaResolution.Available(DEFAULT_PROVIDER_PATH, listOf(DownloadMediaEndpoint(url(server), client)))
+            }
+
+            val result = transfer(rig, rig.claim(), source)
+
+            assertThat(seen!!.transcodeBitrateKbps).isEqualTo(192)
+            assertThat(seen!!.format).isEqualTo("mp3")
+            assertThat(result).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, payload.size.toLong()))
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
+            val published = offlineFileDao.selectByProviderAndExternal(1, "song-1", ProfileScope.Unrestricted).single()
+            assertThat(published.sourceKey).isEqualTo(DownloadKeys.mediaKey(1, "song-1", null, "mp3"))
+        }
+    }
+
+    @Test
+    fun `an explicit transcode bitrate is kept on the wire request`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            server.enqueue(MockResponse().setBody(Buffer().write(body(64))))
+            seedRow(bitrate = 96)
+            var seen: DownloadMediaRequest? = null
+            val source = DownloadMediaSource { request ->
+                seen = request
+                DownloadMediaResolution.Available(DEFAULT_PROVIDER_PATH, listOf(DownloadMediaEndpoint(url(server), client)))
+            }
+
+            val result = transfer(rig, rig.claim(), source)
+
+            assertThat(seen!!.transcodeBitrateKbps).isEqualTo(96)
+            assertThat(seen!!.format).isNull()
+            assertThat(result).isInstanceOf(DownloadTransferResult.Completed::class.java)
+        }
+    }
+
+    @Test
+    fun `a raw download requests no transcode parameters`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            server.enqueue(MockResponse().setBody(Buffer().write(body(64))))
+            seedRow()
+            var seen: DownloadMediaRequest? = null
+            val source = DownloadMediaSource { request ->
+                seen = request
+                DownloadMediaResolution.Available(DEFAULT_PROVIDER_PATH, listOf(DownloadMediaEndpoint(url(server), client)))
+            }
+
+            val result = transfer(rig, rig.claim(), source)
+
+            assertThat(seen!!.transcodeBitrateKbps).isNull()
+            assertThat(seen!!.format).isNull()
+            assertThat(result).isInstanceOf(DownloadTransferResult.Completed::class.java)
+        }
+    }
+
+    @Test
+    fun `a transcoded part is restarted instead of range resumed`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body(1_000)
+            val plan = rig.plan(format = "mp3")
+            seedPart(rig, plan, payload.copyOfRange(0, 400), totalBytes = payload.size.toLong())
+            server.enqueue(MockResponse().setBody(Buffer().write(payload)).setHeader("ETag", "\"v1\""))
+            seedRow(format = "mp3")
+
+            val result = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(result).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, payload.size.toLong()))
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
+            val request = server.takeRequest()
+            assertThat(request.getHeader("Range")).isNull()
+            assertThat(request.getHeader("If-Range")).isNull()
+        }
+    }
+
+    @Test
+    fun `a chunked transcoded body pauses indeterminately and restarts on retry`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body(256 * 1024)
+            server.enqueue(
+                MockResponse()
+                    .setChunkedBody(Buffer().write(payload), 4_096)
+                    .throttleBody(4_096, 20, TimeUnit.MILLISECONDS),
+            )
+            val seeded = seedRow(format = "mp3")
+            val lease = rig.claim()
+            val plan = rig.plan(format = "mp3")
+            val first = withContext(Dispatchers.Default) {
+                val work = async(Dispatchers.Default) { transfer(rig, lease, media(url(server))) }
+                withTimeout(2_000) { while (rig.file(plan.relativePartPath).length() == 0L) delay(25) }
+                rig.coordinator.pauseAll()
+                withTimeout(2_000) { work.await() }
+            }
+
+            assertThat(first).isInstanceOf(DownloadTransferResult.Paused::class.java)
+            assertThat(row(seeded.id)!!.progressPercent).isEqualTo(-1)
+            assertThat(rig.file(plan.relativePartPath).length()).isGreaterThan(0L)
+            assertThat(rig.file(plan.relativePartPath).length()).isLessThan(payload.size.toLong())
+
+            server.enqueue(MockResponse().setChunkedBody(Buffer().write(payload), 4_096))
+            rig.coordinator.resumeAll()
+            val second = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(second).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, payload.size.toLong()))
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
+            server.takeRequest()
+            val retry = server.takeRequest()
+            assertThat(retry.getHeader("Range")).isNull()
+            assertThat(retry.getHeader("If-Range")).isNull()
+        }
+    }
+
+    @Test
+    fun `a transcoded retry restarts from zero instead of sending a range`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            val payload = body(4_096)
+            server.enqueue(
+                MockResponse()
+                    .setBody(Buffer().write(payload))
+                    .setHeader("ETag", "\"v1\"")
+                    .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY),
+            )
+            val plan = rig.plan(format = "mp3")
+            seedRow(format = "mp3")
+
+            val first = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(first).isEqualTo(DownloadTransferResult.Blocked(DownloadTransferBlock.NETWORK_UNAVAILABLE))
+            // D-52: a failed transcoded attempt keeps no resumable part.
+            assertThat(rig.file(plan.relativePartPath).exists()).isFalse()
+
+            server.enqueue(MockResponse().setBody(Buffer().write(payload)).setHeader("ETag", "\"v1\""))
+            val second = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(second).isEqualTo(DownloadTransferResult.Completed(plan.relativePath, payload.size.toLong()))
+            assertThat(rig.file(plan.relativePath).readBytes()).isEqualTo(payload)
+            val firstRequest = server.takeRequest()
+            assertThat(firstRequest.getHeader("Range")).isNull()
+            val retryRequest = server.takeRequest()
+            assertThat(retryRequest.getHeader("Range")).isNull()
+            assertThat(retryRequest.getHeader("If-Range")).isNull()
+        }
+    }
+
+    @Test
+    fun `a transcoded failure keeps the signed url out of the row error`(): Unit = runDbTest {
+        useServer { server ->
+            val rig = rig()
+            server.enqueue(MockResponse().setResponseCode(500).setBody("boom"))
+            val seeded = seedRow(format = "mp3")
+
+            val result = transfer(rig, rig.claim(), media(url(server)))
+
+            assertThat(result).isInstanceOf(DownloadTransferResult.Retry::class.java)
+            assertThat(row(seeded.id)!!.lastError).doesNotContain("secret-1")
         }
     }
 

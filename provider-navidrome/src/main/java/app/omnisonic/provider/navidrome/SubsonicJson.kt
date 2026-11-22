@@ -71,6 +71,20 @@ data class SubsonicErrorDto(val code: Int? = null, val message: String? = null)
 @JsonClass(generateAdapter = true)
 data class SubsonicExtensionDto(val name: String? = null, val versions: List<Int> = emptyList())
 
+/**
+ * `getTranscodeDecision` payload. Only the fields the client consumes are
+ * modeled; [transcodeReason]/[errorReason] are server text and are never
+ * logged or persisted, only the redacted fallback token is.
+ */
+@JsonClass(generateAdapter = true)
+data class SubsonicTranscodeDecisionDto(
+    val canDirectPlay: Boolean? = null,
+    val canTranscode: Boolean? = null,
+    val transcodeReason: List<String> = emptyList(),
+    val errorReason: String? = null,
+    val transcodeParams: String? = null,
+)
+
 @JsonClass(generateAdapter = true)
 data class SubsonicArtistsRootDto(
     val index: List<SubsonicIndexDto> = emptyList(),
@@ -232,6 +246,7 @@ data class SubsonicEnvelope(
     val openSubsonic: Boolean? = null,
     val error: SubsonicErrorDto? = null,
     val openSubsonicExtensions: List<SubsonicExtensionDto> = emptyList(),
+    val transcodeDecision: SubsonicTranscodeDecisionDto? = null,
     val artists: SubsonicArtistsRootDto? = null,
     val directory: List<SubsonicDirectoryDto> = emptyList(),
     val album: List<SubsonicAlbumDto> = emptyList(),

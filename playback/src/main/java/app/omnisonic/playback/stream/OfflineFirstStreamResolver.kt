@@ -2,7 +2,6 @@ package app.omnisonic.playback.stream
 
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.stream.ResolvedStream
-import app.omnisonic.playback.api.stream.StreamKey
 import app.omnisonic.playback.api.stream.StreamResolver
 import app.omnisonic.playback.api.stream.StreamTransport
 import javax.inject.Inject
@@ -32,11 +31,12 @@ fun interface OfflineStreamLookup {
 class OfflineFirstStreamResolver @Inject constructor(
     private val online: ProviderStreamResolver,
     private val offline: OfflineStreamLookup,
+    private val desiredVariants: DesiredStreamVariants,
 ) : StreamResolver {
 
     override suspend fun resolve(entry: PlaybackQueueEntry): ResolvedStream? {
         if (!entry.isRadioStation) {
-            val chosen = choose(entry, offlineCandidates(entry))
+            val chosen = choose(offlineCandidates(entry), desiredKey(entry))
             if (chosen != null) {
                 return ResolvedStream(
                     entry = entry,
@@ -53,21 +53,27 @@ class OfflineFirstStreamResolver @Inject constructor(
     }
 
     /**
-     * The exact desired stream variant wins. Until Phase 8 supplies transcode
-     * bitrate/format, the desired key is the auto variant, so an explicit
-     * variant downloaded earlier is reachable through the deterministic
-     * newest readable fallback rather than by inventing a selection rule.
+     * The exact desired stream variant wins (D-56); a null desired key means
+     * the settings do not determine one variant, so the deterministic newest
+     * readable fallback applies instead of guessing.
      */
     private fun choose(
-        entry: PlaybackQueueEntry,
         candidates: List<OfflineStreamCandidate>,
+        desired: String?,
     ): OfflineStreamCandidate? {
-        val desired = StreamKey(entry.providerId, entry.externalId).cacheKey
-        return candidates.firstOrNull { it.sourceKey == desired }
-            ?: candidates.maxWithOrNull(
-                compareBy<OfflineStreamCandidate> { it.downloadedAtMs ?: Long.MIN_VALUE }
-                    .thenBy { it.id },
-            )
+        val exact = desired?.let { key -> candidates.firstOrNull { it.sourceKey == key } }
+        return exact ?: candidates.maxWithOrNull(
+            compareBy<OfflineStreamCandidate> { it.downloadedAtMs ?: Long.MIN_VALUE }
+                .thenBy { it.id },
+        )
+    }
+
+    private suspend fun desiredKey(entry: PlaybackQueueEntry): String? = try {
+        desiredVariants.desiredKey(entry)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
 
     private suspend fun offlineCandidates(entry: PlaybackQueueEntry): List<OfflineStreamCandidate> = try {

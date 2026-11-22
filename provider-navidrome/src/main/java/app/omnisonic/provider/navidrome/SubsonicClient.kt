@@ -1,5 +1,7 @@
 package app.omnisonic.provider.navidrome
 
+import app.omnisonic.core.model.log.ConsoleLogSink
+import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.model.runCatchingCancellable
 import app.omnisonic.provider.api.AlbumListType
 import app.omnisonic.provider.api.ProviderAuthMethod
@@ -28,6 +30,8 @@ import app.omnisonic.provider.api.ProviderPlaylistSummary
 import app.omnisonic.provider.api.ProviderRadio
 import app.omnisonic.provider.api.ProviderSong
 import app.omnisonic.provider.api.ProviderTransportException
+import app.omnisonic.provider.api.TranscodeFallbackReason
+import app.omnisonic.provider.api.TranscodeStreamResolution
 import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -54,6 +58,7 @@ class SubsonicClient(
     private val onPreferredBlockChange: suspend (Int) -> Unit = {},
     /** Fired after a successful request so the caller can clear an auth-failure marker. */
     private val onAuthSucceeded: suspend (Long) -> Unit = {},
+    private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),
 ) : MediaProvider {
 
     private val failover = BlockFailover(connection, onPreferredBlockChange)
@@ -309,7 +314,78 @@ class SubsonicClient(
     }
 
     override fun streamUrl(externalId: String, maxBitRateKbps: Int?, format: String?): String =
-        mediaUrl("stream", externalId, maxBitRateKbps, format)
+        streamUrl(externalId, maxBitRateKbps, format, timeOffsetSeconds = null)
+
+    /**
+     * Probe-gated `stream.view`: the extension probe decides whether a seek
+     * offset may ride the request (`timeOffset`, seconds, positive only).
+     */
+    override suspend fun resolveTranscodeStream(
+        externalId: String,
+        maxBitRateKbps: Int?,
+        format: String?,
+        timeOffsetSeconds: Int?,
+    ): TranscodeStreamResolution {
+        if (EXTENSION_TRANSCODING !in capabilities.extensionNames) {
+            return plainStreamFallback(
+                externalId, maxBitRateKbps, format, timeOffsetSeconds,
+                TranscodeFallbackReason.EXTENSION_ABSENT,
+            )
+        }
+        val decision = runCatchingCancellable {
+            call(
+                Endpoint.GET_TRANSCODE_DECISION,
+                listOf("mediaId" to externalId, "mediaType" to MEDIA_TYPE_SONG),
+            ) { it.transcodeDecision }
+        }.getOrElse { failure ->
+            // Auth failures stay fatal: the plain stream would fail the same way.
+            if (failure is ProviderAuthException) throw failure
+            return plainStreamFallback(
+                externalId, maxBitRateKbps, format, timeOffsetSeconds,
+                TranscodeFallbackReason.DECISION_FAILED,
+            )
+        }
+        val transcodeParams = decision?.transcodeParams
+        if (decision?.canTranscode != true || transcodeParams.isNullOrBlank()) {
+            return plainStreamFallback(
+                externalId, maxBitRateKbps, format, timeOffsetSeconds,
+                TranscodeFallbackReason.SERVER_DECLINED,
+            )
+        }
+        val streamParams = buildList {
+            add("mediaId" to externalId)
+            add("mediaType" to MEDIA_TYPE_SONG)
+            add("transcodeParams" to transcodeParams)
+            timeOffsetSeconds?.takeIf { it > 0 }?.let { add("offset" to it.toString()) }
+        }
+        return TranscodeStreamResolution(
+            url = buildUrl(preferredBlock(), Endpoint.GET_TRANSCODE_STREAM, streamParams),
+            serverTranscoded = true,
+            fallbackReason = null,
+        )
+    }
+
+    private fun plainStreamFallback(
+        externalId: String,
+        maxBitRateKbps: Int?,
+        format: String?,
+        timeOffsetSeconds: Int?,
+        reason: TranscodeFallbackReason,
+    ): TranscodeStreamResolution {
+        logger.warn(LOG_TAG, "transcode fallback reason=${reason.name.lowercase()}")
+        return TranscodeStreamResolution(
+            url = streamUrl(externalId, maxBitRateKbps, format, timeOffsetSeconds),
+            serverTranscoded = false,
+            fallbackReason = reason,
+        )
+    }
+
+    private fun streamUrl(
+        externalId: String,
+        maxBitRateKbps: Int?,
+        format: String?,
+        timeOffsetSeconds: Int?,
+    ): String = mediaUrl("stream", externalId, maxBitRateKbps, format, timeOffsetSeconds)
 
     override fun coverArtUrl(imageId: String?, sizePx: Int?): String? {
         if (imageId.isNullOrBlank()) return null
@@ -428,15 +504,27 @@ class SubsonicClient(
         AlbumListType.RANDOM -> "random"
     }
 
-    private fun mediaUrl(path: String, externalId: String, maxBitRateKbps: Int?, format: String?): String =
-        buildUrl(preferredBlock(), path, mediaParams(externalId, maxBitRateKbps, format))
+    private fun mediaUrl(
+        path: String,
+        externalId: String,
+        maxBitRateKbps: Int?,
+        format: String?,
+        timeOffsetSeconds: Int? = null,
+    ): String = buildUrl(preferredBlock(), path, mediaParams(externalId, maxBitRateKbps, format, timeOffsetSeconds))
 
-    private fun mediaParams(externalId: String, maxBitRateKbps: Int?, format: String?): List<Pair<String, String>> =
-        buildList {
-            add("id" to externalId)
-            maxBitRateKbps?.let { add("maxBitRate" to it.toString()) }
-            format?.let { add("format" to it) }
+    private fun mediaParams(
+        externalId: String,
+        maxBitRateKbps: Int?,
+        format: String?,
+        timeOffsetSeconds: Int? = null,
+    ): List<Pair<String, String>> = buildList {
+        add("id" to externalId)
+        maxBitRateKbps?.let { add("maxBitRate" to it.toString()) }
+        format?.let { add("format" to it) }
+        if (EXTENSION_TRANSCODE_OFFSET in capabilities.extensionNames) {
+            timeOffsetSeconds?.takeIf { it > 0 }?.let { add("timeOffset" to it.toString()) }
         }
+    }
 
     private fun preferredBlock(): ConnectionBlock {
         val remote = connection.requireRemote()
@@ -562,6 +650,11 @@ class SubsonicClient(
         private const val API_VERSION = "1.13.0"
         private const val CLIENT_ID = "Omnisonic"
         private const val STATUS_OK = "ok"
+        private const val LOG_TAG = "SubsonicClient"
+        /** OpenSubsonic extension names read from the `getOpenSubsonicExtensions` probe. */
+        private const val EXTENSION_TRANSCODING = "transcoding"
+        private const val EXTENSION_TRANSCODE_OFFSET = "transcodeOffset"
+        private const val MEDIA_TYPE_SONG = "song"
         private const val HTTP_UNAUTHORIZED = 401
         private const val HTTP_FORBIDDEN = 403
         private val AUTH_SUBSONIC_CODES = 40..44
@@ -600,6 +693,8 @@ class SubsonicClient(
         const val GET_SIMILAR_SONGS = "getSimilarSongs"
         const val STREAM = "stream"
         const val DOWNLOAD = "download"
+        const val GET_TRANSCODE_DECISION = "getTranscodeDecision"
+        const val GET_TRANSCODE_STREAM = "getTranscodeStream"
     }
 }
 

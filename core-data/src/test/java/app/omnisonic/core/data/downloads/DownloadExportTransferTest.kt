@@ -283,4 +283,55 @@ class DownloadExportTransferTest : DatabaseTestBase() {
         assertThat(downloadDao.selectById(row.id)).isNull()
         assertThat(offlineFileDao.count()).isEqualTo(0)
     }
+
+    @Test
+    fun `a transcoded export row restarts without creating offline files`() = runDbTest {
+        setup()
+        val transcodeKey = DownloadKeys.mediaKey(1, "song-1", null, "mp3")
+        downloadDao.upsert(
+            DownloadItemEntity(
+                mediaKey = transcodeKey,
+                providerId = 1,
+                status = DownloadStatus.PENDING.name,
+                title = "Track",
+                exportTarget = exportTarget,
+                createdAt = 1_000,
+                updatedAt = 1_000,
+            ),
+        )
+        val plan = (storage.planPath(OfflineMediaIdentity(1, providerPath, null, "mp3")) as OfflinePathResult.Planned).plan
+        val part = File(root, plan.relativePartPath).apply {
+            parentFile?.mkdirs()
+            writeBytes(payload.copyOfRange(0, 256))
+        }
+        journal.write(
+            part,
+            DownloadTransferState(
+                identityHash = plan.hash,
+                strongEtag = "\"v1\"",
+                totalBytes = payload.size.toLong(),
+                mediaKey = transcodeKey,
+            ),
+        )
+        server.enqueue(
+            MockResponse()
+                .setBody(Buffer().write(payload))
+                .setHeader("ETag", "\"v1\"")
+                .setHeader("Content-Type", "audio/mpeg"),
+        )
+
+        val result = engine(mediaSource(server.url("/stream?token=SECRET").toString())).transfer(claim())
+
+        val request = server.takeRequest()
+        assertThat(request.getHeader("Range")).isNull()
+        assertThat(request.getHeader("If-Range")).isNull()
+        assertThat(result).isInstanceOf(DownloadTransferResult.Exported::class.java)
+        val document = store.documents.values.single()
+        assertThat(document.bytes).isEqualTo(payload)
+        assertThat(document.pending).isFalse()
+        assertThat(document.request.displayName).doesNotContain("SECRET")
+        assertThat(offlineFileDao.count()).isEqualTo(0)
+        assertThat(File(root, plan.relativePath).exists()).isFalse()
+        assertThat(store.deletes).isEqualTo(0)
+    }
 }

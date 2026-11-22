@@ -25,6 +25,30 @@ interface MediaProvider {
     suspend fun searchSongs(query: String, offset: Int = 0, count: Int = SEARCH_COUNT): List<ProviderSong>
 
     fun streamUrl(externalId: String, maxBitRateKbps: Int? = null, format: String? = null): String?
+
+    /**
+     * Turns a planned server-transcode request into a concrete stream URL.
+     * [maxBitRateKbps]/[format] come straight from the planner's
+     * `ServerTranscode` output (null = server default); [timeOffsetSeconds]
+     * is a positive seek offset in seconds. Providers that advertise the
+     * transcode extension negotiate a server-side transcode session; every
+     * other outcome lands on the plain [streamUrl] with the requested
+     * parameters and reports a redacted [TranscodeStreamResolution.fallbackReason].
+     * Auth failures still throw; the fallback swallows only decision-call
+     * failures. The default implementation keeps providers without the
+     * extension on the plain stream (the offset is a server-stream concept).
+     */
+    suspend fun resolveTranscodeStream(
+        externalId: String,
+        maxBitRateKbps: Int? = null,
+        format: String? = null,
+        timeOffsetSeconds: Int? = null,
+    ): TranscodeStreamResolution = TranscodeStreamResolution(
+        url = streamUrl(externalId, maxBitRateKbps, format),
+        serverTranscoded = false,
+        fallbackReason = null,
+    )
+
     fun coverArtUrl(imageId: String?, sizePx: Int? = null): String?
     fun downloadUrl(externalId: String, maxBitRateKbps: Int? = null, format: String? = null): String?
 

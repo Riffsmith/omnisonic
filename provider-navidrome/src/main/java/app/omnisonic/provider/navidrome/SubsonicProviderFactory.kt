@@ -1,5 +1,7 @@
 package app.omnisonic.provider.navidrome
 
+import app.omnisonic.core.model.log.ConsoleLogSink
+import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.provider.api.MediaProvider
 import app.omnisonic.provider.api.MediaProviderFactory
 import app.omnisonic.provider.api.ProviderConnection
@@ -15,6 +17,7 @@ import okhttp3.OkHttpClient
 class SubsonicProviderFactory(
     private val onPreferredBlockChange: suspend (providerId: Long, block: Int) -> Unit = { _, _ -> },
     private val onAuthSucceeded: suspend (providerId: Long) -> Unit = {},
+    private val logger: OmnisonicLogger = OmnisonicLogger(ConsoleLogSink()),
 ) : MediaProviderFactory {
 
     override fun apiType(): String = "subsonic"
@@ -25,5 +28,6 @@ class SubsonicProviderFactory(
             apiClient,
             onPreferredBlockChange = { block -> onPreferredBlockChange(connection.providerId, block) },
             onAuthSucceeded = onAuthSucceeded,
+            logger = logger,
         )
 }

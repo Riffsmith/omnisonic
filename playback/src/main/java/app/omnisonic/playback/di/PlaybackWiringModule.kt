@@ -50,10 +50,12 @@ import app.omnisonic.playback.startup.PlaybackLaunchRestore
 import app.omnisonic.playback.source.AutoplayQueueSource
 import app.omnisonic.playback.source.RadioQueueSource
 import app.omnisonic.playback.source.SearchPlayQueueSource
+import app.omnisonic.playback.stream.DesiredStreamVariants
 import app.omnisonic.playback.stream.MediaProviderLookup
 import app.omnisonic.playback.stream.OfflineFirstStreamResolver
 import app.omnisonic.playback.stream.OfflineStreamCandidate
 import app.omnisonic.playback.stream.OfflineStreamLookup
+import app.omnisonic.playback.stream.PlannedStreamVariants
 import app.omnisonic.playback.stream.ProviderStreamResolver
 import app.omnisonic.playback.stream.SongReplayGainSource
 import app.omnisonic.playback.stream.SongRowLookup
@@ -170,6 +172,10 @@ object PlaybackWiringModule {
                 OfflineStreamCandidate(file.id, file.sourceKey, file.uri, file.downloadedAtMs)
             }
         }
+
+    @Provides
+    @Singleton
+    fun desiredStreamVariants(variants: PlannedStreamVariants): DesiredStreamVariants = variants
 
     @Provides
     @Singleton

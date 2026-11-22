@@ -99,6 +99,7 @@ class DownloadTransferEngine(
         if (key.providerId != item.providerId) {
             return@withContext settlePark(lease, DownloadTransferPark.QUEUE_KEY_INVALID)
         }
+        val transcoded = DownloadTranscodeRules.isTranscoded(key)
         val prepared = prepareStorage(0L)
         if (prepared is OfflineStorageState.Blocked) {
             return@withContext settleBlock(lease, prepared.toTransferBlock())
@@ -124,7 +125,7 @@ class DownloadTransferEngine(
                 DownloadMediaRequest(
                     providerId = key.providerId,
                     externalId = key.externalId,
-                    transcodeBitrateKbps = key.transcodeBitrateKbps,
+                    transcodeBitrateKbps = DownloadTranscodeRules.requestBitrateKbps(key),
                     format = key.format,
                 ),
             )
@@ -181,6 +182,12 @@ class DownloadTransferEngine(
         }
         if (!partFile.isFile) {
             journal.delete(partFile)
+            state = null
+        }
+        // D-52: a transcoded representation has no trustworthy validators or
+        // lengths, so a previous attempt's part is never resumed — restart it.
+        if (transcoded && partFile.isFile) {
+            discard(partFile)
             state = null
         }
         var offset = if (partFile.isFile) partFile.length() else 0L
@@ -260,8 +267,16 @@ class DownloadTransferEngine(
                 is AttemptResult.Failed ->
                     return@withContext settleRetry(lease, attempt.failure)
                 AttemptResult.Transport -> {
-                    state = journal.read(partFile)
-                    offset = if (partFile.isFile) partFile.length() else 0L
+                    if (transcoded) {
+                        // D-52: never append across representations; the next
+                        // endpoint restarts the transcode from byte zero.
+                        discard(partFile)
+                        state = null
+                        offset = 0L
+                    } else {
+                        state = journal.read(partFile)
+                        offset = if (partFile.isFile) partFile.length() else 0L
+                    }
                     endpointIndex++
                 }
             }
