@@ -17,7 +17,7 @@ Links: `transcode-settings.md`, `transcode-planner.md`, `stream-resolution.md`, 
 
 ## Starting state and exact gate
 
-[VERIFIED] TODO 7 started on branch `main` at `c52b402cc62c0278435653ac17416201098e5450` with 41 modified tracked paths and 10 untracked Phase 8 paths preserved, including the uncommitted TODO 4/5/6 work and the D-62 corrections. No commit or push was performed.
+[VERIFIED] All Phase 8 work is committed on branch `main` at `3392e04` (53 files: modified tracked paths plus new implementation, test and documentation paths); nothing is left uncommitted in the working tree. Committed: yes. Pushed: no.
 
 [VERIFIED] The exact invocation exited 0 with `BUILD SUCCESSFUL`. Its complete output is `/tmp/opencode/phase-8-task-7-gate.log`; parsed totals are `/tmp/opencode/phase-8-task-7-xml-totals.txt`. Numbers are `tests / skipped / failures / errors` from the result XML, not task-success inference.
 
