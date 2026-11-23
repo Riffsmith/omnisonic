@@ -23,6 +23,7 @@ android {
 
 dependencies {
     api(libs.kotlinx.coroutines.android)
+    implementation(libs.moshi)
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.truth)
