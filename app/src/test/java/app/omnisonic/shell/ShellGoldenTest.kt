@@ -7,6 +7,12 @@ import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellPreferencesStore
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.style.OmnisonicTheme
+import app.omnisonic.style.ObservableStyleTokenSource
+import dagger.hilt.android.testing.HiltAndroidRule
+import dagger.hilt.android.testing.HiltAndroidTest
+import dagger.hilt.android.testing.HiltTestApplication
+import javax.inject.Inject
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,15 +24,28 @@ import java.io.File
 /**
  * First shell golden (D-14): portrait bottom bar + home empty state (fresh
  * install). Regenerate deliberately; never from a failing run
- * (R-25).
+ * (R-25). The theme comes from the production source (D-105), so this golden
+ * proves what a fresh install resolves rather than the no-source fallback.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w411dp-h891dp-420dpi")
+@HiltAndroidTest
+@Config(application = HiltTestApplication::class, sdk = [34], qualifiers = "w411dp-h891dp-420dpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ShellGoldenTest {
 
     @get:Rule
+    val hiltRule = HiltAndroidRule(this)
+
+    @get:Rule
     val composeRule = createComposeRule()
+
+    @Inject
+    lateinit var styleTokenSource: ObservableStyleTokenSource
+
+    @Before
+    fun inject() {
+        hiltRule.inject()
+    }
 
     @Test
     fun shellPortraitHomeEmptyState() {
@@ -36,7 +55,7 @@ class ShellGoldenTest {
         val providerSetupViewModel = testProviderSetupViewModel()
         val stepViewModel = testLibrarySyncStepViewModel()
         composeRule.setContent {
-            OmnisonicTheme {
+            OmnisonicTheme(source = styleTokenSource) {
                 OmnisonicShell(
                     state = fixedShellState(hasProvider = false),
                     settingsViewModel = settingsViewModel,

@@ -6,8 +6,10 @@ package app.omnisonic.shell
  * targets reference these strings).
  *
  * Reserved names, deliberately absent (do not squat): profiles, styles,
- * styleEditor, lyrics. `downloads` was reserved for Phase 7 task 9 and is now
- * the downloads workspace destination.
+ * lyrics. `downloads` was reserved for Phase 7 task 9 and is now the downloads
+ * workspace destination; the Phase 9 editor routes are `styleEditor` (the hub),
+ * `styleEditor/{area}` (the nested area sub-screens) and
+ * `styleEditorPreview/{area}` (the non-destructive Home/Library preview, D-109).
  */
 object ShellRoutes {
     const val HOME = "home"
@@ -25,18 +27,24 @@ object ShellRoutes {
     const val QUEUE = "queue"
     const val HISTORY = "history"
     const val DOWNLOADS = "downloads"
+    const val STYLE_EDITOR = "styleEditor"
+    const val STYLE_EDITOR_AREA = "styleEditor/{area}"
+    const val STYLE_EDITOR_PREVIEW = "styleEditorPreview/{area}"
 
     const val ARG_SECTION = "section"
     const val ARG_ALBUM_ID = "albumId"
     const val ARG_ARTIST_ID = "artistId"
     const val ARG_GENRE_ID = "genreId"
     const val ARG_PLAYLIST_ID = "playlistId"
+    const val ARG_AREA = "area"
 
     fun album(albumId: Long): String = "album/$albumId"
     fun artist(artistId: Long): String = "artist/$artistId"
     fun genre(genreId: Long): String = "genre/$genreId"
     fun playlist(playlistId: Long): String = "playlist/$playlistId"
     fun section(section: String): String = "library/$section"
+    fun styleEditorArea(area: String): String = "styleEditor/$area"
+    fun styleEditorPreview(area: String): String = "styleEditorPreview/$area"
 
     /** Every pattern the graph registers, in table order (§5). */
     val ALL: List<String> = listOf(
@@ -55,5 +63,8 @@ object ShellRoutes {
         QUEUE,
         HISTORY,
         DOWNLOADS,
+        STYLE_EDITOR,
+        STYLE_EDITOR_AREA,
+        STYLE_EDITOR_PREVIEW,
     )
 }

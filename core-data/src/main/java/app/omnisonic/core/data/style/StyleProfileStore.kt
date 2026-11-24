@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import app.omnisonic.core.model.log.OmnisonicLogger
 import app.omnisonic.core.model.style.StyleIssue
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +35,21 @@ sealed interface StyleSwitchResult {
 }
 
 /**
+ * A mutation-time snapshot of the active id: a raw DataStore read that reports
+ * [Unreadable] when the pointer cannot be read instead of falling back the way
+ * the [StyleProfileStore.activeId] observation flow does (D-113). A mutation
+ * that would delete data must not proceed on unknown ownership.
+ */
+sealed interface ActiveIdSnapshot {
+
+    /** The pointer was read; [id] is the persisted value (null = none set). */
+    data class Known(val id: String?) : ActiveIdSnapshot
+
+    /** The pointer could not be read; the active id is unknown, not absent. */
+    data class Unreadable(val detail: String) : ActiveIdSnapshot
+}
+
+/**
  * Active-profile pointer over the `omnisonic_style` DataStore
  * (`docs/omnisonic/style/style-loader.md` §4, D-73).
  *
@@ -45,6 +61,13 @@ sealed interface StyleSwitchResult {
  * exactly as observation does, and rejects a candidate that cannot be applied.
  * [switch] and [delete] share [operationMutex], so a candidate can never turn
  * up active after its file was deleted.
+ *
+ * Observation and mutation read the pointer differently (D-113): [activeId]
+ * converts a read failure to null so observers fall back to the default, while
+ * [snapshotActiveId] is the mutation-only raw read that reports
+ * [ActiveIdSnapshot.Unreadable]. [delete] with an explicit [activeAtStart]
+ * snapshot uses the value captured before the repository deletion, so a read
+ * failure can never be mistaken for "not active" after the file is gone.
  */
 class StyleProfileStore(
     private val dataStore: DataStore<Preferences>,
@@ -77,13 +100,47 @@ class StyleProfileStore(
         }
     }
 
+    /**
+     * Mutation-only snapshot of the active id: a raw read of the DataStore that
+     * never applies the [activeId] observation fallback. A delete (or any
+     * destructive mutation) must capture this **before** it deletes anything and
+     * refuse to proceed on [ActiveIdSnapshot.Unreadable] (D-113).
+     */
+    suspend fun snapshotActiveId(): ActiveIdSnapshot = operationMutex.withLock {
+        try {
+            ActiveIdSnapshot.Known(dataStore.data.first()[Keys.ACTIVE_STYLE_ID])
+        } catch (failure: IOException) {
+            ActiveIdSnapshot.Unreadable(
+                failure.message ?: "the active style pointer could not be read",
+            )
+        } catch (failure: SecurityException) {
+            ActiveIdSnapshot.Unreadable(
+                failure.message ?: "the active style pointer could not be read",
+            )
+        }
+    }
+
     suspend fun delete(id: String): StyleDeleteOutcome = operationMutex.withLock {
+        deleteLocked(id, activeId.first())
+    }
+
+    /**
+     * Deletes [id] using [activeAtStart] — a snapshot captured by
+     * [snapshotActiveId] before the repository deletion — to decide whether the
+     * pointer must be cleared. The observation fallback is never used here.
+     */
+    suspend fun delete(id: String, activeAtStart: String?): StyleDeleteOutcome =
+        operationMutex.withLock {
+            deleteLocked(id, activeAtStart)
+        }
+
+    private suspend fun deleteLocked(id: String, activeAtStart: String?): StyleDeleteOutcome {
         val outcome = repository.delete(id)
         val gone = outcome is StyleDeleteOutcome.Deleted || outcome is StyleDeleteOutcome.NotFound
-        if (gone && activeId.first() == id) {
+        if (gone && activeAtStart == id) {
             dataStore.edit { prefs -> prefs.remove(Keys.ACTIVE_STYLE_ID) }
         }
-        outcome
+        return outcome
     }
 
     private object Keys {

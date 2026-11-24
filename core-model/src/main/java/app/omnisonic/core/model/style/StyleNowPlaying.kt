@@ -31,13 +31,13 @@ data class StyleCompactPlayer(
             NowPlayingBlock(NowPlayingBlockKind.CONTROLS),
             NowPlayingBlock(NowPlayingBlockKind.PROGRESS),
         )
+        /**
+         * The shipped mini player draws plain `IconButton`s, so the compact
+         * play/pause is neither filled nor large (D-105).
+         */
         val DEFAULT_BUTTONS: List<StyleControlButton> = listOf(
             StyleControlButton(PlayerAction.PREVIOUS),
-            StyleControlButton(
-                action = PlayerAction.PLAY_PAUSE,
-                style = ControlButtonStyle.FILLED,
-                size = ControlButtonSize.LARGE,
-            ),
+            StyleControlButton(PlayerAction.PLAY_PAUSE),
             StyleControlButton(PlayerAction.NEXT),
         )
     }
@@ -46,8 +46,13 @@ data class StyleCompactPlayer(
 data class StyleExpandedPlayer(
     val blocks: List<NowPlayingBlock> = DEFAULT_BLOCKS,
     val buttons: List<StyleControlButton> = DEFAULT_BUTTONS,
-    val text: StyleTextBlocks = StyleTextBlocks(),
-    val progress: StyleProgress = StyleProgress(),
+    /**
+     * The shipped player centres a two-line title and a one-line subtitle
+     * (D-105); compact text keeps the start-aligned single lines below.
+     */
+    val text: StyleTextBlocks = DEFAULT_TEXT,
+    /** The shipped player always shows elapsed and remaining time (D-105). */
+    val progress: StyleProgress = StyleProgress(showRemainingTime = true),
 ) {
     companion object {
         val DEFAULT_BLOCKS: List<NowPlayingBlock> = listOf(
@@ -58,6 +63,18 @@ data class StyleExpandedPlayer(
             NowPlayingBlock(NowPlayingBlockKind.CONTROLS),
             NowPlayingBlock(NowPlayingBlockKind.QUEUE),
             NowPlayingBlock(NowPlayingBlockKind.LYRICS),
+        )
+        val DEFAULT_TEXT: StyleTextBlocks = StyleTextBlocks(
+            title = StyleTextBlock(
+                template = "%title%",
+                alignment = TextAlignment.CENTER,
+                maxLines = 2,
+            ),
+            subtitle = StyleTextBlock(
+                template = "%artist%",
+                alignment = TextAlignment.CENTER,
+                maxLines = 1,
+            ),
         )
         val DEFAULT_BUTTONS: List<StyleControlButton> = listOf(
             StyleControlButton(PlayerAction.SHUFFLE),

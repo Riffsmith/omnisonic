@@ -11,6 +11,11 @@ jobs:
     env:
       OMNISONIC_BANNED_PATTERNS: ${{ secrets.OMNISONIC_BANNED_PATTERNS }}
       OMNISONIC_BANNED_COLUMNS: ${{ secrets.OMNISONIC_BANNED_COLUMNS }}
+      # Newline-separated studied key spellings for the key-class scan
+      # (scripts/check-banned-names.sh); the import-boundary allowlist inside
+      # the script is the only exemption. Set this secret to the reference
+      # key-index strings (dotted spellings, one per line).
+      OMNISONIC_BANNED_KEY_PATTERNS: ${{ secrets.OMNISONIC_BANNED_KEY_PATTERNS }}
     steps:
       - uses: actions/checkout@v4
 

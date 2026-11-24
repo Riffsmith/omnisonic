@@ -4,11 +4,11 @@ Purpose: pin how Omnisonic stores and loads style profiles — the file-backed r
 
 How derived: own design for Phase 9 TODOs 2a–2c (`.agents/plans/phase-9-tasks.md` TODO 2a–2c, §Architecture "Merge order" and "Persistence"), constrained by the schema v1 document contract in `style-schema.md` §1/§2/§6/§7 (D-64/D-67/D-68/D-69/D-70) and the processing-boundary table in `style-format.md` §4. The repository, merger, resolver and active-profile store reuse `:core-model`'s `StyleMigrator`, `StyleDecoder`, `StyleWriter` and `StyleNormalizer`; they introduce no second parser and no style value of their own.
 
-Confidence: `[VERIFIED]` against the repository source and the `StyleRepositoryTest` cases for the read/write/delete/list paths, atomic replacement, temp-file leftovers, typed failures, duplicate resolution, shadow removal and id validation, against `StyleMergerTest`/`StyleProfileResolverTest` for the merge, reset, base-identity and fallback behavior, and against `StyleProfileStoreTest` for persistence, single emission, merge-based switching, write observation, operation serialization, delete-active and read-failure handling. `[INFERRED]` for the production asset delivery form (TODO 4a picks it), for the app-layer wiring (`context.filesDir`, one DataStore instance per file) and for the caller-supplied derivation base. `[UNKNOWN]` for every on-device result, for backup-ZIP interaction (TODO 5e) and for how TODO 5b persists a non-default derivation base (§2.1 risk).
+Confidence: `[VERIFIED]` against the repository source and the `StyleRepositoryTest` cases for the read/write/delete/list paths, atomic replacement, temp-file leftovers, typed failures, duplicate resolution, shadow removal and id validation, against `StyleMergerTest`/`StyleProfileResolverTest` for the merge, reset, base-identity and fallback behavior, and against `StyleProfileStoreTest` for persistence, single emission, merge-based switching, write observation, operation serialization, delete-active and read-failure handling, and against the TODO 4R2 asset-failure cases for throwing/null enumeration and reads in `StyleRepositoryTest`/`StyleProfileResolverTest`. `[INFERRED]` for the production asset delivery form (TODO 4a picks it), for the app-layer wiring (`context.filesDir`, one DataStore instance per file) and for the caller-supplied derivation base. `[UNKNOWN]` for every on-device result, for backup-ZIP interaction (TODO 5e) and for how TODO 5b persists a non-default derivation base (§2.1 risk).
 
-Date: 2026-11-23
+Date: 2026-11-24
 
-Links: `style-schema.md` (§1 Model, §2 Defaults, §6 Normalized form, §7 Versioning), `style-format.md` (§3.4, §4), `decisions.md` D-64/D-67/D-68/D-69/D-70/D-71/D-72/D-73; `.agents/plans/phase-9-tasks.md` TODO 2a–2c.
+Links: `style-schema.md` (§1 Model, §2 Defaults, §6 Normalized form, §7 Versioning), `style-format.md` (§3.4, §4), `style-editor.md` (§Session core), `decisions.md` D-64/D-67/D-68/D-69/D-70/D-71/D-72/D-73/D-82/D-83/D-85/D-86/D-103/D-106/D-108; `.agents/plans/phase-9-tasks.md` TODO 2a–2c, TODO 4R2, TODO 5a0.
 
 ---
 
@@ -24,7 +24,8 @@ Links: `style-schema.md` (§1 Model, §2 Defaults, §6 Normalized form, §7 Vers
 - [VERIFIED — source] `StyleRepository(stylesDir, assets, logger, migrator, replace)` takes its directory and its asset source as constructor arguments. It holds no `Context`, writes no DataStore key and references no Android type, so it is exercised on the JVM against a temporary directory.
 - [VERIFIED — source] `StyleRepository.STYLES_DIRECTORY = "styles"` is the directory name; the app layer resolves it under its private files directory (`[INFERRED]` wiring: `File(context.filesDir, StyleRepository.STYLES_DIRECTORY)`, TODO 2c/4a). Nothing outside that directory is written.
 - [VERIFIED — source] Built-ins are matched by the **document `id`**, not by asset file name, and the asset list is loaded lazily once per repository instance. TODO 4a therefore keeps its freedom over asset naming; a name repeated in `assets.names()` is not an error, but two assets declaring one id are resolved deterministically (§1.4).
-- [VERIFIED — source] An asset that is missing, unreadable or invalid is skipped with one warning per asset; it never prevents the remaining built-ins from loading and never crashes a list or a read.
+- [VERIFIED — source/test] An asset that is missing (a `null` read), unreadable (an `IOException` or `SecurityException` from the read) or invalid is skipped with one warning per asset; it never prevents the remaining built-ins from loading and never crashes a list or a read.
+- [VERIFIED — source/test] Enumeration sits inside the same boundary (TODO 4R2): `assets.names()` throwing `IOException` or `SecurityException` yields the **empty built-in set with exactly one warning**, so `list()` still returns every usable user style and `read()`/`readText()` resolve a user id or return `NotFound` instead of throwing. A degraded built-in set is a logged partial set, never a crash and never a hidden user style.
 
 ### 1.2 Identity
 
@@ -94,6 +95,8 @@ Stored text goes through exactly one pipeline:
 | `*.json.tmp` leftover | ignored by `read` and `list`; removed by the next write of that id | [VERIFIED — test] |
 | Unparsable user file | `list` skips with one warning; `read` returns `Rejected` | [VERIFIED — test] |
 | Non-regular file at `<id>.json` | `read` returns `Unreadable`; `list` skips it | [VERIFIED — test] |
+| Asset enumeration throws `IOException`/`SecurityException` | empty built-in set, one warning; user styles still list and read | [VERIFIED — test] |
+| Built-in asset read returns `null` or throws `IOException`/`SecurityException` | that asset is skipped with one warning; the rest load | [VERIFIED — test] |
 
 ## 2. Merge
 
@@ -137,7 +140,9 @@ Stored text goes through exactly one pipeline:
 | Document declares another id | default built-in, `fellBack = true` | exactly one | [VERIFIED — test] |
 | Default built-in declares another id (a same-id user shadow) | `Unavailable(errors)`; null active id and named profiles both fail | exactly one | [VERIFIED — test] |
 | Default built-in itself unavailable | `Unavailable(errors)`, no crash | exactly one | [VERIFIED — test] |
+| Built-in asset source cannot be enumerated (default included) | `Unavailable(errors)`, no crash | one for the enumeration failure plus one for the unavailable default | [VERIFIED — test] |
 
+- [VERIFIED — test] The asset source is allowed to fail at the JVM boundary: an `IOException`/`SecurityException` from enumeration leaves the built-in set empty, so a default read becomes `NotFound` and `resolve` returns typed `Unavailable(errors)` instead of propagating. A single failing asset read leaves the other built-ins and every user style usable.
 - [VERIFIED — source/test] The warning names the active id, the machine-readable reason (first path-qualified message or typed read detail) and the default id it fell back to. One `resolve` call logs at most one warning for the profile and one for an unavailable default.
 - [VERIFIED — source] `resolveCandidate(id)` applies the same base read, identity check, merge and decode as `resolve`, but never falls back: a candidate that cannot be applied returns `Unavailable(errors)`. The active-profile store uses it for switching, so acceptance cannot disagree with what observation would show.
 - [VERIFIED — source] The base read applies the identity contract to itself: text read for `defaultStyleId` must decode to a document declaring that id. A same-id user file that declares another id makes the base unavailable instead of silently becoming the base.
@@ -155,6 +160,7 @@ Stored text goes through exactly one pipeline:
 | Resolve | `activeProfile = combine(activeId, repository.changes) { id, _ -> resolver.resolve(id) }.distinctUntilChanged()` — §3 on every selection or successful repository change | [VERIFIED — source/test] |
 | Switch | `switch(id)` resolves the candidate through the resolver's merge/identity contract under the operation mutex, then writes the id | [VERIFIED — source/test] |
 | Delete | `delete(id)` delegates to `StyleRepository.delete` under the same mutex and clears the pointer only for a gone active file | [VERIFIED — source/test] |
+| Mutation snapshot | `snapshotActiveId()` is a raw DataStore read with **no** observation fallback, returning `ActiveIdSnapshot.Known(id)` or `ActiveIdSnapshot.Unreadable(detail)`; `delete(id, activeAtStart)` clears the pointer based on a snapshot captured **before** the repository deletion | [VERIFIED — source/test, D-113] |
 | Read failure | one warning, then the default built-in, collection continues | [VERIFIED — source/test] |
 
 - [VERIFIED — source/test] `activeProfile` is observation through the same resolver every other reader uses: a successful switch emits the merged document (§2), while a missing, unreadable or invalid active file emits the default built-in with §3's exactly one warning. The store adds no fallback of its own.
@@ -163,7 +169,8 @@ Stored text goes through exactly one pipeline:
 - [VERIFIED — test] The switch emits exactly one new resolved document and the id survives a new store instance over the same preferences file; a later switch does not rewrite or delete the previous profile file.
 - [VERIFIED — source/test] `delete(id)` calls `StyleRepository.delete(id)` and, only when the outcome is `Deleted` or `NotFound` **and** the deleted id is active, removes `style.active_id`. The next emission therefore resolves the default built-in (`fellBack = false`, no warning), which is the plan's delete-active return. An `Unwritable` or `InvalidId` delete keeps the pointer, and deleting a non-active style never touches it.
 - [VERIFIED — source/test] `switch` and `delete` hold one operation-level `Mutex` for their complete compound operation, so a switch cannot validate a candidate that a concurrent delete is removing, and a delete cannot clear an id a concurrent switch just wrote. The gated concurrency test proves the switch/delete ordering leaves no deleted style active.
-- [VERIFIED — source/test] A DataStore read failure is caught once, logged as one warning and replaced by `emptyPreferences`, so the id reads as null and `activeProfile` resolves the default built-in instead of failing the collector. An unavailable default still surfaces as §3's `Unavailable`, never a crash.
+- [VERIFIED — source/test] A DataStore read failure is caught once, logged as one warning and replaced by `emptyPreferences`, so the id reads as null and `activeProfile` resolves the default built-in instead of failing the collector. An unavailable default still surfaces as §3's `Unavailable`, never a crash. This observation fallback is unchanged by D-113: it applies only to observation, never to a destructive mutation.
+- [VERIFIED — source/test, D-113] Mutation reads the pointer differently. `snapshotActiveId()` collects the raw DataStore flow under the operation mutex and returns `ActiveIdSnapshot.Known(id)` — or `ActiveIdSnapshot.Unreadable(detail)` when the read throws, with no fallback to null. `delete(id, activeAtStart)` takes that pre-captured snapshot and clears `style.active_id` only when the deleted id was active at snapshot time; the coordinator calls it only after a `Known` snapshot, so a pointer read failure aborts the delete with `Failed` **before** the repository deletion, and before the derivation entry is touched. The single-argument `delete(id)` keeps the observation-fallback read for non-coordinator callers and existing tests; the coordinator never uses it.
 - [INFERRED] The pointer is cleared after the file is gone (never before), so an emission interleaved with a delete falls back through §3 rather than naming a file that no longer exists. Sequencing is single-writer through the operation mutex.
 - [INFERRED] `create` builds the DataStore; the app layer must call it once per process for `omnisonic_style` (DataStore forbids two active instances over one file). Hilt binding is left to the child that has both the files directory and the asset source (TODO 4a).
 
@@ -174,3 +181,46 @@ Stored text goes through exactly one pipeline:
 - [VERIFIED — source] No Hilt module is added: the repository needs the app's files directory and its asset source, so binding it belongs to the child that first has both (TODO 2c/4a). Every dependency is a constructor parameter.
 - [VERIFIED — test] Evidence: `StyleRepositoryTest` — 17 cases: write→read round-trip, canonical bytes on disk, replacement leaves one file, failed replace keeps the previous document, temp leftovers ignored, unreadable file typed failure, delete one id, unparsable listing with one warning, hostile id rejection, built-in list/read, user shadowing, duplicate built-in ids, declared-id mismatch, migration-before-decode, writer rejection without a file, plus corrupt-shadow and wrong-id-shadow summary removal. `StyleMergerTest` 12 covers precedence, fall-through, list replacement, warnings/rejection and the three reset levels; `StyleProfileResolverTest` 9 covers the silent default, each fallback reason, the kept corrupt file, an unavailable default, the base declared-id mismatch, and the candidate merge path; `StyleProfileStoreTest` 13 covers fresh default, persistence, single-emission switch, invalid and missing rejection, delete-active/inactive/failed, active-write observation, inactive-write suppression, partial-pair merge acceptance, gated switch/delete serialization and read-failure fallback. Serial gate results are recorded in `phase-9-task-1-3-audit-gate.log` / `phase-9-task-1-3-audit-xml-totals.txt`.
 - [UNKNOWN] On-device read/write timing, DataStore size/startup behavior, backup-ZIP restore interaction (TODO 5e) and the production asset source implementation (TODO 4a). The `omnisonic_style` key and observation are JVM-verified in §4.
+
+## 6. Mutation and ordering
+
+[VERIFIED — source/test] `StyleMutationCoordinator(repository, profileStore, derivations, logger, defaultStyleId, clock, newId)` (`core-data/.../style/StyleMutationCoordinator.kt`, D-108) is the one ordered boundary for every style write and active-pointer change. One `Mutex` covers each command from its read through its commit and its companion steps, so a save, reset, rename, duplicate, delete, switch, import write and restore write cannot interleave. The coordinator adds no second parser, validator or fallback: it reuses `StyleRepository` for bytes, `StyleProfileStore` for the pointer and `StyleMerger` for resets.
+
+| Command | Contract |
+|---|---|
+| `create(document, baseId, activate)` | refuses an occupied or invalid id, validates the base exists, writes, records the derivation entry, then optionally activates |
+| `update(id, expectedRevision, transform)` | reads the document, checks the revision, applies `transform` to that **latest committed** document inside the lock, refuses an id change, writes |
+| `rename(id, expectedRevision, name)` | `update` with a name-only copy |
+| `duplicate(id, activate)` | copies the source into a fresh generated id, records the source's base (or its built-in/default with one warning) |
+| `reset(id, expectedRevision, scope)` | field (`resetField`), section (`resetSection`) or all (`resetAll`) from the derived base; unknown paths are refused, never a silent no-op |
+| `delete(id)` | snapshots the active id via the store's mutation-only read and aborts with `Failed` if it is unreadable; otherwise deletes the user file through the store (which clears the pointer for an active id captured before the deletion), then clears the derivation entry |
+| `switch(id)` | the store's validated switch; a DataStore write failure is a typed `Failed` |
+| `importWrite(document, baseId)` | D-83 collision resolution and the derivation entry, never an activation |
+| `restoreWrite(document, baseId, activate)` | the same collision resolution and derivation entry, then activation only when the caller has already restored its data (D-85/D-86) |
+
+### 6.1 Revision
+
+[VERIFIED — source/test] `StyleRevision` is the SHA-256 of a document's canonical text (`StyleWriter`). Only committed bytes produce a revision, so an external write, restore or delete that changes the file changes the revision without any counter to persist. Every command against an existing style carries the revision the caller last observed; a mismatch returns `StyleMutationResult.StaleStyle(id, expected, actual)` and writes nothing. This is F-26's guard against a queued editor transform landing on a document that an external write replaced.
+
+### 6.2 Derivation metadata
+
+[VERIFIED — source/test] `StyleDerivationStore` maps a custom id to the built-in base id it was copied or imported from (D-82). `FileStyleDerivationStore` keeps one JSON object in a same-directory temp file, `flush()` + `fd.sync()` + rename, so an interrupted metadata write keeps the previous entries; the file lives beside the private files directory, never under `styles/`, so `list()` cannot mistake it for a style. The entry is set on create/import/restore and cleared on delete. A missing entry is never resolved to a guessed built-in: `duplicate` and `reset` log one warning and fall back to `defaultStyleId` explicitly.
+
+### 6.3 Failure truthfulness
+
+[VERIFIED — source/test] Results are typed: `Saved`, `Deleted`, `Switched`, `StaleStyle`, `NotFound`, `Rejected`, `Failed` and `Partial`. Only the first three are success shapes, so a caller cannot push an Undo entry for a write that did not land. The file commit is the point of no return; the derivation entry and the pointer are ordered **after** it and their failure returns `Partial` naming which part is true — for example a style saved with activation refused (`saved inactive`), or a file deleted but the active pointer stuck. A DataStore switch failure changes nothing; a DataStore delete failure after the file is gone is reported as partial, never as `Deleted`. [VERIFIED — source/test, D-113] The point of no return is protected from the other side as well: `delete` reads the active id through `StyleProfileStore.snapshotActiveId()` — a raw read without the observation fallback — **before** the repository deletion, and returns `Failed` without deleting any file or derivation entry when the pointer cannot be read. A later pointer-**write** failure after a successful file delete remains `Partial` (D-108); only a pointer-**read** failure aborts early with `Failed`.
+
+### 6.4 Ordering evidence
+
+[VERIFIED — JVM, `StyleMutationCoordinatorTest` 23 cases, both `:core-data` variants]
+
+- Rapid alternating field edits keep both fields and end at the latest document; two updates holding one captured revision commit exactly once and the other gets `StaleStyle`.
+- An injected replace failure leaves the previous bytes, the active pointer and the resolved document unchanged, with no temp leftover.
+- A DataStore switch failure is `Failed`; a DataStore delete failure after the file is gone is `Partial` — neither is a success shape.
+- [VERIFIED — JVM, TODO 2R1 / D-113] A DataStore **read** failure during a delete aborts before the file or derivation entry is touched and returns `Failed` — never `Deleted` — with no pointer write, no `*.tmp` leftover and no success-shaped result; deleting an inactive style keeps the active pointer and clears only its own derivation entry; an observation-only read failure still resolves the default built-in through the unchanged `activeId` fallback.
+- A delete and a write on one id cannot resurrect the file in either order; a write after a delete is `NotFound` and writes nothing.
+- A stale revision is refused and the externally written document stays; a restart reads the last committed document and the persisted derivation base.
+- Duplicate gets a fresh id and its own derivation entry; import/restore apply D-83 (free id preserved, identical document a no-op, occupied id saved as a copy, a built-in id never shadowed); import and restore share the one lock.
+- Derivation metadata survives a failed metadata replace with its previous entries intact, and no operation leaves a `*.tmp` file behind.
+
+[UNKNOWN] On-device timing, process-death behavior of a save in flight, and editor UX on a stale target are not device results (TODO 5d owns the state machine).

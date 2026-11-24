@@ -29,6 +29,9 @@ class ShellRoutesTest {
             "queue",
             "history",
             "downloads",
+            "styleEditor",
+            "styleEditor/{area}",
+            "styleEditorPreview/{area}",
         ).inOrder()
     }
 
@@ -39,6 +42,8 @@ class ShellRoutesTest {
         assertThat(ShellRoutes.artist(7L)).isEqualTo("artist/7")
         assertThat(ShellRoutes.genre(7L)).isEqualTo("genre/7")
         assertThat(ShellRoutes.playlist(7L)).isEqualTo("playlist/7")
+        assertThat(ShellRoutes.styleEditorArea("home")).isEqualTo("styleEditor/home")
+        assertThat(ShellRoutes.styleEditorPreview("library")).isEqualTo("styleEditorPreview/library")
     }
 
     @Test

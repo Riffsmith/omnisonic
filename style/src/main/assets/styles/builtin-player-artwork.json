@@ -1,0 +1,342 @@
+{
+  "schemaVersion": 1,
+  "id": "builtin-player-artwork",
+  "name": "Artwork Player",
+  "app": {
+    "colorSource": "SYSTEM",
+    "seedColor": "#7CC4FF",
+    "darkMode": "SYSTEM",
+    "colorPalette": "TONAL_SPOT",
+    "colorContrast": "STANDARD",
+    "cornerScale": "DEFAULT",
+    "fontFamilies": {
+      "title": null,
+      "body": null,
+      "lyrics": null,
+      "nav": null
+    },
+    "effects": {
+      "quality": "AUTO",
+      "progressiveBlur": "AUTO",
+      "overlayAlpha": 0.4,
+      "legibilityShield": true,
+      "artColorFollowing": false,
+      "audioReactive": false,
+      "tiltParallax": false,
+      "tiltParallaxMaxOffsetDp": 12
+    }
+  },
+  "home": {
+    "sections": [
+      {
+        "section": "RECENTLY_PLAYED",
+        "visible": true
+      },
+      {
+        "section": "RECENTLY_ADDED",
+        "visible": true
+      },
+      {
+        "section": "MOST_PLAYED",
+        "visible": true
+      },
+      {
+        "section": "FAVORITES",
+        "visible": true
+      }
+    ]
+  },
+  "pages": {
+    "albums": {
+      "columns": {
+        "portrait": 3,
+        "landscape": 5
+      },
+      "spacingDp": {
+        "portrait": 8,
+        "landscape": 8
+      }
+    },
+    "artists": {
+      "columns": {
+        "portrait": 3,
+        "landscape": 5
+      },
+      "spacingDp": {
+        "portrait": 8,
+        "landscape": 8
+      }
+    },
+    "genres": {
+      "columns": {
+        "portrait": 3,
+        "landscape": 5
+      },
+      "spacingDp": {
+        "portrait": 8,
+        "landscape": 8
+      }
+    },
+    "songs": {
+      "columns": {
+        "portrait": 3,
+        "landscape": 5
+      },
+      "spacingDp": {
+        "portrait": 8,
+        "landscape": 8
+      }
+    },
+    "playlists": {
+      "columns": {
+        "portrait": 3,
+        "landscape": 5
+      },
+      "spacingDp": {
+        "portrait": 8,
+        "landscape": 8
+      }
+    }
+  },
+  "nowPlaying": {
+    "compact": {
+      "blocks": [
+        {
+          "kind": "ARTWORK",
+          "visible": true
+        },
+        {
+          "kind": "TITLE",
+          "visible": true
+        },
+        {
+          "kind": "SUBTITLE",
+          "visible": true
+        },
+        {
+          "kind": "CONTROLS",
+          "visible": true
+        },
+        {
+          "kind": "PROGRESS",
+          "visible": true
+        }
+      ],
+      "buttons": [
+        {
+          "action": "PREVIOUS",
+          "style": "DEFAULT",
+          "size": "MEDIUM"
+        },
+        {
+          "action": "PLAY_PAUSE",
+          "style": "DEFAULT",
+          "size": "MEDIUM"
+        },
+        {
+          "action": "NEXT",
+          "style": "DEFAULT",
+          "size": "MEDIUM"
+        }
+      ],
+      "text": {
+        "title": {
+          "template": "%title%",
+          "alignment": "START",
+          "maxLines": 1
+        },
+        "subtitle": {
+          "template": "%artist%",
+          "alignment": "START",
+          "maxLines": 1
+        }
+      },
+      "progress": {
+        "appearance": "HAIRLINE",
+        "heightDp": 2,
+        "showRemainingTime": false
+      }
+    },
+    "expanded": {
+      "portrait": {
+        "blocks": [
+          {
+            "kind": "ARTWORK",
+            "visible": true
+          },
+          {
+            "kind": "TITLE",
+            "visible": true
+          },
+          {
+            "kind": "SUBTITLE",
+            "visible": true
+          },
+          {
+            "kind": "PROGRESS",
+            "visible": true
+          },
+          {
+            "kind": "CONTROLS",
+            "visible": true
+          },
+          {
+            "kind": "QUEUE",
+            "visible": true
+          },
+          {
+            "kind": "LYRICS",
+            "visible": true
+          }
+        ],
+        "buttons": [
+          {
+            "action": "SHUFFLE",
+            "style": "DEFAULT",
+            "size": "MEDIUM"
+          },
+          {
+            "action": "PREVIOUS",
+            "style": "DEFAULT",
+            "size": "MEDIUM"
+          },
+          {
+            "action": "PLAY_PAUSE",
+            "style": "FILLED",
+            "size": "LARGE"
+          },
+          {
+            "action": "NEXT",
+            "style": "DEFAULT",
+            "size": "MEDIUM"
+          },
+          {
+            "action": "REPEAT",
+            "style": "DEFAULT",
+            "size": "MEDIUM"
+          }
+        ],
+        "text": {
+          "title": {
+            "template": "%title%",
+            "alignment": "CENTER",
+            "maxLines": 2
+          },
+          "subtitle": {
+            "template": "%artist%",
+            "alignment": "CENTER",
+            "maxLines": 1
+          }
+        },
+        "progress": {
+          "appearance": "SLIDER",
+          "heightDp": 4,
+          "showRemainingTime": true
+        }
+      },
+      "landscape": {
+        "blocks": [
+          {
+            "kind": "ARTWORK",
+            "visible": true
+          },
+          {
+            "kind": "TITLE",
+            "visible": true
+          },
+          {
+            "kind": "SUBTITLE",
+            "visible": true
+          },
+          {
+            "kind": "PROGRESS",
+            "visible": true
+          },
+          {
+            "kind": "CONTROLS",
+            "visible": true
+          },
+          {
+            "kind": "QUEUE",
+            "visible": true
+          },
+          {
+            "kind": "LYRICS",
+            "visible": true
+          }
+        ],
+        "buttons": [
+          {
+            "action": "SHUFFLE",
+            "style": "DEFAULT",
+            "size": "MEDIUM"
+          },
+          {
+            "action": "PREVIOUS",
+            "style": "DEFAULT",
+            "size": "MEDIUM"
+          },
+          {
+            "action": "PLAY_PAUSE",
+            "style": "FILLED",
+            "size": "LARGE"
+          },
+          {
+            "action": "NEXT",
+            "style": "DEFAULT",
+            "size": "MEDIUM"
+          },
+          {
+            "action": "REPEAT",
+            "style": "DEFAULT",
+            "size": "MEDIUM"
+          }
+        ],
+        "text": {
+          "title": {
+            "template": "%title%",
+            "alignment": "CENTER",
+            "maxLines": 2
+          },
+          "subtitle": {
+            "template": "%artist% · %album%",
+            "alignment": "CENTER",
+            "maxLines": 1
+          }
+        },
+        "progress": {
+          "appearance": "SLIDER",
+          "heightDp": 4,
+          "showRemainingTime": true
+        }
+      }
+    },
+    "background": {
+      "extent": "FULL_SCREEN",
+      "layers": [
+        {
+          "kind": "ALBUM_ART",
+          "scale": 1.2,
+          "alpha": 1,
+          "blend": "NORMAL"
+        },
+        {
+          "kind": "BLUR",
+          "radiusDp": 48,
+          "extent": "FULL_SCREEN",
+          "alpha": 0.6,
+          "blend": "NORMAL"
+        },
+        {
+          "kind": "GRADIENT",
+          "anchor": "TOP_AND_BOTTOM",
+          "startColor": "SCRIM",
+          "endColor": "BACKGROUND",
+          "artTint": 0.2,
+          "alpha": 0.5,
+          "blend": "NORMAL"
+        }
+      ]
+    }
+  }
+}

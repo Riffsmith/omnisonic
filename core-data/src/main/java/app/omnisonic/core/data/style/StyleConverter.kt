@@ -447,21 +447,14 @@ object StyleConverter {
     }
 
     private fun homeSection(token: String, position: Int, path: String, issues: ConversionIssues): HomeSection? {
-        if (!token.startsWith("q:")) {
-            issues.warn(path, "row token '$token' at position ${position + 1} is not carried over")
-            return null
+        val section = if (token.startsWith("q:")) EVIDENCED_HOME_ROWS[token.removePrefix("q:")] else null
+        if (section == null) {
+            issues.warn(
+                path,
+                "row token '$token' at position ${position + 1} is not an evidenced home row; not carried over",
+            )
         }
-        val name = token.removePrefix("q:")
-        return when {
-            name.startsWith("lastplayed") -> HomeSection.RECENTLY_PLAYED
-            name.startsWith("recent") -> HomeSection.RECENTLY_ADDED
-            name.startsWith("mostplayed") -> HomeSection.MOST_PLAYED
-            name.startsWith("favorite") -> HomeSection.FAVORITES
-            else -> {
-                issues.warn(path, "row token '$token' at position ${position + 1} is not carried over")
-                null
-            }
-        }
+        return section
     }
 
     private fun interfaceDetail(key: String): String = when {
@@ -858,6 +851,33 @@ object StyleConverter {
         is Number -> "number"
         else -> "value"
     }
+
+    /**
+     * The exact home row names the reference samples evidence, each with the v1
+     * section it stands for (D-107). Family-prefix matching would carry an
+     * un-evidenced token or a near-prefix lookalike into a supported section, so
+     * only these names map; any other token warns and is dropped.
+     */
+    private val EVIDENCED_HOME_ROWS: Map<String, HomeSection> = mapOf(
+        "favoriteplaylists" to HomeSection.FAVORITES,
+        "favoriteartists" to HomeSection.FAVORITES,
+        "favoriteradios" to HomeSection.FAVORITES,
+        "favoritealbums" to HomeSection.FAVORITES,
+        "favoritesongs" to HomeSection.FAVORITES,
+        "lastplayedalbums" to HomeSection.RECENTLY_PLAYED,
+        "lastplayedsongs" to HomeSection.RECENTLY_PLAYED,
+        "lastplayedartists" to HomeSection.RECENTLY_PLAYED,
+        "lastplayedalbumartists" to HomeSection.RECENTLY_PLAYED,
+        "recentalbums" to HomeSection.RECENTLY_ADDED,
+        "recentartists" to HomeSection.RECENTLY_ADDED,
+        "recentsongs" to HomeSection.RECENTLY_ADDED,
+        "recentreleasealbum" to HomeSection.RECENTLY_ADDED,
+        "recentalbumsartists" to HomeSection.RECENTLY_ADDED,
+        "mostplayedalbumartists" to HomeSection.MOST_PLAYED,
+        "mostplayedsongs" to HomeSection.MOST_PLAYED,
+        "mostplayedartists" to HomeSection.MOST_PLAYED,
+        "mostplayedalbums" to HomeSection.MOST_PLAYED,
+    )
 
     private val CONTROL_BUTTON = Regex("controlButton([1-7])")
     private val SUPPORTED_PLACEHOLDERS = setOf("%title%", "%artist%", "%album%")

@@ -11,6 +11,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Single source of every color, size, typography and layout choice. Screens
@@ -474,6 +476,8 @@ fun interface StyleTokenSource {
     fun tokens(): StyleTokens
 }
 
-object DefaultStyleTokenSource : StyleTokenSource {
+object DefaultStyleTokenSource : ObservableStyleTokenSource {
+    override val tokenFlow: Flow<StyleTokens> = flowOf(DefaultStyleTokens)
+
     override fun tokens(): StyleTokens = DefaultStyleTokens
 }

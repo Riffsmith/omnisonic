@@ -2,7 +2,7 @@
 
 Purpose: pin the one-way, import-time conversion of a confirmed third-party style export into an Omnisonic `schemaVersion 1` document — what input it accepts, what it rejects, how every value that cannot be carried over is reported, and why a successful conversion is always a valid v1 document.
 
-How derived: own design for Phase 9 TODO 3 (`.agents/plans/phase-9-tasks.md`), built from the three confirmed user samples and their container/value inventory in `style-format.md` §2, the v1 document contract in `style-schema.md`, and the evidenced value decodes recorded in the reference mapping table (`reference/docs/GESTURES.md` §5.1). The converter introduces no new schema field and no second parser. Recognizing the source format necessarily embeds studied input-format key and token spellings in the converter and its fixtures; that conflict with the project's clean-room string-key rule is recorded as an open blocker in §1.1, not claimed as compliant.
+How derived: own design for Phase 9 TODO 3 (`.agents/plans/phase-9-tasks.md`), built from the three confirmed user samples and their container/value inventory in `style-format.md` §2, the v1 document contract in `style-schema.md`, and the evidenced value decodes recorded in the reference mapping table (`reference/docs/GESTURES.md` §5.1). The converter introduces no new schema field and no second parser. Recognizing the source format necessarily embeds studied input-format key and token spellings in the converter and its fixtures; that conflict is resolved by the narrowly scoped, scanner-enforced import-boundary exception recorded in §1.1 (D-76), and this file is clean-room compliant under the amended rule.
 
 Confidence: `[VERIFIED]` against `StyleConverter` source and `StyleConverterTest` for the accept/reject matrix, the evidenced mappings, the supported placeholder vocabulary, the home-row absent/empty/dedupe semantics, the portable font-family rule, numeric button-slot ordering, the warning contract, the dropped image/paths, determinism and the normalization round-trip. `[INFERRED]` for the future import UI wiring (TODO 5/7c) and for exporter variants not present in the confirmed samples. `[UNKNOWN]` for any ordinal or enum value the reference decode does not evidence, for on-device results, and for the clean-room policy resolution.
 
@@ -19,9 +19,9 @@ Links: `style-format.md` (§1 scope, §2 samples, §4 boundaries), `style-schema
 - [VERIFIED — source] The output is produced by the canonical `StyleWriter` and then decoded again by `StyleDecoder` before it is returned. A document the writer cannot represent, or the decoder would reject, is returned as a rejection, never as a partial conversion.
 - [INFERRED] Because the converter is pure, the future import flow can run it off the main thread, show the warning list as an import summary, and hand a `Converted.document` to `StyleRepository.write` unchanged. That wiring is TODO 5/7c, not this task.
 
-### 1.1 Clean-room status — open blocker
+### 1.1 Clean-room status — resolved by D-76 (user decision 2026-11-23)
 
-[UNKNOWN — policy blocker, 2026-11-23] `.agents/rules/project-rules.md` rule 1 forbids studied "string keys in Omnisonic code, comments, strings, assets, tests, or docs", with no import-boundary exception. A converter that recognizes the studied input format must compare those input keys and token spellings, and its fixtures must carry realistic input documents to test that recognition. The current implementation therefore contains studied input-format literals in `StyleConverter` and the three converter fixtures, and the configured banned-name scan does not look for them (it scans app/package-name patterns only). TODO 3 is **not clean-room compliant by the current rule text**; the options are (a) a user-approved, narrowly scoped import-boundary exception recorded in the project rules, with a scanner that enforces its exact scope, or (b) a different import design the roadmap does not currently describe. Neither option was taken by this audit, because amending the clean-room policy is a user decision (project rule 11). The behavior contract below is verified independently of that policy question.
+[RESOLVED — D-76] `.agents/rules/project-rules.md` rule 1 forbids studied "string keys in Omnisonic code, comments, strings, assets, tests, or docs"; recognizing the studied input format necessarily embeds those literals in `StyleConverter`, its test and its three fixtures. The user approved a narrowly scoped, scanner-enforced import-boundary exception (D-76): exactly those five paths may carry the studied input-format keys, and `scripts/check-banned-names.sh` now rejects them in every other file (key-class scan with an exact allowlist; tokens from `OMNISONIC_BANNED_KEY_PATTERNS` / `omnisonic.bannedKeyPatterns` / the reference key index; CI sets the secret). [VERIFIED 2026-11-23] scanner self-test 35/35, full tracked-repo scan exit 0, a file containing a studied key outside the allowlist exits 1. TODO 3 is clean-room compliant under the amended rule; the behavior contract below was verified independently of the policy question.
 
 ## 2. API
 
@@ -77,7 +77,15 @@ The complete studied-name → Omnisonic-name mapping is the reference mapping ta
 - [VERIFIED — source/test] Compact text templates carry only the evidenced placeholders `%title%`, `%artist%` and `%album%`. A template with any other placeholder, an unterminated `%`, or conditional/escape syntax warns at its own path and keeps the contextual fallback template (`%title%` or `%artist%`); TODO 8b owns the general template grammar and validator. A supported template is copied verbatim.
 - [VERIFIED — source/test] Home rows distinguish three states: both lists absent keeps the four-section v1 default; a present list is processed even when empty, so an explicitly empty visible list yields an empty composition; a hidden-only input yields only the hidden sections. Tokens that collapse to the same native family are added once and warn once per dropped token (position-qualified), so nothing is silently lost or invented.
 - [VERIFIED — source/test] Expanded control-button slots are recognized as `controlButton1..7` and sorted by slot number before the native ordered list is built; source object order cannot reorder the controls.
-- [INFERRED] The four home-row families are the only row kinds with an evidenced v1 counterpart; query rows outside them, shortcut slots and per-row configuration are deliberately dropped instead of being approximated.
+- [VERIFIED — source/test — D-107] A home row maps only when its name after `q:` is one of the 18 names the confirmed samples evidence, and each name belongs to exactly one native family: `favoriteplaylists`/`favoriteartists`/`favoriteradios`/`favoritealbums`/`favoritesongs` → favorites; `lastplayedalbums`/`lastplayedsongs`/`lastplayedartists`/`lastplayedalbumartists` → recently played; `recentalbums`/`recentartists`/`recentsongs`/`recentreleasealbum`/`recentalbumsartists` → recently added; `mostplayedalbumartists`/`mostplayedsongs`/`mostplayedartists`/`mostplayedalbums` → most played.
+- [VERIFIED — source/test] Any other `q:` name — a bare family, a longer or shortened name, a near-prefix lookalike, a different case or an embedded separator — warns once (position-qualified) at the visible home-row list path and is dropped; a family prefix is never enough on its own. Query rows, shortcut slots and per-row configuration outside the table are deliberately dropped instead of being approximated.
+
+### 4.1 Exact home-row recognition (D-107)
+
+- [VERIFIED — source] The converter holds an exact name→section table (`EVIDENCED_HOME_ROWS`) instead of family prefix matching, so a family name with an extra suffix, a singular lookalike of a plural family, or a truncated family name cannot be carried into a supported section.
+- [VERIFIED — test] Every one of the 18 evidenced names maps to its expected section in isolation with no warning; a near-prefix case for each family drops with exactly one position-qualified warning, and a malformed form (empty name, missing or wrong separator, wrong case, embedded space or NUL) does the same while the rest of the conversion still succeeds.
+- [VERIFIED — test] A per-sample ordered snapshot pins the complete warning path list of all three confirmed samples, so a warning-order change or a newly dropped/mapped value fails loudly.
+- [UNKNOWN] How the exporter's remaining row kinds behave; only these 18 names are evidenced, and the rule deliberately does not extend a grammar to unobserved tokens.
 
 ## 5. Warning contract
 
@@ -104,7 +112,7 @@ The complete studied-name → Omnisonic-name mapping is the reference mapping ta
 
 ## 8. Test coverage
 
-[VERIFIED — `StyleConverterTest`, 32 executions / 0 failures / 0 skipped, debug and release variants, 2026-11-23 audit gate]
+[VERIFIED — `StyleConverterTest`, 75 executions / 0 failures / 0 skipped, debug and release variants, 2026-11-24 TODO 3R1 gate]
 
 | Case | Asserts |
 |---|---|
@@ -116,6 +124,10 @@ The complete studied-name → Omnisonic-name mapping is the reference mapping ta
 | Hidden rows | hidden-only family becomes `visible = false`; hidden-only input converts without a visible list |
 | Explicit empty home | a present empty visible list yields an empty composition, not the default |
 | Home dedupe | repeated native family kept once, one position-qualified warning per dropped token |
+| Exact home rows | all 18 evidenced names map one at a time to their exact section with no warning |
+| Near-prefix home rows | a bare, extended, shortened, singular/plural or case-shifted lookalike for every family drops with one position-qualified warning |
+| Malformed home rows | an empty name, missing/wrong separator, wrong case, embedded space or NUL drops with one position-qualified warning |
+| Warning snapshots | each sample's complete warning path list is pinned in order |
 | Compact player | title/subtitle templates, `favorite` + `play` buttons |
 | Unsupported template | `%artist% (%player.remaining%)` keeps `%artist%` and warns at the exact subtitle path |
 | Supported template | `%album% - %artist%` is copied verbatim with no template warning |
@@ -126,7 +138,7 @@ The complete studied-name → Omnisonic-name mapping is the reference mapping ta
 | Non-integral seed | warned, default seed kept |
 | Unknown action ordinal | warned, dropped, surrounding buttons kept |
 | All-empty button family | empty buttons for that orientation, defaults for an absent orientation, still valid v1 |
-| Image and paths | `style.ci` and `style.i.home.custom.icon` warn; written text contains neither |
+| Image and paths | the embedded-image key and the home custom-icon key warn at their paths; the written text contains neither (spellings live only in the reference notes) |
 | Malformed container | readable `$: malformed JSON` rejection |
 | Foreign JSON | `type: required field is missing` rejection |
 | No sections | rejection naming the expected sections |
@@ -138,7 +150,8 @@ The complete studied-name → Omnisonic-name mapping is the reference mapping ta
 ## 9. Limits
 
 - [UNKNOWN] The exporter's full value set. Only two container `type` values, one palette, one contrast value, one dark-mode value and a subset of action ordinals appear in the confirmed samples; everything else is treated as un-evidenced and dropped.
+- [VERIFIED — D-107] The home-row surface is exactly the 18 evidenced names; the converter has no broader query grammar, so an unseen row kind is warned and dropped rather than inferred.
 - [UNKNOWN] The meaning of the list display-mode ordinals and the navigation-type ordinal set; they are warned, never mapped.
 - [VERIFIED — D-63] There is no third-party writer. Export always emits the normalized v1 document.
 - [INFERRED] The converter is not the import UI. File picking, duplicate-name handling, the warning summary and profile storage are TODO 5/7c; this task ends at a `StyleConversionResult`.
-- [UNKNOWN — blocker] Clean-room compliance is unresolved (§1.1): the input vocabulary the converter must recognize is the studied format's own keys and tokens, while project rule 1 forbids studied string keys in code/tests/fixtures. TODO 3 must not be reported as clean-room compliant until the user decides the exception or a different design.
+- [RESOLVED — D-76, user-approved 2026-11-23] Clean-room compliance is settled by the exact, scanner-enforced import-boundary exception in §1.1: `StyleConverter.kt`, its test and the three sample fixtures may carry the studied input-format keys, and `scripts/check-banned-names.sh` rejects them in every other file. TODO 3 is clean-room compliant under the amended rule (self-test 35/35, full-repo scan exit 0, negative control exit 1).

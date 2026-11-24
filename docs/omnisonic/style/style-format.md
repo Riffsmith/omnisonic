@@ -31,7 +31,7 @@ Links: `decisions.md` D-63/D-64/D-65; `.agents/plans/phase-9-tasks.md`; `docs/om
 
 [VERIFIED — parsed 2026-11-22]
 
-- [VERIFIED] The two `application` samples are **near-duplicates**: sections `a`, `d` and `ci` are byte-identical and only five `i` values differ (a custom icon path, two per-row configs, the shortcut list and one shortcut slot). They carry different ids and names. Identity is therefore the container `id`, not the content, and an import flow cannot deduplicate by comparing documents.
+- [VERIFIED] The two `application` samples are **near-duplicates**: sections `a`, `d` and `ci` are byte-identical and only a few `i` values differ (a custom icon path, two per-row configs, the shortcut list and one shortcut slot) [approximate: five were counted here, four on a direct fixture comparison on 2026-11-23]. They carry different ids and names. Identity is therefore the container `id`, not the content, and an import flow cannot deduplicate by comparing documents.
 - [INFERRED] `type` distinguishes an application-wide style from a now-playing-only style: the now-playing sample contains exactly one configuration object and nothing else, which only makes sense as a partial style for one screen.
 - [UNKNOWN] whether the exporter ever emits other `type` values. Only these two were observed, and no reference note enumerates the set.
 
@@ -61,14 +61,14 @@ Links: `decisions.md` D-63/D-64/D-65; `.agents/plans/phase-9-tasks.md`; `docs/om
 - `d` — display/page values (170 keys: 132 integer, 33 boolean, 5 string).
 - `ci` — a single base64 payload beginning with the PNG signature, 351,759 characters in both application samples (≈ 258 KB decoded).
 
-[VERIFIED] Key spelling is dotted-lowercase throughout (`albums.list.display.columns.landscape`, `list.track.swipe.left.action`, `now.playing.page.configuration`), matching the reference key index; there is **no** camelCase key in any sample. [VERIFIED] `theme_keys.json` holds 241 entries covering this surface.
+[VERIFIED] Key spelling is dotted-lowercase throughout, matching the reference key index (241 entries covering this surface — the exact spellings are recorded only in the reference notes, never here); there is **no** camelCase key in any sample.
 
 [VERIFIED] 50 of the 250 leaf entries are **JSON encoded as strings** and must be parsed a second time. The observed families are:
 
-- `i.now.playing.page.configuration` → `{compactConfiguration, portraitConfiguration, landscapeConfiguration}`. The compact object carries ~23 keys (size, floating, margins, corner radius, background/thumbnail/progress styles, title and subtitle text blocks, a `buttons` array of action names). The two expanded objects carry ~100 keys each and are near-identical, differing in layout positions; they cover top/bottom bars with seven button slots each, cover-art options with four button slots and four gesture actions, landscape slot positions, a `controlsOrder` array of 12 slot ids, slider/volume/rating bars, six text blocks and seven control-button slots. Nested inside each text block are `margins` objects and `icon1..3` action/colour objects.
-- `i.overview.row.<token>` → per-row config objects (header group, data group, card group, `hideIfEmpty`) for each home row.
-- `i.library.page.configuration` → `{gridColumns, gridLandscapeColumns, padding, buttonStyle}`.
-- `a.custom.material.theme` → `{name, id, imported, schemes:{light, dark}}` where each scheme maps ~30 role names to `#AARRGGBB` strings.
+- the now-playing page configuration key → `{compactConfiguration, portraitConfiguration, landscapeConfiguration}`. The compact object carries ~23 keys (size, floating, margins, corner radius, background/thumbnail/progress styles, title and subtitle text blocks, a `buttons` array of action names). The two expanded objects carry ~100 keys each and are near-identical, differing in layout positions; they cover top/bottom bars with seven button slots each, cover-art options with four button slots and four gesture actions, landscape slot positions, a `controlsOrder` array of 12 slot ids, slider/volume/rating bars, six text blocks and seven control-button slots. Nested inside each text block are `margins` objects and `icon1..3` action/colour objects.
+- the per-row overview configuration keys → per-row config objects (header group, data group, card group, `hideIfEmpty`) for each home row.
+- the library page configuration key → `{gridColumns, gridLandscapeColumns, padding, buttonStyle}`.
+- the custom material theme key → `{name, id, imported, schemes:{light, dark}}` where each scheme maps ~30 role names to `#AARRGGBB` strings.
 
 [VERIFIED] Section `d` also contains five **string** values, four of which are page configurations (`album`, `artist`, `genre`, `playlist`) and one a button-style token list.
 
@@ -119,7 +119,7 @@ Links: `decisions.md` D-63/D-64/D-65; `.agents/plans/phase-9-tasks.md`; `docs/om
 - [VERIFIED — D-64] Keys are camelCase and the seven names above are fixed for v1. `schemaVersion` is a document field and the only version marker.
 - [VERIFIED — D-64] **No JSON-in-strings.** Every studied nested config string becomes a real object, and every delimited list becomes an array. This is the single largest divergence from the third-party format and the reason a converter (not a reader) is required.
 - [VERIFIED — D-64] No third-party spelling, dotted-lowercase key, ordinal enum, container field (`type`, `imported`, `version`) or embedded raster is representable in v1.
-- [INFERRED] `id` is the identity for the file name, the active-profile pointer and the Phase 10 style link; `name` is presentation only and may repeat.
+- [INFERRED] `id` is the identity for the file name, the active-profile pointer and the Phase 10 style link; `name` is presentation only and may repeat. The shipped production default is `builtin-default` (display name Default Style), the seventh canonical built-in; it is a document like any other and resolves to `DefaultStyleTokens` (D-105).
 - [UNKNOWN] the exact field inventory inside the four sections — that is TODO 1a's deliverable (`style-schema.md`), deliberately not fixed here so the model can start from what `StyleTokens` already expresses.
 
 ### 3.2 Section responsibilities
@@ -129,7 +129,7 @@ Links: `decisions.md` D-63/D-64/D-65; `.agents/plans/phase-9-tasks.md`; `docs/om
 | `app` | colour source and seed, dark mode, palette/contrast, corner scale, typography and font families, effects quality and backdrop defaults | [INFERRED] from the token groups that already exist and the reference `a` section's role |
 | `home` | ordered, hideable home sections and their per-section presentation | [INFERRED] the reference `i` row composition maps onto an ordered list, not a delimited string |
 | `pages` | per-list/library presentation, including per-orientation column pairs | [INFERRED] from the reference `d` list-display family, reduced to the pairs Omnisonic renders |
-| `nowPlaying` | ordered blocks per orientation/compact, text templates, control slots, progress styling, background layer reference | [INFERRED] from the reference expanded/compact configuration and D-13's `BackdropStack` |
+| `nowPlaying` | ordered blocks per orientation/compact, text templates, control slots, progress styling, background layer reference | [INFERRED] from the reference expanded/compact configuration and D-13's `BackdropStack`; the shipped-screen defaults are recorded in `style-schema.md` §1.5 (TODO 4R1/D-105) |
 
 - [VERIFIED — D-64] Per-orientation values are **structural pairs** (`{ "portrait": …, "landscape": … }`), never duplicated sibling keys as the reference format does (`…columns` + `…columns.landscape`).
 - [VERIFIED — D-64] v1 is deliberately narrower than the reference surface: no lyric-styling section, no page-header builder, no per-row card geometry, no BPM/waveform styling. Additions arrive as optional keys under a schema bump through the migrator.

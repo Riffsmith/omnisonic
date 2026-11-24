@@ -24,6 +24,7 @@ android {
 
 dependencies {
     api(project(":core-model"))
+    api(libs.kotlinx.coroutines.core)
     implementation(platform(libs.androidx.compose.bom))
     api(libs.androidx.compose.ui)
     api(libs.androidx.compose.foundation)
@@ -33,4 +34,5 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(libs.truth)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

@@ -323,7 +323,7 @@ class StyleDecoderTest {
             StyleTextBlock(template = "%artist%", alignment = TextAlignment.START, maxLines = 1),
         )
         assertThat(decoded.document.nowPlaying.expanded.portrait.text.title).isEqualTo(
-            StyleTextBlock(template = "%title%", alignment = TextAlignment.START, maxLines = 2),
+            StyleTextBlock(template = "%title%", alignment = TextAlignment.CENTER, maxLines = 2),
         )
         assertThat(decoded.document.nowPlaying.expanded.landscape.text.subtitle).isEqualTo(
             StyleTextBlock(template = "%artist%", alignment = TextAlignment.END, maxLines = 1),

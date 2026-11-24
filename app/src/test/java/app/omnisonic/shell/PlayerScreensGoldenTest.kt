@@ -11,7 +11,13 @@ import app.omnisonic.feature.library.ui.QueueScreen
 import app.omnisonic.playback.api.queue.PlaybackQueueEntry
 import app.omnisonic.playback.api.queue.RepeatMode
 import app.omnisonic.style.OmnisonicTheme
+import app.omnisonic.style.ObservableStyleTokenSource
 import com.github.takahirom.roborazzi.captureRoboImage
+import dagger.hilt.android.testing.HiltAndroidRule
+import dagger.hilt.android.testing.HiltAndroidTest
+import dagger.hilt.android.testing.HiltTestApplication
+import javax.inject.Inject
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,15 +28,28 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * Roborazzi goldens for the player screens (D-14). Record deliberately with
  * `:app:recordRoborazziDebug`; plain `test` does not verify them — use
- * `:app:verifyRoborazziDebug` to compare (R-25).
+ * `:app:verifyRoborazziDebug` to compare (R-25). The theme comes from the
+ * production source (D-105), so the goldens prove the fresh-install baseline.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w411dp-h891dp-420dpi")
+@HiltAndroidTest
+@Config(application = HiltTestApplication::class, sdk = [34], qualifiers = "w411dp-h891dp-420dpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PlayerScreensGoldenTest {
 
     @get:Rule
+    val hiltRule = HiltAndroidRule(this)
+
+    @get:Rule
     val composeRule = createComposeRule()
+
+    @Inject
+    lateinit var styleTokenSource: ObservableStyleTokenSource
+
+    @Before
+    fun inject() {
+        hiltRule.inject()
+    }
 
     private fun queueEntry(id: Long, title: String) = PlaybackQueueEntry(
         providerId = 1,
@@ -44,7 +63,7 @@ class PlayerScreensGoldenTest {
     @Test
     fun nowPlayingPortrait() {
         composeRule.setContent {
-            OmnisonicTheme {
+            OmnisonicTheme(source = styleTokenSource) {
                 NowPlayingScreen(
                     state = NowPlayingUiState(
                         entry = NowPlayingEntry(
@@ -78,7 +97,7 @@ class PlayerScreensGoldenTest {
     @Test
     fun queuePortrait() {
         composeRule.setContent {
-            OmnisonicTheme {
+            OmnisonicTheme(source = styleTokenSource) {
                 QueueScreen(
                     state = QueueUiState(
                         rows = listOf(

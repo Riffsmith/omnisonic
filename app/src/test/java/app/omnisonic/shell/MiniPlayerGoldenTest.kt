@@ -12,8 +12,14 @@ import app.omnisonic.feature.library.miniplayer.MiniPlayerUiState
 import app.omnisonic.feature.library.nowplaying.NowPlayingEntry
 import app.omnisonic.feature.library.ui.MiniPlayerBar
 import app.omnisonic.style.OmnisonicTheme
+import app.omnisonic.style.ObservableStyleTokenSource
 import app.omnisonic.style.rememberSwipeZoneRegistry
 import com.github.takahirom.roborazzi.captureRoboImage
+import dagger.hilt.android.testing.HiltAndroidRule
+import dagger.hilt.android.testing.HiltAndroidTest
+import dagger.hilt.android.testing.HiltTestApplication
+import javax.inject.Inject
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,18 +35,31 @@ import org.robolectric.annotation.GraphicsMode
  * The "expanded transition" has no separate resting frame to capture: the
  * settle animation runs before the shell swaps the bar for the now-playing
  * route, whose golden (`now_playing_portrait.png`) is the expanded state.
+ * The theme comes from the production source (D-105).
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w411dp-h891dp-420dpi")
+@HiltAndroidTest
+@Config(application = HiltTestApplication::class, sdk = [34], qualifiers = "w411dp-h891dp-420dpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class MiniPlayerGoldenTest {
 
     @get:Rule
+    val hiltRule = HiltAndroidRule(this)
+
+    @get:Rule
     val composeRule = createComposeRule()
+
+    @Inject
+    lateinit var styleTokenSource: ObservableStyleTokenSource
+
+    @Before
+    fun inject() {
+        hiltRule.inject()
+    }
 
     private fun setBar(state: MiniPlayerUiState) {
         composeRule.setContent {
-            OmnisonicTheme {
+            OmnisonicTheme(source = styleTokenSource) {
                 Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     MiniPlayerBar(
                         state = state,

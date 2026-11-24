@@ -103,6 +103,30 @@ class StyleOrientationTest {
     }
 
     @Test
+    fun `now-playing defaults match the shipped mini-player and player screens`() {
+        val compact = StyleCompactPlayer()
+        val playPause = compact.buttons.single { it.action == PlayerAction.PLAY_PAUSE }
+        assertThat(playPause.style).isEqualTo(ControlButtonStyle.DEFAULT)
+        assertThat(playPause.size).isEqualTo(ControlButtonSize.MEDIUM)
+        assertThat(compact.text.title.alignment).isEqualTo(TextAlignment.START)
+        assertThat(compact.text.title.maxLines).isEqualTo(1)
+        assertThat(compact.text.subtitle.alignment).isEqualTo(TextAlignment.START)
+        assertThat(compact.text.subtitle.maxLines).isEqualTo(1)
+        assertThat(compact.progress.showRemainingTime).isFalse()
+
+        val expanded = StyleExpandedPlayer()
+        assertThat(expanded.text.title.template).isEqualTo("%title%")
+        assertThat(expanded.text.title.alignment).isEqualTo(TextAlignment.CENTER)
+        assertThat(expanded.text.title.maxLines).isEqualTo(2)
+        assertThat(expanded.text.subtitle.template).isEqualTo("%artist%")
+        assertThat(expanded.text.subtitle.alignment).isEqualTo(TextAlignment.CENTER)
+        assertThat(expanded.text.subtitle.maxLines).isEqualTo(1)
+        assertThat(expanded.progress.appearance).isEqualTo(ProgressAppearance.SLIDER)
+        assertThat(expanded.progress.heightDp).isEqualTo(4f)
+        assertThat(expanded.progress.showRemainingTime).isTrue()
+    }
+
+    @Test
     fun `pages carry a portrait and landscape pair for every list`() {
         val pages = StylePages()
 

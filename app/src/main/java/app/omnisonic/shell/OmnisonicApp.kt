@@ -38,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -52,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -81,22 +83,30 @@ import app.omnisonic.feature.library.ui.PlayerSheetDrag
 import app.omnisonic.feature.library.ui.PlaylistDetailRoute
 import app.omnisonic.feature.library.ui.QueueRoute
 import app.omnisonic.feature.search.search.SearchViewModel
+import app.omnisonic.feature.library.ui.LibraryHubScreen
 import app.omnisonic.feature.settings.downloads.DownloadSettingsViewModel
 import app.omnisonic.feature.settings.history.HistorySettingsViewModel
 import app.omnisonic.feature.settings.providers.ProviderSetupRoute
 import app.omnisonic.feature.settings.providers.ProviderSetupViewModel
 import app.omnisonic.feature.settings.shell.MainTab
 import app.omnisonic.feature.settings.shell.ShellNavigationResolver
+import app.omnisonic.feature.settings.styleeditor.StyleEditorArea
+import app.omnisonic.feature.settings.styleeditor.StyleEditorAreaRoute
+import app.omnisonic.feature.settings.styleeditor.StyleEditorHubRoute
+import app.omnisonic.feature.settings.styleeditor.StyleEditorViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncManagerViewModel
 import app.omnisonic.feature.settings.sync.LibrarySyncStepRoute
 import app.omnisonic.feature.settings.sync.LibrarySyncStepViewModel
 import app.omnisonic.feature.settings.sync.PendingSyncViewModel
 import app.omnisonic.feature.settings.transcode.TranscodeSettingsViewModel
 import app.omnisonic.feature.settings.ui.ShellSettingsScreen
+import app.omnisonic.feature.settings.R
 import app.omnisonic.feature.settings.shell.ShellSettingsViewModel
 import app.omnisonic.feature.settings.ui.label
+import app.omnisonic.style.DefaultStyleTokenSource
 import app.omnisonic.style.NavigationLabelMode
 import app.omnisonic.style.NavigationLayout
+import app.omnisonic.style.ObservableStyleTokenSource
 import app.omnisonic.style.OmnisonicTheme
 import app.omnisonic.style.TabSwipeMode
 import app.omnisonic.style.rememberSwipeZoneRegistry
@@ -114,10 +124,11 @@ fun OmnisonicApp(
     searchViewModel: SearchViewModel = hiltViewModel(),
     openDownloadsRequest: Boolean = false,
     onOpenDownloadsHandled: () -> Unit = {},
+    tokenSource: ObservableStyleTokenSource = DefaultStyleTokenSource,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val miniPlayer by miniPlayerViewModel.state.collectAsStateWithLifecycle()
-    OmnisonicTheme {
+    OmnisonicTheme(source = tokenSource) {
         val shell = state
         if (shell == null) {
             Surface(
@@ -196,8 +207,11 @@ fun OmnisonicShell(
     onUserAction: (String) -> Unit = {},
     openDownloadsRequest: Boolean = false,
     onOpenDownloadsHandled: () -> Unit = {},
+    styleEditorViewModelProvider: (@Composable () -> StyleEditorViewModel)? = null,
 ) {
     val controller = navController ?: rememberNavController()
+    val editorViewModelProvider: @Composable () -> StyleEditorViewModel =
+        styleEditorViewModelProvider ?: { defaultStyleEditorViewModel(controller) }
     val backStackEntry by controller.currentBackStackEntryAsState()
     val tokens = OmnisonicTheme.tokens
     val isLandscape =
@@ -456,6 +470,12 @@ fun OmnisonicShell(
                         onOpenArtist = { controller.navigateTo(ShellRoutes.artist(it)) },
                         onOpenGenre = { controller.navigateTo(ShellRoutes.genre(it)) },
                         onOpenPlaylist = { controller.navigateTo(ShellRoutes.playlist(it)) },
+                        onOpenStyleEditor = { controller.navigateTo(ShellRoutes.STYLE_EDITOR) },
+                        onPreviewNowPlaying = {
+                            onUserAction("style-editor:preview-now-playing")
+                            sheet.openNowPlaying()
+                        },
+                        styleEditorViewModelProvider = styleEditorViewModelProvider,
                         modifier = Modifier.weight(1f),
                     )
                     miniPlayer(Modifier)
@@ -499,6 +519,12 @@ fun OmnisonicShell(
                     onOpenArtist = { controller.navigateTo(ShellRoutes.artist(it)) },
                     onOpenGenre = { controller.navigateTo(ShellRoutes.genre(it)) },
                     onOpenPlaylist = { controller.navigateTo(ShellRoutes.playlist(it)) },
+                    onOpenStyleEditor = { controller.navigateTo(ShellRoutes.STYLE_EDITOR) },
+                    onPreviewNowPlaying = {
+                        onUserAction("style-editor:preview-now-playing")
+                        sheet.openNowPlaying()
+                    },
+                    styleEditorViewModelProvider = styleEditorViewModelProvider,
                     modifier = Modifier.weight(1f),
                 )
                 miniPlayer(Modifier)
@@ -555,6 +581,9 @@ private fun ShellContentArea(
     transcodeSettingsViewModelProvider: @Composable () -> TranscodeSettingsViewModel? = { null },
     onOpenDownloads: () -> Unit,
     onOpenSetup: () -> Unit,
+    onOpenStyleEditor: () -> Unit,
+    onPreviewNowPlaying: () -> Unit,
+    styleEditorViewModelProvider: (@Composable () -> StyleEditorViewModel)? = null,
     onTabTapped: (MainTab) -> Unit,
     onOpenSection: (LibrarySection) -> Unit,
     onOpenHistory: () -> Unit,
@@ -579,6 +608,9 @@ private fun ShellContentArea(
             historyViewModelProvider = historyViewModelProvider,
             downloadsViewModelProvider = downloadsViewModelProvider,
             libraryDownloadViewModelProvider = libraryDownloadViewModelProvider,
+            styleEditorViewModelProvider = styleEditorViewModelProvider
+                ?: { defaultStyleEditorViewModel(navController) },
+            onPreviewNowPlaying = onPreviewNowPlaying,
             modifier = Modifier
                 .fillMaxSize()
                 .zIndex(if (showingTabs) 0f else 1f)
@@ -599,6 +631,7 @@ private fun ShellContentArea(
             searchViewModel = searchViewModel,
             onOpenDownloads = onOpenDownloads,
             onOpenSetup = onOpenSetup,
+            onOpenStyleEditor = onOpenStyleEditor,
             onSelectTab = onTabTapped,
             onOpenSection = onOpenSection,
             onOpenHistory = onOpenHistory,
@@ -702,6 +735,13 @@ internal fun ShellNavHost(
     // Destination-scoped on purpose: the step resolves the provider row in init,
     // so it must be created when the route opens, never at app launch.
     syncStepViewModelProvider: @Composable () -> LibrarySyncStepViewModel = { hiltViewModel() },
+    // The editor ViewModel is scoped to the outer `styleEditor` back stack entry so
+    // the hub and every nested area sub-screen share one session (D-114 Q1 back
+    // chain); a direct deep link to an area route falls back to its own entry.
+    styleEditorViewModelProvider: @Composable () -> StyleEditorViewModel = {
+        defaultStyleEditorViewModel(navController)
+    },
+    onPreviewNowPlaying: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Player surfaces are bottom takeovers (D-19): slide up on push, down on
@@ -855,6 +895,69 @@ internal fun ShellNavHost(
                 onBack = { navController.popBackStack() },
             )
         }
+        composable(ShellRoutes.STYLE_EDITOR) {
+            StyleEditorHubRoute(
+                viewModel = styleEditorViewModelProvider(),
+                onOpenArea = { area -> navController.navigate(ShellRoutes.styleEditorArea(area.id)) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            ShellRoutes.STYLE_EDITOR_AREA,
+            arguments = listOf(navArgument(ShellRoutes.ARG_AREA) { type = NavType.StringType }),
+        ) { entry ->
+            val area = StyleEditorArea.fromId(entry.arguments?.getString(ShellRoutes.ARG_AREA).orEmpty())
+            if (area == null) {
+                PlaceholderPane(stringResource(R.string.settings_style_editor))
+            } else {
+                val editorViewModel = styleEditorViewModelProvider()
+                val stylesState by editorViewModel.stylesState.collectAsStateWithLifecycle()
+                StyleEditorAreaRoute(
+                    area = area,
+                    onBack = { navController.popBackStack() },
+                    stylesState = stylesState,
+                    onPickStyle = editorViewModel::pick,
+                    onDuplicateStyle = editorViewModel::duplicate,
+                    onBeginRenameStyle = editorViewModel::beginRename,
+                    onRenameDraftChange = editorViewModel::updateRenameDraft,
+                    onConfirmRename = editorViewModel::confirmRename,
+                    onCancelRename = editorViewModel::cancelRename,
+                    onBeginDeleteStyle = editorViewModel::beginDelete,
+                    onResetDamagedStyle = editorViewModel::beginResetDamaged,
+                    onExportRawStyle = editorViewModel::exportRaw,
+                    onDismissRawExport = editorViewModel::dismissRawExport,
+                    onConfirmLifecycle = editorViewModel::confirm,
+                    onCancelConfirm = editorViewModel::cancelConfirm,
+                    onPreviewHome = {
+                        navController.navigateTo(ShellRoutes.styleEditorPreview(StyleEditorArea.HOME.id))
+                    },
+                    onPreviewLibrary = {
+                        navController.navigateTo(ShellRoutes.styleEditorPreview(StyleEditorArea.LIBRARY.id))
+                    },
+                    onPreviewNowPlaying = onPreviewNowPlaying,
+                )
+            }
+        }
+        composable(
+            ShellRoutes.STYLE_EDITOR_PREVIEW,
+            arguments = listOf(navArgument(ShellRoutes.ARG_AREA) { type = NavType.StringType }),
+        ) { entry ->
+            // D-109: a dedicated non-destructive route over the editor, never a
+            // tab selection that would pop the `styleEditor` session off the stack.
+            when (StyleEditorArea.fromId(entry.arguments?.getString(ShellRoutes.ARG_AREA).orEmpty())) {
+                StyleEditorArea.HOME -> HomePlaceholder(
+                    hasProvider = hasProvider,
+                    onSetup = { navController.navigateTo(ShellRoutes.PROVIDER_SETUP) },
+                )
+
+                StyleEditorArea.LIBRARY -> LibraryHubScreen(
+                    onOpenSection = { section -> navController.navigateTo(ShellRoutes.section(section.id)) },
+                    onOpenHistory = { navController.navigateTo(ShellRoutes.HISTORY) },
+                )
+
+                else -> PlaceholderPane(stringResource(R.string.settings_style_editor))
+            }
+        }
     }
 }
 
@@ -871,3 +974,14 @@ private fun TabRouteSlot() {
 private fun NavHostController.navigateTo(route: String) {
     navigate(route) { launchSingleTop = true }
 }
+
+/**
+ * The editor ViewModel scoped to the outer `styleEditor` back stack entry, so
+ * the hub and every nested area sub-screen share one session (D-114 Q1);
+ * a deep link straight to an area route falls back to its own entry.
+ */
+@Composable
+private fun defaultStyleEditorViewModel(navController: NavHostController): StyleEditorViewModel =
+    navController.runCatching { getBackStackEntry(ShellRoutes.STYLE_EDITOR) }.getOrNull()
+        ?.let { hiltViewModel(it) }
+        ?: hiltViewModel()

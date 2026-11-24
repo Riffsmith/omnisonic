@@ -42,6 +42,8 @@ private fun concreteRoute(pattern: String): String = when (pattern) {
     ShellRoutes.ARTIST -> ShellRoutes.artist(7L)
     ShellRoutes.GENRE -> ShellRoutes.genre(7L)
     ShellRoutes.PLAYLIST -> ShellRoutes.playlist(7L)
+    ShellRoutes.STYLE_EDITOR_AREA -> ShellRoutes.styleEditorArea("home")
+    ShellRoutes.STYLE_EDITOR_PREVIEW -> ShellRoutes.styleEditorPreview("home")
     else -> pattern
 }
 
@@ -88,6 +90,7 @@ class ShellNavHostTest {
                     queueViewModelProvider = { testQueueViewModel() },
                     historyViewModelProvider = { testHistoryViewModel() },
                     downloadsViewModelProvider = { testDownloadsViewModel() },
+                    styleEditorViewModelProvider = { testStyleEditorViewModel("navhost").first },
                     modifier = Modifier,
                 )
             }

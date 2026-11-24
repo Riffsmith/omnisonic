@@ -176,6 +176,26 @@ class StyleProfileResolverTest {
         assertThat(warnings).hasSize(1)
     }
 
+    @Test
+    fun `an asset enumeration failure makes the default typed unavailable`() {
+        val failing = StyleRepository(
+            stylesDir = File(tempDir, StyleRepository.STYLES_DIRECTORY),
+            assets = object : StyleAssetSource {
+                override fun names(): List<String> =
+                    throw SecurityException("asset index is not readable")
+
+                override fun read(name: String): String? = error("no asset should be read")
+            },
+            logger = logger,
+        )
+
+        val state = resolver(failing).resolve(null)
+
+        assertThat(state).isInstanceOf(StyleProfileState.Unavailable::class.java)
+        assertThat((state as StyleProfileState.Unavailable).firstMessage).contains("default")
+        assertThat(warnings).hasSize(2)
+    }
+
     private class MapStyleAssets(private val contents: Map<String, String>) : StyleAssetSource {
 
         override fun names(): List<String> = contents.keys.toList()

@@ -10,6 +10,7 @@ import app.omnisonic.core.data.sync.OutboxSyncControl
 import app.omnisonic.feature.downloads.service.DownloadNotificationActions
 import app.omnisonic.feature.downloads.service.DownloadServiceStarter
 import app.omnisonic.shell.OmnisonicApp
+import app.omnisonic.style.ObservableStyleTokenSource
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import javax.inject.Provider
@@ -24,6 +25,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var downloadStarter: Provider<DownloadServiceStarter>
 
+    @Inject
+    lateinit var styleTokenSource: ObservableStyleTokenSource
+
     /** A notification tap is a one-shot request; the shell reports consumption. */
     private val openDownloads = MutableStateFlow(false)
 
@@ -35,6 +39,7 @@ class MainActivity : ComponentActivity() {
             OmnisonicApp(
                 openDownloadsRequest = request,
                 onOpenDownloadsHandled = { openDownloads.value = false },
+                tokenSource = styleTokenSource,
             )
         }
     }

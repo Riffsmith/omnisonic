@@ -105,7 +105,7 @@ Links: `style-format.md` (file scope and v1 contract), `style-loader.md` (TODO 2
 | Field | Type | Default |
 |---|---|---|
 | `blocks` | `List<NowPlayingBlock>` | artwork, title, subtitle, controls, progress |
-| `buttons` | `List<StyleControlButton>` | previous, play/pause (filled, large), next |
+| `buttons` | `List<StyleControlButton>` | previous, play/pause (default, medium), next |
 | `text` | `StyleTextBlocks` | title `%title%`, subtitle `%artist%` |
 | `progress` | `StyleProgress` | hairline, `2f` dp, no remaining time |
 
@@ -115,8 +115,8 @@ Links: `style-format.md` (file scope and v1 contract), `style-loader.md` (TODO 2
 |---|---|---|
 | `blocks` | `List<NowPlayingBlock>` | artwork, title, subtitle, progress, controls, queue, lyrics |
 | `buttons` | `List<StyleControlButton>` | shuffle, previous, play/pause (filled, large), next, repeat |
-| `text` | `StyleTextBlocks` | title `%title%`, subtitle `%artist%` |
-| `progress` | `StyleProgress` | slider, `4f` dp, no remaining time |
+| `text` | `StyleTextBlocks` | title `%title%` centred, 2 lines; subtitle `%artist%` centred, 1 line |
+| `progress` | `StyleProgress` | slider, `4f` dp, remaining time shown |
 
 `NowPlayingBlock`: `kind` (`NowPlayingBlockKind`, default `ARTWORK`), `visible` (`Boolean`, default `true`).
 
@@ -127,6 +127,7 @@ Links: `style-format.md` (file scope and v1 contract), `style-loader.md` (TODO 2
 `StyleProgress`: `appearance` (`ProgressAppearance`, default `SLIDER`), `heightDp` (`Float`, default `4f`), `showRemainingTime` (`Boolean`, default `false`).
 
 - [VERIFIED — source] The default block and button orders match the implemented screens: `NowPlayingScreen` draws art, title/artist, seek, shuffle/previous/play/next/repeat, then queue/lyrics; `MiniPlayerBar` draws art, title/artist, previous/play/next and a bottom progress hairline. TODO 8a/8c consume these lists so the default style renders today's layout without a conditional.
+- [VERIFIED — source/test, TODO 4R1/D-105] The now-playing *fidelity* defaults were corrected to the shipped screens (F-02): the compact play/pause is `DEFAULT`/`MEDIUM` because the mini bar uses plain `IconButton`s, which is also why compact text stays start-aligned at one line and compact progress keeps `showRemainingTime = false`; the expanded composition centres a two-line title and one-line subtitle and always shows remaining time, while expanded play/pause stays `FILLED`/`LARGE` (the shipped `FilledIconButton` is enlarged). `StyleOrientationTest.now-playing defaults match the shipped mini-player and player screens` pins these values; built-in assets use the same corrected values.
 - [INFERRED] Blocks intentionally describe major areas only; per-block params (template, button slots, progress styling, background) live in dedicated fields so a block entry stays a stable ordering unit. Duplicate/unknown block ids and placeholder validation are TODO 8a/8b.
 
 ### 1.6 Backdrop layers
@@ -153,6 +154,7 @@ Links: `style-format.md` (file scope and v1 contract), `style-loader.md` (TODO 2
 
 - [VERIFIED — source] Defaults are constructor defaults on the model types, not a separate default-document constant, so the decoder can omit absent keys and still produce a fully resolved document in TODO 1b, and the merger's "absent key falls through" rule (TODO 2b) has one authoritative value per field.
 - [VERIFIED — source] Every default is taken from an existing Phase 5 token, the implemented screen it describes, or D-13; nothing is a new hard-coded look. The single `[INFERRED]` default family is the four Home sections (§1.3), noted there.
+- [VERIFIED — source/test, TODO 4R1/D-105] The `nowPlaying` defaults were re-derived from the shipped `MiniPlayerBar`/`NowPlayingScreen` (§1.5) rather than from the previous constructor values; this is a default-value correction, not a schema-shape or `schemaVersion` change.
 - [VERIFIED — source] `schemaVersion` defaults to `1` but is not enforced by the constructor: an unknown future version must reach the migrator's loud failure (TODO 1d), not fail during object construction.
 - [INFERRED] Keeping defaults on the types means a per-field reset in TODO 5 can restore the default by omitting the field during merge, with no editor-side default table to drift.
 

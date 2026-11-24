@@ -57,6 +57,7 @@ fun ShellSettingsScreen(
     appVersion: String,
     onOpenProviders: () -> Unit,
     onOpenDownloads: () -> Unit = {},
+    onOpenStyleEditor: () -> Unit = {},
     downloadSettingsViewModel: DownloadSettingsViewModel? = null,
     syncViewModel: LibrarySyncManagerViewModel,
     pendingSyncViewModel: PendingSyncViewModel,
@@ -78,6 +79,7 @@ fun ShellSettingsScreen(
         onMoveTab = viewModel::moveTab,
         onSetNavOverride = viewModel::setNavOverride,
         onOpenProviders = onOpenProviders,
+        onOpenStyleEditor = onOpenStyleEditor,
         syncViewModel = syncViewModel,
         pendingSyncViewModel = pendingSyncViewModel,
         historySettingsViewModel = historySettingsViewModel,
@@ -97,6 +99,7 @@ private fun ShellSettingsContent(
     onMoveTab: (List<MainTab>, MainTab, Int) -> Unit,
     onSetNavOverride: (Boolean, NavigationLayout?) -> Unit,
     onOpenProviders: () -> Unit,
+    onOpenStyleEditor: () -> Unit,
     syncViewModel: LibrarySyncManagerViewModel,
     pendingSyncViewModel: PendingSyncViewModel,
     historySettingsViewModel: HistorySettingsViewModel,
@@ -128,6 +131,9 @@ private fun ShellSettingsContent(
             prefs = prefs,
             onSetNavOverride = onSetNavOverride,
         )
+        TextButton(onClick = onOpenStyleEditor) {
+            Text(stringResource(R.string.settings_style_editor))
+        }
         Text(
             text = stringResource(R.string.settings_group_tabs),
             style = MaterialTheme.typography.titleSmall,

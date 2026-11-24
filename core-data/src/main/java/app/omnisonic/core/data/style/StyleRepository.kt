@@ -97,6 +97,71 @@ sealed interface StyleDeleteOutcome {
 }
 
 /**
+ * One row of the style listing (D-97/F-41): either a usable style or a user
+ * file that could not be read or decoded. Built-ins are always [Valid] — a
+ * damaged built-in asset keeps the D-106 behavior (skipped with one warning),
+ * never a user "needs attention" row. [modifiedAt] is the user file's last
+ * modified time and `null` for a built-in; the model is additive, so
+ * [StyleSummary] and the existing [StyleRepository.list] contract are
+ * unchanged.
+ */
+sealed interface StyleListEntry {
+
+    val id: String
+
+    val name: String
+
+    val origin: StyleOrigin
+
+    val modifiedAt: Long?
+
+    data class Valid(
+        override val id: String,
+        override val name: String,
+        override val origin: StyleOrigin,
+        override val modifiedAt: Long? = null,
+    ) : StyleListEntry
+
+    /**
+     * An unreadable or undecodable user file. [path] is the stored file itself
+     * and [detail] repeats it, so the reason is qualified by the file the user
+     * has to inspect. Such a row is never pickable as a style.
+     */
+    data class Damaged(
+        override val id: String,
+        val path: String,
+        val detail: String,
+        override val modifiedAt: Long? = null,
+    ) : StyleListEntry {
+
+        override val name: String get() = id
+
+        override val origin: StyleOrigin get() = StyleOrigin.USER
+    }
+}
+
+/**
+ * The exact stored bytes of a user style file, without migration, decoding or
+ * normalization — the support-export path for a damaged file (D-97/F-41).
+ * [StyleReadResult.readText][StyleRepository.readText] is not this path: it
+ * migrates and can reject.
+ */
+sealed interface StyleRawResult {
+
+    data class Loaded(
+        val id: String,
+        val bytes: ByteArray,
+        val path: String,
+    ) : StyleRawResult
+
+    data class NotFound(val id: String) : StyleRawResult
+
+    data class Unreadable(val id: String, val detail: String) : StyleRawResult
+
+    data class InvalidId(val id: String) : StyleRawResult
+}
+
+/**
  * File-backed style storage: built-in documents come from [assets], user
  * documents from `styles/<id>.json` under [stylesDir]
  * (`docs/omnisonic/style/style-loader.md` §Storage, D-71).
@@ -226,6 +291,102 @@ class StyleRepository(
     }
 
     /**
+     * The listing with damaged user files surfaced instead of skipped
+     * (D-97/F-41). Usable rows follow [list]'s order and rules exactly; a user
+     * file that cannot be read, cannot be decoded or declares another id is a
+     * [StyleListEntry.Damaged] row carrying the file path. This is the same
+     * decode path as [list] — no second decoder or validator — and it changes
+     * neither [list] nor [read].
+     */
+    fun listing(): List<StyleListEntry> {
+        val entries = linkedMapOf<String, StyleListEntry>()
+        builtIns.forEach { builtIn ->
+            entries[builtIn.document.id] = StyleListEntry.Valid(
+                id = builtIn.document.id,
+                name = builtIn.document.name,
+                origin = StyleOrigin.BUILT_IN,
+                modifiedAt = null,
+            )
+        }
+        userFiles().forEach { file ->
+            val id = file.name.removeSuffix(FILE_SUFFIX)
+            val modifiedAt = file.lastModified().takeIf { at -> at > 0L }
+            val alreadyUser = (entries[id] as? StyleListEntry.Valid)?.origin == StyleOrigin.USER
+            if (alreadyUser) {
+                logger.warn(TAG, "style id $id is declared by more than one file; kept the first")
+                return@forEach
+            }
+            entries.remove(id)
+            val text = try {
+                file.readText(Charsets.UTF_8)
+            } catch (failure: IOException) {
+                logger.warn(TAG, "style file ${file.name} could not be read", failure)
+                entries[id] = damaged(file, id, modifiedAt, "could not be read: ${failure.message ?: file.name}")
+                return@forEach
+            } catch (failure: SecurityException) {
+                logger.warn(TAG, "style file ${file.name} could not be read", failure)
+                entries[id] = damaged(file, id, modifiedAt, "could not be read: ${failure.message ?: file.name}")
+                return@forEach
+            }
+            when (val decoded = decode(text)) {
+                is DecodedText.Rejected -> {
+                    logger.warn(TAG, "style file ${file.name} rejected: ${decoded.errors.first().message}")
+                    val first = decoded.errors.first()
+                    entries[id] = damaged(file, id, modifiedAt, "${first.path}: ${first.message}")
+                }
+
+                is DecodedText.Decoded -> {
+                    if (decoded.document.id != id) {
+                        logger.warn(TAG, "style file ${file.name} declares another id; skipped")
+                        entries[id] = damaged(
+                            file,
+                            id,
+                            modifiedAt,
+                            "declares the style id '${decoded.document.id}' instead of '$id'",
+                        )
+                        return@forEach
+                    }
+                    entries[id] = StyleListEntry.Valid(
+                        id = id,
+                        name = decoded.document.name,
+                        origin = StyleOrigin.USER,
+                        modifiedAt = modifiedAt,
+                    )
+                }
+            }
+        }
+        return entries.values.toList()
+    }
+
+    /**
+     * The exact stored bytes of a user file, with no migration, decoding or
+     * normalization (D-97/F-41 support export). A built-in has no stored file,
+     * so only user files can be exported this way; a missing file is
+     * [StyleRawResult.NotFound] even when an asset with that id exists.
+     */
+    fun readRaw(id: String): StyleRawResult {
+        if (!isValidId(id)) return StyleRawResult.InvalidId(id)
+        val file = fileFor(id)
+        if (!file.exists()) return StyleRawResult.NotFound(id)
+        if (!file.isFile) return StyleRawResult.Unreadable(id, "not a regular file: ${file.name}")
+        return try {
+            StyleRawResult.Loaded(id, file.readBytes(), file.absolutePath)
+        } catch (failure: IOException) {
+            StyleRawResult.Unreadable(id, failure.message ?: "could not read ${file.name}")
+        } catch (failure: SecurityException) {
+            StyleRawResult.Unreadable(id, failure.message ?: "could not read ${file.name}")
+        }
+    }
+
+    private fun damaged(file: File, id: String, modifiedAt: Long?, reason: String): StyleListEntry.Damaged =
+        StyleListEntry.Damaged(
+            id = id,
+            path = file.absolutePath,
+            detail = "${file.absolutePath}: $reason",
+            modifiedAt = modifiedAt,
+        )
+
+    /**
      * Built-ins first in asset-name order, then user files in file-name order;
      * a user file shadows a built-in with the same id, and the first file name
      * wins when two documents declare one id.
@@ -288,12 +449,24 @@ class StyleRepository(
     private val builtIns: List<BuiltIn> by lazy { loadBuiltIns() }
 
     private fun loadBuiltIns(): List<BuiltIn> {
+        val names = try {
+            assets.names()
+        } catch (failure: IOException) {
+            logger.warn(TAG, "style assets could not be enumerated", failure)
+            return emptyList()
+        } catch (failure: SecurityException) {
+            logger.warn(TAG, "style assets could not be enumerated", failure)
+            return emptyList()
+        }
         val loaded = mutableListOf<BuiltIn>()
         val seenIds = mutableSetOf<String>()
-        assets.names().sorted().forEach { name ->
+        names.sorted().forEach { name ->
             val text = try {
                 assets.read(name)
             } catch (failure: IOException) {
+                logger.warn(TAG, "style asset $name could not be read", failure)
+                return@forEach
+            } catch (failure: SecurityException) {
                 logger.warn(TAG, "style asset $name could not be read", failure)
                 return@forEach
             }

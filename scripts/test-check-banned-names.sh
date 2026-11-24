@@ -134,5 +134,51 @@ check "invalid regex exits 1" test "$rc" -eq 1
 check "scan failure is reported" grep -q 'scan failed on:' "$out"
 check "the invalid pattern itself is not echoed" lacks "${token}("
 
+# 9. Key class: a studied-key literal in a normal file exits 1 and reports path:line only.
+key_token="xxbanmexx.key.one"
+key_other="xxbanmexx.key.two"
+export OMNISONIC_BANNED_KEY_PATTERNS="${key_token}
+${key_other}"
+
+key_leak_free() {
+  ! grep -Fq -- "$key_token" "$out" && ! grep -Fq -- "$key_other" "$out"
+}
+
+k1="$work/k1.txt"
+printf 'clean 1\nhas %s on 2\nclean 3\n' "$key_token" >"$k1"
+scan "$k1"
+check "key-class hit exits 1" test "$rc" -eq 1
+check "reports k1.txt:2" grep -Fq -- "$k1:2" "$out"
+check "no key content or token in output (key class)" key_leak_free
+
+# 10. Key class: an allowlisted import-boundary path is exempt.
+mkdir -p "$work/core-data/src/main/java/app/omnisonic/core/data/style"
+conv_rel="core-data/src/main/java/app/omnisonic/core/data/style/StyleConverter.kt"
+printf 'has %s here\n' "$key_token" >"$work/$conv_rel"
+SCAN_CWD="$work"
+scan "$conv_rel"
+check "allowlisted path is exempt from the key class" test "$rc" -eq 0
+check "allowlisted exemption produces no output" test ! -s "$out"
+
+# 11. The name class still applies to an allowlisted path.
+printf 'name %s and key %s\n' "$token" "$key_token" >"$work/$conv_rel"
+scan "$conv_rel"
+check "name-class hit on allowlisted path still exits 1" test "$rc" -eq 1
+check "reports the allowlisted path:1" grep -Fq -- "$conv_rel:1" "$out"
+check "key token on allowlisted path is not reported" lacks "$key_token"
+SCAN_CWD=""
+
+# 12. Key class across operands: hit file reported, clean file never mentioned.
+k2="$work/k2.txt"
+k3="$work/k3.txt"
+printf 'has %s\n' "$key_other" >"$k2"
+printf 'clean\n' >"$k3"
+scan "$k2" "$k3"
+check "key-class hit in one operand exits 1" test "$rc" -eq 1
+check "reports k2.txt:1" grep -Fq -- "$k2:1" "$out"
+check "clean key-class operand is not mentioned" lacks "$k3"
+
+unset OMNISONIC_BANNED_KEY_PATTERNS
+
 echo "scanner self-test: $checks checks, $fails failures (scanner: $scanner)"
 [ "$fails" -eq 0 ]

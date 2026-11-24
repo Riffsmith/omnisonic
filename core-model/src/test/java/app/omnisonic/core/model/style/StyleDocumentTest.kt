@@ -61,11 +61,7 @@ class StyleDocumentTest {
                         ),
                         buttons = listOf(
                             StyleControlButton(PlayerAction.PREVIOUS),
-                            StyleControlButton(
-                                action = PlayerAction.PLAY_PAUSE,
-                                style = ControlButtonStyle.FILLED,
-                                size = ControlButtonSize.LARGE,
-                            ),
+                            StyleControlButton(PlayerAction.PLAY_PAUSE),
                             StyleControlButton(PlayerAction.NEXT),
                         ),
                         text = StyleTextBlocks(
@@ -115,13 +111,21 @@ class StyleDocumentTest {
             StyleControlButton(PlayerAction.REPEAT),
         ),
         text = StyleTextBlocks(
-            title = StyleTextBlock(template = "%title%"),
-            subtitle = StyleTextBlock(template = "%artist%"),
+            title = StyleTextBlock(
+                template = "%title%",
+                alignment = TextAlignment.CENTER,
+                maxLines = 2,
+            ),
+            subtitle = StyleTextBlock(
+                template = "%artist%",
+                alignment = TextAlignment.CENTER,
+                maxLines = 1,
+            ),
         ),
         progress = StyleProgress(
             appearance = ProgressAppearance.SLIDER,
             heightDp = 4f,
-            showRemainingTime = false,
+            showRemainingTime = true,
         ),
     )
 

@@ -8,6 +8,8 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 
 val LocalStyleTokens = staticCompositionLocalOf { DefaultStyleTokens }
@@ -32,6 +34,23 @@ fun OmnisonicTheme(
             content = content,
         )
     }
+}
+
+/**
+ * Observing variant of [OmnisonicTheme] (`docs/omnisonic/style/style-profiles.md`
+ * §Repaint, D-80): the composition follows [source]'s
+ * [ObservableStyleTokenSource.tokenFlow], so an active-profile change repaints
+ * in place instead of requiring an activity recreation. The synchronous
+ * [ObservableStyleTokenSource.tokens] supplies the first frame until the flow
+ * emits.
+ */
+@Composable
+fun OmnisonicTheme(
+    source: ObservableStyleTokenSource,
+    content: @Composable () -> Unit,
+) {
+    val tokens by source.tokenFlow.collectAsState(initial = source.tokens())
+    OmnisonicTheme(tokens = tokens, content = content)
 }
 
 fun ColorTokens.toColorScheme(): ColorScheme = darkColorScheme(

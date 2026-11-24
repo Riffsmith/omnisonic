@@ -216,8 +216,8 @@ New public names are recorded in the ground-rule naming diff
 `LibrarySyncLastResult`/`LibrarySyncKind`, the step/manager view-model and
 screen names — Omnisonic-original coinages, no verbatim collision in
 `reference/extracted/theme/theme_keys.json` (241 dotted keys) or THEMING.md §4
-(re-run 2026-11-09; the only studied `sync` key is the unrelated
-`d.lyrics.show.sync.buttons.bar` lyrics toggle). The studied app's own sync
+(re-run 2026-11-09; the only studied `sync` key is an unrelated lyrics toggle,
+spelling recorded only in the reference key index). The studied app's own sync
 progress surface, if any, was not reconstructed — do not borrow names from it
 regardless [UNKNOWN]. User-facing copy is written fresh.
 
